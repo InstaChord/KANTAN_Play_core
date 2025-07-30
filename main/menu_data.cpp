@@ -964,9 +964,18 @@ struct mi_song_step_beat_t : public mi_selector_t {
     if (value == 5) { // "Each"
       return true;
     }
+    auto prev_value = getValue();
     for (size_t i = 0; i < def::app::max_slot; ++i) {
       system_registry.song_data.slot[i].slot_info.setStepPerBeat(value);
     }
+    if ((prev_value != value) && (prev_value <= 4)) {
+      auto tempo = system_registry.song_data.song_info.getTempo();
+
+      // ステップ/ビートが変更された場合、テンポを調整する
+      uint16_t new_tempo = (tempo * prev_value) / value;
+      system_registry.song_data.song_info.setTempo(new_tempo);
+    }
+
     return true;
   }
 };
@@ -1685,7 +1694,7 @@ static constexpr menu_item_ptr menu_system[] = {
   (const mi_slot_playmode_t []){{ def::menu_category_t::menu_system,  8,  2  , { "Play Mode"      , "演奏モード"    }}},
   (const mi_slot_key_t      []){{ def::menu_category_t::menu_system,  9,  2  , { "Key Modulation" , "キー転調"      }}},
   (const mi_slot_step_beat_t[]){{ def::menu_category_t::menu_system, 10,  2  , { "Step / Beat"    , "ステップ／ビート"}}},
-  (const mi_slot_clipboard_t[]){{ def::menu_category_t::menu_system, 11,  2  , { "Clipboard"      , "クリップボード" }}},
+  (const mi_slot_clipboard_t[]){{ def::menu_category_t::menu_system, 11,  2  , { "Copy/Paste"     , "コピー/ペースト" }}},
   (const mi_tree_t          []){{ def::menu_category_t::menu_system, 12, 1   , { "Tempo & Groove" , "テンポ＆グルーヴ設定"  }}},
   (const mi_song_tempo_t    []){{ def::menu_category_t::menu_system, 13,  2  , { "BPM"            , "テンポ(BPM)"   }}},
   (const mi_song_swing_t    []){{ def::menu_category_t::menu_system, 14,  2  , { "Swing"          , "スウィング"    }}},
@@ -1916,7 +1925,7 @@ static constexpr menu_item_ptr menu_part[] = {
   (const mi_drum_note_t     []){{ def::menu_category_t::menu_part, 14,  2, { "Pitch5"     , "ピッチ5"          }, 4}},
   (const mi_drum_note_t     []){{ def::menu_category_t::menu_part, 15,  2, { "Pitch6"     , "ピッチ6"          }, 5}},
   (const mi_drum_note_t     []){{ def::menu_category_t::menu_part, 16,  2, { "Pitch7"     , "ピッチ7"          }, 6}},
-  (const mi_part_clipboard_t[]){{ def::menu_category_t::menu_part, 17, 1 , { "Clipboard"      , "クリップボード" }}},
+  (const mi_part_clipboard_t[]){{ def::menu_category_t::menu_part, 17, 1 , { "Copy/Paste" , "コピー/ペースト"  }}},
   (const mi_clear_notes_t   []){{ def::menu_category_t::menu_part, 18, 1 , { "Clear All Notes", "ノートをクリア"}}},
   nullptr, // end of menu
 };

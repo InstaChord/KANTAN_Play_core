@@ -1135,8 +1135,8 @@ protected:
 
     reg_command_mapping_t command_mapping_custom_main { def::hw::max_button_mask };  // メインボタンの割当カスタマイズテーブル
 
-    kanplay_slot_t       clipboard_slot;      // クリップボードデータ。コピー/カットしたデータを一時的に保持する
-    reg_arpeggio_table_t clipboard_arpeggio;  // クリップボードデータ。コピー/カットしたデータを一時的に保持する
+    kanplay_slot_t       clipboard_slot;      // コピー/ペースト(クリップボード)データ。コピー/カットしたデータを一時的に保持する
+    reg_arpeggio_table_t clipboard_arpeggio;  // コピー/ペースト(クリップボード)データ。コピー/カットしたデータを一時的に保持する
 
     enum clipboard_contetn_t : uint8_t {
         CLIPBOARD_CONTENT_NONE,
@@ -1144,7 +1144,7 @@ protected:
         CLIPBOARD_CONTENT_PART,
         CLIPBOARD_CONTENT_ARPEGGIO,
     };
-    clipboard_contetn_t clipboard_content;    // クリップボードの内容
+    clipboard_contetn_t clipboard_content;    // コピー/ペースト(クリップボード)の内容
 
     registry_t drum_mapping { 16, 0, registry_t::DATA_SIZE_8 }; // ドラム演奏モードのコマンドとノートナンバーのマッピングテーブル
 
