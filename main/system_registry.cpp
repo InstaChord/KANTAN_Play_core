@@ -190,6 +190,9 @@ void system_registry_t::reset(void)
   // InstaChord連携デバイス設定
   midi_port_setting.setInstaChordLinkDev(def::command::instachord_link_dev_t::icld_kanplay);
 
+  // USBホスト時パワーサプライ
+  midi_port_setting.setUSBPowerEnabled(true);
+
   // マスターボリューム設定
   operator_command.addQueue( { def::command::master_vol_set, 75 } );
 

@@ -139,16 +139,21 @@ TODO:CoreS3でのSDカード挿抜状態判定を追加する
           M5.Display.setBrightness(br);
         }
 
-        static def::command::midiport_info_t prev_usb_port_info;
-        auto usb_port_info = system_registry.runtime_info.getMidiPortStateUSB();
-        if (prev_usb_port_info != usb_port_info)
-        { // USBホスト使用時はUSBへの電源供給をオンにする
-          prev_usb_port_info = usb_port_info;
-          if (usb_port_info == def::command::midiport_info_t::mp_off) {
-            M5.Power.setUsbOutput(false);
-          } else {
-            M5.Power.setUsbOutput(true);
+        static bool prev_usb_power_enabled = false;
+        bool usb_power_enabled = system_registry.midi_port_setting.getUSBPowerEnabled();
+        if (usb_power_enabled) {
+          // InstaChordリンクがUSBポートの場合は電力供給はしない
+          if (system_registry.midi_port_setting.getInstaChordLinkPort() == def::command::instachord_link_port_t::iclp_usb) {
+            usb_power_enabled = false;
           }
+          if (usb_power_enabled) {
+            usb_power_enabled = (system_registry.runtime_info.getMidiPortStateUSB() != def::command::midiport_info_t::mp_off);
+          }
+        }
+        if (prev_usb_power_enabled != usb_power_enabled)
+        { // USBホスト使用時はUSBへの電源供給をオンにする
+          prev_usb_power_enabled = usb_power_enabled;
+          M5.Power.setUsbOutput(usb_power_enabled);
         }
       }
     }
