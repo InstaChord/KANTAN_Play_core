@@ -964,9 +964,18 @@ struct mi_song_step_beat_t : public mi_selector_t {
     if (value == 5) { // "Each"
       return true;
     }
+    auto prev_value = getValue();
     for (size_t i = 0; i < def::app::max_slot; ++i) {
       system_registry.song_data.slot[i].slot_info.setStepPerBeat(value);
     }
+    if ((prev_value != value) && (prev_value <= 4)) {
+      auto tempo = system_registry.song_data.song_info.getTempo();
+
+      // ステップ/ビートが変更された場合、テンポを調整する
+      uint16_t new_tempo = (tempo * prev_value) / value;
+      system_registry.song_data.song_info.setTempo(new_tempo);
+    }
+
     return true;
   }
 };
@@ -1328,6 +1337,29 @@ struct mi_usb_midi_t : public mi_midi_selector_t {
   }
 };
 
+struct mi_usb_power_t : public mi_selector_t {
+protected:
+  static constexpr const localize_text_array_t name_array = { 2, (const localize_text_t[]){
+    { "Off", "給電しない" },
+    { "On" , "給電する"   },
+  }};
+
+public:
+  constexpr mi_usb_power_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, seq, level, title, &name_array } {}
+  int getValue(void) const override
+  {
+    return getMinValue() + system_registry.midi_port_setting.getUSBPowerEnabled();
+  }
+  bool setValue(int value) const override
+  {
+    if (mi_selector_t::setValue(value) == false) { return false; }
+    value -= getMinValue();
+    system_registry.midi_port_setting.setUSBPowerEnabled( static_cast<bool>(value));
+    return true;
+  }
+};
+
 struct mi_iclink_port_t : public mi_selector_t {
 protected:
   static constexpr const localize_text_array_t name_array = { 3, (const localize_text_t[]){
@@ -1685,7 +1717,7 @@ static constexpr menu_item_ptr menu_system[] = {
   (const mi_slot_playmode_t []){{ def::menu_category_t::menu_system,  8,  2  , { "Play Mode"      , "演奏モード"    }}},
   (const mi_slot_key_t      []){{ def::menu_category_t::menu_system,  9,  2  , { "Key Modulation" , "キー転調"      }}},
   (const mi_slot_step_beat_t[]){{ def::menu_category_t::menu_system, 10,  2  , { "Step / Beat"    , "ステップ／ビート"}}},
-  (const mi_slot_clipboard_t[]){{ def::menu_category_t::menu_system, 11,  2  , { "Clipboard"      , "クリップボード" }}},
+  (const mi_slot_clipboard_t[]){{ def::menu_category_t::menu_system, 11,  2  , { "Copy/Paste"     , "コピー/ペースト" }}},
   (const mi_tree_t          []){{ def::menu_category_t::menu_system, 12, 1   , { "Tempo & Groove" , "テンポ＆グルーヴ設定"  }}},
   (const mi_song_tempo_t    []){{ def::menu_category_t::menu_system, 13,  2  , { "BPM"            , "テンポ(BPM)"   }}},
   (const mi_song_swing_t    []){{ def::menu_category_t::menu_system, 14,  2  , { "Swing"          , "スウィング"    }}},
@@ -1877,23 +1909,25 @@ static constexpr menu_item_ptr menu_system[] = {
   (const mi_tree_t          []){{ def::menu_category_t::menu_system,200,  2   , { "External Device", "外部デバイス" }}},
   (const mi_portc_midi_t    []){{ def::menu_category_t::menu_system,201,   3  , { "PortC MIDI"     , "ポートC MIDI" }}},
   (const mi_ble_midi_t      []){{ def::menu_category_t::menu_system,202,   3  , { "BLE MIDI"       , nullptr     }}},
-  (const mi_usb_midi_t      []){{ def::menu_category_t::menu_system,203,   3  , { "USB MIDI"       , nullptr     }}},
-  (const mi_tree_t          []){{ def::menu_category_t::menu_system,204,   3  , { "InstaChord Link", "インスタコードリンク"}}},
-  (const mi_iclink_port_t   []){{ def::menu_category_t::menu_system,205,    4 , { "Connect"        , "接続方法"   }}},
-  (const mi_iclink_dev_t    []){{ def::menu_category_t::menu_system,206,    4 , { "Play Device"    , "演奏デバイス"}}},
-  (const mi_iclink_style_t  []){{ def::menu_category_t::menu_system,207,    4 , { "Play Style"     , "演奏スタイル"}}},
-  (const mi_imu_velocity_t  []){{ def::menu_category_t::menu_system,208,  2   , { "IMU Velocity"   , "IMUベロシティ"}}},
-  (const mi_tree_t          []){{ def::menu_category_t::menu_system,209,  2   , { "Display"        , "表示"        }}},
-  (const mi_lcd_backlight_t []){{ def::menu_category_t::menu_system,210,   3  , { "Backlight"      , "画面の輝度"  }}},
-  (const mi_led_brightness_t[]){{ def::menu_category_t::menu_system,211,   3  , { "LED Brightness" , "LEDの輝度"   }}},
-  (const mi_detail_view_t   []){{ def::menu_category_t::menu_system,212,   3  , { "Detail View"    , "詳細表示"    }}},
-  (const mi_wave_view_t     []){{ def::menu_category_t::menu_system,213,   3  , { "Wave View"      , "波形表示"    }}},
-  (const mi_language_t      []){{ def::menu_category_t::menu_system,214,  2   , { "Language"       , "言語"        }}},
-  (const mi_tree_t          []){{ def::menu_category_t::menu_system,215,  2   , { "Volume"         , "音量"        }}},
-  (const mi_vol_midi_t      []){{ def::menu_category_t::menu_system,216,   3  , { "MIDI Mastervol" , "MIDIマスター音量"}}},
-  (const mi_vol_adcmic_t    []){{ def::menu_category_t::menu_system,217,   3  , { "ADC MicAmp"     , "ADCマイクアンプ" }}},
-  (const mi_all_reset_t     []){{ def::menu_category_t::menu_system,218,  2   , { "Reset All Settings", "全設定リセット"    }}},
-  (const mi_manual_qr_t     []){{ def::menu_category_t::menu_system,219, 1    , { "Manual QR"      , "説明書QR"     }}},
+  (const mi_tree_t          []){{ def::menu_category_t::menu_system,203,   3  , { "USB"            , nullptr}}},
+  (const mi_usb_power_t     []){{ def::menu_category_t::menu_system,204,    4 , { "Host Power Supply", "ホスト給電設定" }}},
+  (const mi_usb_midi_t      []){{ def::menu_category_t::menu_system,205,    4 , { "USB MIDI"       , nullptr     }}},
+  (const mi_tree_t          []){{ def::menu_category_t::menu_system,206,   3  , { "InstaChord Link", "インスタコードリンク"}}},
+  (const mi_iclink_port_t   []){{ def::menu_category_t::menu_system,207,    4 , { "Connect"        , "接続方法"   }}},
+  (const mi_iclink_dev_t    []){{ def::menu_category_t::menu_system,208,    4 , { "Play Device"    , "演奏デバイス"}}},
+  (const mi_iclink_style_t  []){{ def::menu_category_t::menu_system,209,    4 , { "Play Style"     , "演奏スタイル"}}},
+  (const mi_imu_velocity_t  []){{ def::menu_category_t::menu_system,210,  2   , { "IMU Velocity"   , "IMUベロシティ"}}},
+  (const mi_tree_t          []){{ def::menu_category_t::menu_system,211,  2   , { "Display"        , "表示"        }}},
+  (const mi_lcd_backlight_t []){{ def::menu_category_t::menu_system,212,   3  , { "Backlight"      , "画面の輝度"  }}},
+  (const mi_led_brightness_t[]){{ def::menu_category_t::menu_system,213,   3  , { "LED Brightness" , "LEDの輝度"   }}},
+  (const mi_detail_view_t   []){{ def::menu_category_t::menu_system,214,   3  , { "Detail View"    , "詳細表示"    }}},
+  (const mi_wave_view_t     []){{ def::menu_category_t::menu_system,215,   3  , { "Wave View"      , "波形表示"    }}},
+  (const mi_language_t      []){{ def::menu_category_t::menu_system,216,  2   , { "Language"       , "言語"        }}},
+  (const mi_tree_t          []){{ def::menu_category_t::menu_system,217,  2   , { "Volume"         , "音量"        }}},
+  (const mi_vol_midi_t      []){{ def::menu_category_t::menu_system,218,   3  , { "MIDI Mastervol" , "MIDIマスター音量"}}},
+  (const mi_vol_adcmic_t    []){{ def::menu_category_t::menu_system,219,   3  , { "ADC MicAmp"     , "ADCマイクアンプ" }}},
+  (const mi_all_reset_t     []){{ def::menu_category_t::menu_system,220,  2   , { "Reset All Settings", "全設定リセット"    }}},
+  (const mi_manual_qr_t     []){{ def::menu_category_t::menu_system,221, 1    , { "Manual QR"      , "説明書QR"     }}},
   nullptr, // end of menu
 };
 // const size_t menu_system_size = sizeof(menu_system) / sizeof(menu_system[0]) - 1;
@@ -1916,7 +1950,7 @@ static constexpr menu_item_ptr menu_part[] = {
   (const mi_drum_note_t     []){{ def::menu_category_t::menu_part, 14,  2, { "Pitch5"     , "ピッチ5"          }, 4}},
   (const mi_drum_note_t     []){{ def::menu_category_t::menu_part, 15,  2, { "Pitch6"     , "ピッチ6"          }, 5}},
   (const mi_drum_note_t     []){{ def::menu_category_t::menu_part, 16,  2, { "Pitch7"     , "ピッチ7"          }, 6}},
-  (const mi_part_clipboard_t[]){{ def::menu_category_t::menu_part, 17, 1 , { "Clipboard"      , "クリップボード" }}},
+  (const mi_part_clipboard_t[]){{ def::menu_category_t::menu_part, 17, 1 , { "Copy/Paste" , "コピー/ペースト"  }}},
   (const mi_clear_notes_t   []){{ def::menu_category_t::menu_part, 18, 1 , { "Clear All Notes", "ノートをクリア"}}},
   nullptr, // end of menu
 };

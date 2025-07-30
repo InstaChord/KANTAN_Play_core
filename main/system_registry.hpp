@@ -130,6 +130,7 @@ protected:
             INSTACHORD_LINK_PORT,
             INSTACHORD_LINK_DEV,
             INSTACHORD_LINK_STYLE,
+            USB_POWER_ENABLED, // USB給電 オン・オフ
         };
         void setPortCMIDI(def::command::ex_midi_mode_t mode) { set8(PORT_C_MIDI, static_cast<uint8_t>(mode)); }
         def::command::ex_midi_mode_t getPortCMIDI(void) const { return static_cast<def::command::ex_midi_mode_t>(get8(PORT_C_MIDI)); }
@@ -148,6 +149,9 @@ protected:
 
         void setInstaChordLinkStyle(def::command::instachord_link_style_t style) { set8(INSTACHORD_LINK_STYLE, static_cast<uint8_t>(style)); }
         def::command::instachord_link_style_t getInstaChordLinkStyle(void) const { return static_cast<def::command::instachord_link_style_t>(get8(INSTACHORD_LINK_STYLE)); }
+
+        void setUSBPowerEnabled(bool enabled) { set8(USB_POWER_ENABLED, enabled); }
+        bool getUSBPowerEnabled(void) const { return static_cast<bool>(get8(USB_POWER_ENABLED)); }
     } midi_port_setting;
 
     // 実行時に変化する情報 (設定画面が存在しない可変情報)
@@ -1135,8 +1139,8 @@ protected:
 
     reg_command_mapping_t command_mapping_custom_main { def::hw::max_button_mask };  // メインボタンの割当カスタマイズテーブル
 
-    kanplay_slot_t       clipboard_slot;      // クリップボードデータ。コピー/カットしたデータを一時的に保持する
-    reg_arpeggio_table_t clipboard_arpeggio;  // クリップボードデータ。コピー/カットしたデータを一時的に保持する
+    kanplay_slot_t       clipboard_slot;      // コピー/ペースト(クリップボード)データ。コピー/カットしたデータを一時的に保持する
+    reg_arpeggio_table_t clipboard_arpeggio;  // コピー/ペースト(クリップボード)データ。コピー/カットしたデータを一時的に保持する
 
     enum clipboard_contetn_t : uint8_t {
         CLIPBOARD_CONTENT_NONE,
@@ -1144,7 +1148,7 @@ protected:
         CLIPBOARD_CONTENT_PART,
         CLIPBOARD_CONTENT_ARPEGGIO,
     };
-    clipboard_contetn_t clipboard_content;    // クリップボードの内容
+    clipboard_contetn_t clipboard_content;    // コピー/ペースト(クリップボード)の内容
 
     registry_t drum_mapping { 16, 0, registry_t::DATA_SIZE_8 }; // ドラム演奏モードのコマンドとノートナンバーのマッピングテーブル
 

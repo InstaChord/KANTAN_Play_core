@@ -2228,7 +2228,7 @@ public:
     }
 
     if (system_registry.chord_play.getConfirm_Paste())
-    { // クリップボードのパターンを描画
+    { // コピー/ペースト(クリップボード)のパターンを描画
       auto part = &system_registry.current_slot->chord_part[_part_index];
       auto part_info = &part->part_info;
 
