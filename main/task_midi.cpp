@@ -84,6 +84,10 @@ public:
         if (prev_rx_enable != rx_enable) {
           prev_rx_enable = rx_enable;
         }
+        if (me->_flg_instachord_link && me->_flg_instachord_pad)
+        { // インスタコードリンクでパッド演奏が有効な場合は、自動演奏ビートモードにする
+          system_registry.runtime_info.setChordAutoplayState(def::play::auto_play_mode_t::auto_play_beatmode);
+        }
         midi_driver::MIDI_Message message;
         while (midi->receiveMessage(&message)) {
           ++rx_count;
@@ -368,6 +372,7 @@ void task_midi_t::task_func(task_midi_t* me)
 #ifdef MIDI_TRANSPORT_USB_HPP
   bool prev_usb_out = false;
   bool prev_usb_in = false;
+  def::command::usb_mode_t prev_usb_mode = def::command::usb_mode_t::usb_host;
 #endif
 
   auto prev_iclink_port = def::command::instachord_link_port_t::iclp_off;
@@ -436,17 +441,13 @@ void task_midi_t::task_func(task_midi_t* me)
       ble_in = true;
     }
     if (prev_ble_out != ble_out || prev_ble_in != ble_in) {
-      // bool prev_en = prev_ble_out || prev_ble_in;
-      // bool en = ble_out || ble_in;
-      // if (prev_en != en) {
-      //   kanplay_ns::system_registry.runtime_info.setMidiPortStateBLE(en ? kanplay_ns::def::command::midiport_info_t::mp_enabled : kanplay_ns::def::command::midiport_info_t::mp_off);
-      // }
       prev_ble_out = ble_out;
       prev_ble_in  = ble_in;
       ble_midi_transport.setUseTxRx(ble_out, ble_in);
     }
 #endif
 #ifdef MIDI_TRANSPORT_USB_HPP
+    auto usb_mode = system_registry.midi_port_setting.getUSBMode();
     auto usb_setting = system_registry.midi_port_setting.getUSBMIDI();
     bool usb_out = usb_setting & def::command::ex_midi_mode_t::midi_output;
     bool usb_in  = usb_setting & def::command::ex_midi_mode_t::midi_input;
@@ -454,13 +455,15 @@ void task_midi_t::task_func(task_midi_t* me)
     { // InstaChord Link USBモードのときは、USB-MIDIを有効にする
       usb_out = true;
       usb_in = true;
+      usb_mode = def::command::usb_mode_t::usb_host; // InstaChord Link USBモードのときは、USBホストにする
     }
-    if (prev_usb_out != usb_out || prev_usb_in != usb_in) {
-      // bool prev_en = prev_usb_out || prev_usb_in;
-      // bool en = usb_out || usb_in;
-      // if (prev_en != en) {
-      //   kanplay_ns::system_registry.runtime_info.setMidiPortStateUSB(en ? kanplay_ns::def::command::midiport_info_t::mp_enabled : kanplay_ns::def::command::midiport_info_t::mp_off);
-      // }
+    if (prev_usb_mode != usb_mode || prev_usb_out != usb_out || prev_usb_in != usb_in) {
+      if (!usb_midi_transport.setUSBMode(usb_mode)) {
+        // 設定が変更できなかった場合
+        system_registry.popup_notify.setMessage(def::notify_type_t::MESSAGE_NEED_RESTART);
+        usb_mode = usb_midi_transport.getUSBMode();
+      }
+      prev_usb_mode = usb_mode;
       prev_usb_out = usb_out;
       prev_usb_in  = usb_in;
       usb_midi_transport.setUseTxRx(usb_out, usb_in);

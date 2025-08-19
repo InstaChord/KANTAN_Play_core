@@ -131,6 +131,7 @@ protected:
             INSTACHORD_LINK_DEV,
             INSTACHORD_LINK_STYLE,
             USB_POWER_ENABLED, // USB給電 オン・オフ
+            USB_MODE,          // USBモード(Host/Device)
         };
         void setPortCMIDI(def::command::ex_midi_mode_t mode) { set8(PORT_C_MIDI, static_cast<uint8_t>(mode)); }
         def::command::ex_midi_mode_t getPortCMIDI(void) const { return static_cast<def::command::ex_midi_mode_t>(get8(PORT_C_MIDI)); }
@@ -152,6 +153,9 @@ protected:
 
         void setUSBPowerEnabled(bool enabled) { set8(USB_POWER_ENABLED, enabled); }
         bool getUSBPowerEnabled(void) const { return static_cast<bool>(get8(USB_POWER_ENABLED)); }
+
+        void setUSBMode(def::command::usb_mode_t mode) { set8(USB_MODE, static_cast<uint8_t>(mode)); }
+        def::command::usb_mode_t getUSBMode(void) const { return static_cast<def::command::usb_mode_t>(get8(USB_MODE)); }
     } midi_port_setting;
 
     // 実行時に変化する情報 (設定画面が存在しない可変情報)
@@ -288,7 +292,7 @@ protected:
         bool getDeveloperMode(void) const { return get8(DEVELOPER_MODE); }
 
         // MIDIチャンネルボリュームの最大値
-        // ※ Instachord Link時に85に下げる。通常時は127とする
+        // ※ Instachord Link時に下げる。通常時は127とする
         void setMIDIChannelVolumeMax(uint8_t max_volume) { set8(MIDI_CHVOL_MAX, max_volume); }
         uint8_t getMIDIChannelVolumeMax(void) const { return get8(MIDI_CHVOL_MAX); }
 
@@ -331,16 +335,18 @@ protected:
 
     struct reg_popup_notify_t : public registry_t {
         reg_popup_notify_t(void) : registry_t(8, 8, DATA_SIZE_8) {}
-        enum index_t : uint16_t {
+        enum category_t : uint16_t {
             ERROR_NOTIFY = 0x00,
             SUCCESS_NOTIFY = 0x01,
+            MESSAGE = 0x02,
         };
         void setPopup(bool is_success, def::notify_type_t notify) { set8(is_success ? SUCCESS_NOTIFY : ERROR_NOTIFY, notify, true); }
-        bool getPopupHistory(history_code_t &code, def::notify_type_t &notify_type, bool &is_success) {
+        void setMessage(def::notify_type_t notify) { set8(MESSAGE, notify, true); }
+        bool getPopupHistory(history_code_t &code, def::notify_type_t &notify_type, category_t &category) {
             auto history = getHistory(code);
             if (history == nullptr) { return false; }
             notify_type = static_cast<def::notify_type_t>(history->value);
-            is_success = (history->index == SUCCESS_NOTIFY);
+            category = static_cast<category_t>(history->index);
             return true;
         }
     } popup_notify;

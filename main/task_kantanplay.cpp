@@ -110,26 +110,36 @@ bool task_kantanplay_t::commandProccessor(void)
       if (system_registry.runtime_info.getWiFiOtaProgress() != 0) {
         autoplay_state = def::play::auto_play_mode_t::auto_play_none;
       } else {
-        switch (command_param.getParam()) {
-          case def::command::autoplay_switch_t::autoplay_toggle:
-            if (autoplay_state == def::play::auto_play_mode_t::auto_play_none) {
-              autoplay_state = def::play::auto_play_mode_t::auto_play_waiting;
-            } else {
+        auto iclink_port = system_registry.midi_port_setting.getInstaChordLinkPort();
+        auto iclink_style = system_registry.midi_port_setting.getInstaChordLinkStyle();
+
+        // インスタコードリンクのパッド演奏時はビート自動演奏モードに固定扱いとする
+        if ((iclink_port != def::command::instachord_link_port_t::iclp_off)
+        && (iclink_style == def::command::instachord_link_style_t::icls_pad))
+        {
+          autoplay_state = def::play::auto_play_mode_t::auto_play_beatmode;
+        } else {
+          switch (command_param.getParam()) {
+            case def::command::autoplay_switch_t::autoplay_toggle:
+              if (autoplay_state == def::play::auto_play_mode_t::auto_play_none) {
+                autoplay_state = def::play::auto_play_mode_t::auto_play_waiting;
+              } else {
+                autoplay_state = def::play::auto_play_mode_t::auto_play_none;
+              }
+              break;
+    
+            case def::command::autoplay_switch_t::autoplay_start:
+              if (autoplay_state != def::play::auto_play_mode_t::auto_play_running) {
+                autoplay_state = def::play::auto_play_mode_t::auto_play_waiting;
+                system_registry.runtime_info.setChordAutoplayState(autoplay_state);
+                system_registry.player_command.addQueue( { def::command::chord_degree, 1 } );
+              }
+              break;
+    
+            case def::command::autoplay_switch_t::autoplay_stop:
               autoplay_state = def::play::auto_play_mode_t::auto_play_none;
-            }
-            break;
-  
-          case def::command::autoplay_switch_t::autoplay_start:
-            if (autoplay_state != def::play::auto_play_mode_t::auto_play_running) {
-              autoplay_state = def::play::auto_play_mode_t::auto_play_waiting;
-              system_registry.runtime_info.setChordAutoplayState(autoplay_state);
-              system_registry.player_command.addQueue( { def::command::chord_degree, 1 } );
-            }
-            break;
-  
-          case def::command::autoplay_switch_t::autoplay_stop:
-            autoplay_state = def::play::auto_play_mode_t::auto_play_none;
-            break;
+              break;
+          }
         }
       }
       // M5_LOGV("autoplay %d", (int)autoplay);

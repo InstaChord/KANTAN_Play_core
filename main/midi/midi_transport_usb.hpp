@@ -6,6 +6,7 @@
 #define MIDI_TRANSPORT_USB_HPP
 
 #include "midi_driver.hpp"
+#include "../common_define.hpp"
 
 #include <usb/usb_host.h>
 
@@ -14,18 +15,17 @@ namespace midi_driver {
 class MIDI_Transport_USB : public MIDI_Transport {
 public:
   struct config_t {
-    // int baud_rate = 31250;
-    uint16_t buffer_size_tx = 144;
-    // uint16_t buffer_size_rx = 144;
-    // uint8_t uart_port_num = 0;
-    // int8_t pin_tx = -1;
-    // int8_t pin_rx = -1;
+    const char* device_name = "KANTAN-Play";
   };
 
   MIDI_Transport_USB(void) = default;
   ~MIDI_Transport_USB();
 
   void setConfig(const config_t& config) { _config = config; }
+  config_t& getConfig(void) { return _config; }
+
+  bool setUSBMode(kanplay_ns::def::command::usb_mode_t mode);
+  kanplay_ns::def::command::usb_mode_t getUSBMode(void) const { return _usb_mode; }
 
   bool begin(void) override;
   void end(void) override;
@@ -35,16 +35,15 @@ public:
   bool sendFlush(void) override;
 
   void setUseTxRx(bool tx_enable, bool rx_enable) override;
-  
+
+  void setConnected(bool flg);
 
 private:
-  static void usb_host_task(MIDI_Transport_USB* me);
-  static void usb_client_task(MIDI_Transport_USB* me);
-  static void usb_client_cb(const usb_host_client_event_msg_t *event_msg, void *arg);
 
   std::vector<uint8_t> _tx_data;
   config_t _config;
   bool _is_begin = false;
+  kanplay_ns::def::command::usb_mode_t _usb_mode = kanplay_ns::def::command::usb_mode_t::usb_host;
 };
 
 } // namespace midi_driver

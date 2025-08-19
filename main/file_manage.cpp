@@ -490,9 +490,11 @@ int storage_littlefs_t::saveFromMemoryToFile(const char* path, const uint8_t* da
 {
   if (!_is_begin) { return -1; }
 
+  const char* tmpfile = "/tmpfile.tmp";
   size_t writelen = 0;
 #if __has_include(<LittleFS.h>)
-  auto file = LittleFS.open(path, FILE_WRITE);
+  // 一旦テンポラリファイルに保存する。
+  auto file = LittleFS.open(tmpfile, FILE_WRITE);
   if (!file) {
     return -1;
   }
@@ -503,6 +505,11 @@ int storage_littlefs_t::saveFromMemoryToFile(const char* path, const uint8_t* da
     taskYIELD();
   } while (length);
   file.close();
+  taskYIELD();
+  // 元のファイルを削除してリネームする。
+  LittleFS.remove(path);
+  LittleFS.rename(tmpfile, path);
+
 #else
   if (path[0] == '/') { ++path; }
   auto FP = fopen(path, "w");
