@@ -160,7 +160,7 @@ protected:
 
     // 実行時に変化する情報 (設定画面が存在しない可変情報)
     struct reg_runtime_info_t : public registry_t {
-        reg_runtime_info_t(void) : registry_t(36, 0, DATA_SIZE_8) {}
+        reg_runtime_info_t(void) : registry_t(40, 0, DATA_SIZE_8) {}
         enum index_t : uint16_t {
             PART_EFFECT_1,
             PART_EFFECT_2,
@@ -185,6 +185,7 @@ protected:
             PLAY_MODE,
             MENU_VISIBLE,
             CHORD_AUTOPLAY_STATE,
+            SUSTAIN_STATE,
             EDIT_VELOCITY,
             BUTTON_MAPPING_SWITCH,
             DEVELOPER_MODE,
@@ -277,6 +278,9 @@ protected:
         // コード自動演奏状態
         void setChordAutoplayState(def::play::auto_play_mode_t mode) { set8(CHORD_AUTOPLAY_STATE, mode); }
         def::play::auto_play_mode_t getChordAutoplayState(void) const { return (def::play::auto_play_mode_t)get8(CHORD_AUTOPLAY_STATE); }
+
+        void setSustainState(def::play::sustain_state_t state) { set8(SUSTAIN_STATE, state); }
+        def::play::sustain_state_t getSustainState(void) const { return (def::play::sustain_state_t)get8(SUSTAIN_STATE); }
 
         // 編集時のベロシティ
         void setEditVelocity(int8_t level) { set8(EDIT_VELOCITY, level); }

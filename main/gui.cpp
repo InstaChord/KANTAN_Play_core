@@ -947,6 +947,13 @@ public:
     default:
       canvas->fillTriangle(x - 5, y - 5, x - 5, y + 5, x + 5, y, TFT_GREEN);
       break;
+    case def::play::auto_play_mode_t::auto_play_waiting:
+      canvas->fillRect(x - 5, y - 5, 11, 11, TFT_DARKGRAY);
+      break;
+    case def::play::auto_play_mode_t::auto_play_paused:
+      canvas->fillRect(x - 5, y - 5,  3, 11, TFT_DARKGRAY);
+      canvas->fillRect(x + 5, y - 5, -3, 11, TFT_DARKGRAY);
+      break;
     case def::play::auto_play_mode_t::auto_play_none:
       break;
     case def::play::auto_play_mode_t::auto_play_beatmode:
@@ -1299,7 +1306,6 @@ struct ui_main_buttons_t : public ui_base_t
               options.minor_swap = _minor_swap;
               options.semitone_shift = _semitone;
 
-              // auto pc = param->play_control;
               uint8_t note = KANTANMusic_GetMidiNoteNumber
                 ( 1
                 , command_param.param

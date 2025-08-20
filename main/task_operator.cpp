@@ -344,7 +344,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
   case def::command::drum_button:
   case def::command::chord_step_reset_request:
   case def::command::autoplay_switch:
-  case def::command::panic_stop:
+  case def::command::play_control:
     system_registry.player_command.addQueue(command_param, is_pressed);
     break;
 
@@ -361,11 +361,11 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
     break;
 
   case def::command::chord_bass_degree:
-    procChordBaseDegree(command_param, is_pressed);
+    procChordBassDegree(command_param, is_pressed);
     break;
 
   case def::command::chord_bass_semitone:
-    procChordBaseSemitone(command_param, is_pressed);
+    procChordBassSemitone(command_param, is_pressed);
     break;
 
   // case def::command::swap_sub_button:
@@ -1014,7 +1014,7 @@ void task_operator_t::procChordSemitone(const def::command::command_param_t& com
   // system_registry.player_command.addQueue( { def::command::chord_step_reset_request, 1 } );
 }
 
-void task_operator_t::procChordBaseDegree(const def::command::command_param_t& command_param, const bool is_pressed)
+void task_operator_t::procChordBassDegree(const def::command::command_param_t& command_param, const bool is_pressed)
 {
   // M5_LOGV("chord_bass_degree %d %d", command_param.getParam(), is_pressed);
   // TODO: 暫定実装。
@@ -1036,7 +1036,7 @@ void task_operator_t::procChordBaseDegree(const def::command::command_param_t& c
   system_registry.chord_play.setChordBassDegree(base_degree);
 }
 
-void task_operator_t::procChordBaseSemitone(const def::command::command_param_t& command_param, const bool is_pressed)
+void task_operator_t::procChordBassSemitone(const def::command::command_param_t& command_param, const bool is_pressed)
 {
   // M5_LOGV("chord_bass_semitone %d %d", command_param.getParam(), is_pressed);
   int value = 0;

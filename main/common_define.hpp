@@ -325,7 +325,7 @@ Button Index mapping
       set_velocity,
       menu_open,
       internal_button,        // メインボタンへのマッピング (WebSocket等で利用)
-      panic_stop,
+      play_control,
       command_max,
     };
 
@@ -348,7 +348,7 @@ Button Index mapping
       (const char*[]){ "-", "←", "→", "↓", "↑", "<<", ">>", "Home", "On", "Off", "Mute", "ON/of", "CLEAR", "Copy", "Paste" },            // edit_function
       (const char*[]){ "-", "Exit", "Save" },            // edit_exit
       (const char*[]){ "-", "Vol %", "Oct", "Voicing", "Velo %", "Tone", "Anchor", "LoopLen", "Stroke" },   // edit_enc2_target
-      (const char*[]){ "-", "Auto", "Play", "Stop" },  // autoplay_switch
+      (const char*[]){ "-", "Auto", "Play", "Stop", "Pause" },  // autoplay_switch
       (const char*[]){ "-", "Penta", "Major", "Chroma", "Blues", "Japan", }, // note_scale_set
     };
     enum menu_function_t : uint8_t {
@@ -361,7 +361,7 @@ Button Index mapping
       part_vol = 1, position, voicing, velocity, program, banlift, endpoint, displacement,
     };
     enum autoplay_switch_t : uint8_t {
-      autoplay_off = 0, autoplay_toggle, autoplay_start, autoplay_stop,
+      autoplay_off = 0, autoplay_toggle, autoplay_start, autoplay_stop, autoplay_pause,
     };
     enum sound_effect_t : uint8_t {
       single = 1, testplay,
@@ -438,6 +438,12 @@ Button Index mapping
     enum instachord_link_style_t : uint8_t {
       icls_button = 0,
       icls_pad,
+    };
+
+    enum play_control_t : uint8_t {
+      pc_panic_stop = 0,
+      pc_sustain,
+      pc_reset_arpeggio,
     };
 
     // コマンドとパラメータのペア
@@ -537,7 +543,7 @@ Button Index mapping
       { sub_button  , 1 }, { sub_button, 2 }, { sub_button, 3 }, { sub_button, 4 },
       { menu_function, mf_back }, { menu_function, mf_enter }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
-      { master_vol_ud, -1}, { master_vol_ud , 1 }, { panic_stop, 1, autoplay_switch, autoplay_stop }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
+      { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { menu_function, mf_down }, { menu_function, mf_up }, { menu_function, mf_enter },  // ENC2_DOWN, ENC2_UP, ENC2_PUSH
       { menu_function, mf_up }, { menu_function, mf_down }, // ENC3_DOWN, ENC3_UP
     };
@@ -550,7 +556,7 @@ Button Index mapping
       { sub_button  , 1 }, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
       { menu_open, menu_part }, { chord_degree, 1 }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
-      { master_vol_ud, -1}, { master_vol_ud , 1 }, { panic_stop, 1, autoplay_switch, autoplay_stop }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
+      { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { edit_enc2_ud , -1}, { edit_enc2_ud  , 1 }, { menu_open, menu_part },  // ENC2_DOWN, ENC2_UP, ENC2_PUSH
       { master_key_ud, -1}, { master_key_ud,  1 }, // ENC3_DOWN, ENC3_UP
     };
@@ -562,7 +568,7 @@ Button Index mapping
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
       { menu_open, menu_part }, { chord_degree, 1 }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
-      { master_vol_ud, -1}, { master_vol_ud , 1 }, { panic_stop, 1, autoplay_switch, autoplay_stop }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
+      { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { edit_enc2_ud , -1}, { edit_enc2_ud  , 1 }, { menu_open, menu_part },  // ENC2_DOWN, ENC2_UP, ENC2_PUSH
       { master_key_ud, -1}, { master_key_ud,  1 }, // ENC3_DOWN, ENC3_UP
     };
@@ -574,7 +580,7 @@ Button Index mapping
       { sub_button  , 1 }, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
       { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
-      { master_vol_ud, -1}, { master_vol_ud , 1 }, { panic_stop, 1, autoplay_switch, autoplay_stop }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
+      { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { menu_open, menu_system },  // ENC2_DOWN, ENC2_UP, ENC2_PUSH
       { master_key_ud, -1}, { master_key_ud,  1 }, // ENC3_DOWN, ENC3_UP
     };
@@ -586,7 +592,7 @@ Button Index mapping
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
       { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
-      { master_vol_ud, -1}, { master_vol_ud , 1 }, { panic_stop, 1, autoplay_switch, autoplay_stop }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
+      { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { menu_open, menu_system },  // ENC2_DOWN, ENC2_UP, ENC2_PUSH
       { master_key_ud, -1}, { master_key_ud,  1 }, // ENC3_DOWN, ENC3_UP
     };
@@ -598,7 +604,7 @@ Button Index mapping
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
       { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
-      { master_vol_ud, -1}, { master_vol_ud , 1 }, { panic_stop, 1, autoplay_switch, autoplay_stop }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
+      { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { menu_open, menu_system },  // ENC2_DOWN, ENC2_UP, ENC2_PUSH
       { master_key_ud, -1}, { master_key_ud,  1 }, // ENC3_DOWN, ENC3_UP
     };
@@ -610,7 +616,7 @@ Button Index mapping
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
       { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
-      { master_vol_ud, -1}, { master_vol_ud , 1 }, { panic_stop, 1, autoplay_switch, autoplay_stop }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
+      { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { none },   // ENC2_DOWN, ENC2_UP, ENC2_PUSH
       { master_key_ud, -1}, { master_key_ud,  1 }, // ENC3_DOWN, ENC3_UP
     };
@@ -622,7 +628,7 @@ Button Index mapping
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
       { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
-      { master_vol_ud, -1}, { master_vol_ud , 1 }, { panic_stop, 1, autoplay_switch, autoplay_stop }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
+      { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { none },   // ENC2_DOWN, ENC2_UP, ENC2_PUSH
       { master_key_ud, -1}, { master_key_ud,  1 }, // ENC3_DOWN, ENC3_UP
     };
@@ -634,7 +640,7 @@ Button Index mapping
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
       { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
-      { master_vol_ud, -1}, { master_vol_ud , 1 }, { panic_stop, 1, autoplay_switch, autoplay_stop }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
+      { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { none },   // ENC2_DOWN, ENC2_UP, ENC2_PUSH
       { master_key_ud, -1}, { master_key_ud,  1 }, // ENC3_DOWN, ENC3_UP
     };
@@ -646,7 +652,7 @@ Button Index mapping
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
       { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
-      { master_vol_ud, -1}, { master_vol_ud , 1 }, { panic_stop, 1, autoplay_switch, autoplay_stop }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
+      { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { none },   // ENC2_DOWN, ENC2_UP, ENC2_PUSH
       { master_key_ud, -1}, { master_key_ud,  1 }, // ENC3_DOWN, ENC3_UP
     };
@@ -658,7 +664,7 @@ Button Index mapping
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
       { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
-      { master_vol_ud, -1}, { master_vol_ud , 1 }, { panic_stop, 1, autoplay_switch, autoplay_stop }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
+      { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { none },   // ENC2_DOWN, ENC2_UP, ENC2_PUSH
       { master_key_ud, -1}, { master_key_ud,  1 }, // ENC3_DOWN, ENC3_UP
     };
@@ -670,7 +676,7 @@ Button Index mapping
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
       { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
-      { master_vol_ud, -1}, { master_vol_ud , 1 }, { panic_stop, 1, autoplay_switch, autoplay_stop }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
+      { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { none },   // ENC2_DOWN, ENC2_UP, ENC2_PUSH
       { master_key_ud, -1}, { master_key_ud,  1 }, // ENC3_DOWN, ENC3_UP
     };
@@ -682,7 +688,7 @@ Button Index mapping
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
       { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
-      { master_vol_ud, -1}, { master_vol_ud , 1 }, { panic_stop, 1, autoplay_switch, autoplay_stop }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
+      { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { none },   // ENC2_DOWN, ENC2_UP, ENC2_PUSH
       { master_key_ud, -1}, { master_key_ud,  1 }, // ENC3_DOWN, ENC3_UP
     };
@@ -694,7 +700,7 @@ Button Index mapping
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
       { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
-      { master_vol_ud, -1}, { master_vol_ud , 1 }, { panic_stop, 1, autoplay_switch, autoplay_stop }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
+      { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { none },   // ENC2_DOWN, ENC2_UP, ENC2_PUSH
       { master_key_ud, -1}, { master_key_ud,  1 }, // ENC3_DOWN, ENC3_UP
     };
@@ -808,8 +814,15 @@ Button Index mapping
       auto_play_none,
       auto_play_waiting,
       auto_play_running,
+      auto_play_paused,
       auto_play_beatmode,
       auto_play_max,
+    };
+
+    enum sustain_state_t : uint8_t {
+      sustain_off = 0,
+      sustain_on,
+      sustain_max,
     };
 
     enum offbeat_style_t : uint8_t {
@@ -923,8 +936,8 @@ Button Index mapping
 
     static constexpr const uint32_t app_version_major = 0;
     static constexpr const uint32_t app_version_minor = 5;
-    static constexpr const uint32_t app_version_patch = 1;
-    static constexpr const char app_version_string[] = "051";
+    static constexpr const uint32_t app_version_patch = 4;
+    static constexpr const char app_version_string[] = "054";
     static constexpr const uint32_t app_version_raw = app_version_major<<16|app_version_minor<<8|app_version_patch;
 
     static constexpr const char url_manual[] = "https://kantan-play.com/core/manual/";
