@@ -89,7 +89,23 @@ namespace def {
     NOTIFY_CLEAR_ALL_NOTES,
     NOTIFY_ALL_RESET,
     NOTIFY_DEVELOPER_MODE,
+    MESSAGE_NEED_RESTART,
   };
+  static constexpr const localize_text_array_t notify_name_array = { 12, (const localize_text_t[]){
+    { "-"                 , nullptr },
+    { "Storage Open"      , nullptr },
+    { "File Load"         , nullptr },
+    { "File Save"         , nullptr },
+    { "Copy Slot"         , nullptr },
+    { "Paste Slot"        , nullptr },
+    { "Copy Part"         , nullptr },
+    { "Paste Part"        , nullptr },
+    { "Clear all notes"   , nullptr },
+    { "All Reset"         , nullptr },
+    { "Developer"         , nullptr },
+    { "Please restart now", nullptr },
+  }};
+
   enum qrcode_type_t : uint8_t {
     QRCODE_NONE,
     QRCODE_URL_MANUAL,
@@ -401,6 +417,11 @@ Button Index mapping
       midi_output,
       midi_input,
       midi_input_output,
+    };
+
+    enum usb_mode_t : uint8_t {
+      usb_host = 0,
+      usb_device,
     };
 
     enum instachord_link_port_t : uint8_t {
@@ -901,9 +922,9 @@ Button Index mapping
     static constexpr const char* wifi_mdns = "kanplay";        // WiFi接続時のmDNS名 kanplay.local
 
     static constexpr const uint32_t app_version_major = 0;
-    static constexpr const uint32_t app_version_minor = 4;
-    static constexpr const uint32_t app_version_patch = 9;
-    static constexpr const char app_version_string[] = "049";
+    static constexpr const uint32_t app_version_minor = 5;
+    static constexpr const uint32_t app_version_patch = 1;
+    static constexpr const char app_version_string[] = "051";
     static constexpr const uint32_t app_version_raw = app_version_major<<16|app_version_minor<<8|app_version_patch;
 
     static constexpr const char url_manual[] = "https://kantan-play.com/core/manual/";

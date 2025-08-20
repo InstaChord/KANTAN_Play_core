@@ -518,6 +518,8 @@ size_t system_registry_t::saveSettingJSON(uint8_t* data, size_t data_length)
   {
     auto json = json_root["midi_port_setting"].to<JsonObject>();
     json["instachord_link_dev"] = (uint8_t)midi_port_setting.getInstaChordLinkDev();
+    json["usb_mode"] = (uint8_t)midi_port_setting.getUSBMode();
+    json["usb_power"] = (uint8_t)midi_port_setting.getUSBPowerEnabled();
   }
 
   auto json_key_mapping = json_root["key_mapping"].to<JsonObject>();
@@ -606,6 +608,8 @@ bool system_registry_t::loadSettingJSON(const uint8_t* data, size_t data_length)
   {
     auto json = json_root["midi_port_setting"].as<JsonObject>();
     midi_port_setting.setInstaChordLinkDev((def::command::instachord_link_dev_t)json["instachord_link_dev"      ].as<uint8_t>());
+    midi_port_setting.setUSBMode((def::command::usb_mode_t)json["usb_mode"].as<uint8_t>());
+    midi_port_setting.setUSBPowerEnabled(json["usb_power"].as<bool>());
   }
 
   // control_assignment::play button ( 旧名 key mapping )

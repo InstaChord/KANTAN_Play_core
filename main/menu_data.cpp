@@ -1337,6 +1337,29 @@ struct mi_usb_midi_t : public mi_midi_selector_t {
   }
 };
 
+struct mi_usb_mode_t : public mi_selector_t {
+protected:
+  static constexpr const localize_text_array_t name_array = { 2, (const localize_text_t[]){
+    { "Host",            "ホスト" },
+    { "Device (to PC)" , "デバイス(→PC)"   },
+  }};
+
+public:
+  constexpr mi_usb_mode_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, seq, level, title, &name_array } {}
+  int getValue(void) const override
+  {
+    return getMinValue() + system_registry.midi_port_setting.getUSBMode();
+  }
+  bool setValue(int value) const override
+  {
+    if (mi_selector_t::setValue(value) == false) { return false; }
+    value -= getMinValue();
+    system_registry.midi_port_setting.setUSBMode( static_cast<def::command::usb_mode_t>(value));
+    return true;
+  }
+};
+
 struct mi_usb_power_t : public mi_selector_t {
 protected:
   static constexpr const localize_text_array_t name_array = { 2, (const localize_text_t[]){
@@ -1910,24 +1933,25 @@ static constexpr menu_item_ptr menu_system[] = {
   (const mi_portc_midi_t    []){{ def::menu_category_t::menu_system,201,   3  , { "PortC MIDI"     , "ポートC MIDI" }}},
   (const mi_ble_midi_t      []){{ def::menu_category_t::menu_system,202,   3  , { "BLE MIDI"       , nullptr     }}},
   (const mi_tree_t          []){{ def::menu_category_t::menu_system,203,   3  , { "USB"            , nullptr}}},
-  (const mi_usb_power_t     []){{ def::menu_category_t::menu_system,204,    4 , { "Host Power Supply", "ホスト給電設定" }}},
-  (const mi_usb_midi_t      []){{ def::menu_category_t::menu_system,205,    4 , { "USB MIDI"       , nullptr     }}},
-  (const mi_tree_t          []){{ def::menu_category_t::menu_system,206,   3  , { "InstaChord Link", "インスタコードリンク"}}},
-  (const mi_iclink_port_t   []){{ def::menu_category_t::menu_system,207,    4 , { "Connect"        , "接続方法"   }}},
-  (const mi_iclink_dev_t    []){{ def::menu_category_t::menu_system,208,    4 , { "Play Device"    , "演奏デバイス"}}},
-  (const mi_iclink_style_t  []){{ def::menu_category_t::menu_system,209,    4 , { "Play Style"     , "演奏スタイル"}}},
-  (const mi_imu_velocity_t  []){{ def::menu_category_t::menu_system,210,  2   , { "IMU Velocity"   , "IMUベロシティ"}}},
-  (const mi_tree_t          []){{ def::menu_category_t::menu_system,211,  2   , { "Display"        , "表示"        }}},
-  (const mi_lcd_backlight_t []){{ def::menu_category_t::menu_system,212,   3  , { "Backlight"      , "画面の輝度"  }}},
-  (const mi_led_brightness_t[]){{ def::menu_category_t::menu_system,213,   3  , { "LED Brightness" , "LEDの輝度"   }}},
-  (const mi_detail_view_t   []){{ def::menu_category_t::menu_system,214,   3  , { "Detail View"    , "詳細表示"    }}},
-  (const mi_wave_view_t     []){{ def::menu_category_t::menu_system,215,   3  , { "Wave View"      , "波形表示"    }}},
-  (const mi_language_t      []){{ def::menu_category_t::menu_system,216,  2   , { "Language"       , "言語"        }}},
-  (const mi_tree_t          []){{ def::menu_category_t::menu_system,217,  2   , { "Volume"         , "音量"        }}},
-  (const mi_vol_midi_t      []){{ def::menu_category_t::menu_system,218,   3  , { "MIDI Mastervol" , "MIDIマスター音量"}}},
-  (const mi_vol_adcmic_t    []){{ def::menu_category_t::menu_system,219,   3  , { "ADC MicAmp"     , "ADCマイクアンプ" }}},
-  (const mi_all_reset_t     []){{ def::menu_category_t::menu_system,220,  2   , { "Reset All Settings", "全設定リセット"    }}},
-  (const mi_manual_qr_t     []){{ def::menu_category_t::menu_system,221, 1    , { "Manual QR"      , "説明書QR"     }}},
+  (const mi_usb_mode_t      []){{ def::menu_category_t::menu_system,204,    4 , { "USB MODE"       , "USBモード設定" }}},
+  (const mi_usb_power_t     []){{ def::menu_category_t::menu_system,205,    4 , { "Host Power Supply", "ホスト給電設定" }}},
+  (const mi_usb_midi_t      []){{ def::menu_category_t::menu_system,206,    4 , { "USB MIDI"       , nullptr     }}},
+  (const mi_tree_t          []){{ def::menu_category_t::menu_system,207,   3  , { "InstaChord Link", "インスタコードリンク"}}},
+  (const mi_iclink_port_t   []){{ def::menu_category_t::menu_system,208,    4 , { "Connect"        , "接続方法"   }}},
+  (const mi_iclink_dev_t    []){{ def::menu_category_t::menu_system,209,    4 , { "Play Device"    , "演奏デバイス"}}},
+  (const mi_iclink_style_t  []){{ def::menu_category_t::menu_system,210,    4 , { "Play Style"     , "演奏スタイル"}}},
+  (const mi_imu_velocity_t  []){{ def::menu_category_t::menu_system,211,  2   , { "IMU Velocity"   , "IMUベロシティ"}}},
+  (const mi_tree_t          []){{ def::menu_category_t::menu_system,212,  2   , { "Display"        , "表示"        }}},
+  (const mi_lcd_backlight_t []){{ def::menu_category_t::menu_system,213,   3  , { "Backlight"      , "画面の輝度"  }}},
+  (const mi_led_brightness_t[]){{ def::menu_category_t::menu_system,214,   3  , { "LED Brightness" , "LEDの輝度"   }}},
+  (const mi_detail_view_t   []){{ def::menu_category_t::menu_system,215,   3  , { "Detail View"    , "詳細表示"    }}},
+  (const mi_wave_view_t     []){{ def::menu_category_t::menu_system,216,   3  , { "Wave View"      , "波形表示"    }}},
+  (const mi_language_t      []){{ def::menu_category_t::menu_system,217,  2   , { "Language"       , "言語"        }}},
+  (const mi_tree_t          []){{ def::menu_category_t::menu_system,218,  2   , { "Volume"         , "音量"        }}},
+  (const mi_vol_midi_t      []){{ def::menu_category_t::menu_system,219,   3  , { "MIDI Mastervol" , "MIDIマスター音量"}}},
+  (const mi_vol_adcmic_t    []){{ def::menu_category_t::menu_system,220,   3  , { "ADC MicAmp"     , "ADCマイクアンプ" }}},
+  (const mi_all_reset_t     []){{ def::menu_category_t::menu_system,221,  2   , { "Reset All Settings", "全設定リセット"    }}},
+  (const mi_manual_qr_t     []){{ def::menu_category_t::menu_system,222, 1    , { "Manual QR"      , "説明書QR"     }}},
   nullptr, // end of menu
 };
 // const size_t menu_system_size = sizeof(menu_system) / sizeof(menu_system[0]) - 1;

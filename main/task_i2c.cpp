@@ -145,8 +145,10 @@ TODO:CoreS3でのSDカード挿抜状態判定を追加する
           // InstaChordリンクがUSBポートの場合は電力供給はしない
           if (system_registry.midi_port_setting.getInstaChordLinkPort() == def::command::instachord_link_port_t::iclp_usb) {
             usb_power_enabled = false;
-          }
-          if (usb_power_enabled) {
+          } else // USBホストモードでない場合は電力供給はしない
+          if (system_registry.midi_port_setting.getUSBMode() != def::command::usb_mode_t::usb_host) {
+            usb_power_enabled = false;
+          } else {
             usb_power_enabled = (system_registry.runtime_info.getMidiPortStateUSB() != def::command::midiport_info_t::mp_off);
           }
         }

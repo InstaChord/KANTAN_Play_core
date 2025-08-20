@@ -432,44 +432,32 @@ struct ui_popup_notify_t : public ui_timer_popup_t
 {
 protected:
   std::string _text;
+  uint32_t _text_color;
   registry_t::history_code_t _history_code;
   def::notify_type_t _notify_type;
-  bool _is_success;
+  system_registry_t::reg_popup_notify_t::category_t _category;
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     bool updated = false;
-    if (system_registry.popup_notify.getPopupHistory(_history_code, _notify_type, _is_success))
+    if (system_registry.popup_notify.getPopupHistory(_history_code, _notify_type, _category))
     {
-      const char* t = "";
-      switch (_notify_type) {
-      default: break;
-      case def::notify_type_t::NOTIFY_STORAGE_OPEN:
-        t = "Storage Open : "; break;
-      case def::notify_type_t::NOTIFY_FILE_LOAD:
-        t = "File Load : "; break;
-      case def::notify_type_t::NOTIFY_FILE_SAVE:
-        t = "File Save : "; break;
-      case def::notify_type_t::NOTIFY_COPY_SLOT_SETTING:
-        t = "Copy Slot : "; break;
-      case def::notify_type_t::NOTIFY_PASTE_SLOT_SETTING:
-        t = "Paste Slot : "; break;
-      case def::notify_type_t::NOTIFY_COPY_PART_SETTING:
-        t = "Copy Part : "; break;
-      case def::notify_type_t::NOTIFY_PASTE_PART_SETTING:
-        t = "Paste Part : "; break;
-      case def::notify_type_t::NOTIFY_CLEAR_ALL_NOTES:
-        t = "Clear all notes : "; break;
-      case def::notify_type_t::NOTIFY_ALL_RESET:
-        t = "All Reset : "; break;
-      case def::notify_type_t::NOTIFY_DEVELOPER_MODE:
-        t = "Developer : "; break;
-      }
+      auto text = def::notify_name_array.at(_notify_type);
+      const char* t = text->get();
+
+      _text_color = 0xFFFF00u;
       if (t) {
         _text = t;
-        if (_is_success) {
-          _text += "OK";
-        } else {
-          _text += "Error";
+        switch (_category) {
+        case system_registry_t::reg_popup_notify_t::category_t::SUCCESS_NOTIFY:
+          _text += " : OK";
+          _text_color = 0x20FF20u;
+          break;
+        case system_registry_t::reg_popup_notify_t::category_t::ERROR_NOTIFY:
+          _text += " : Error";
+          _text_color = 0xFF8080u;
+          break;
+        default:
+          break;
         }
         _gfx->setTextSize(1, 2);
         int w = _gfx->textWidth(_text.c_str()) + 16;
@@ -495,7 +483,7 @@ public:
     canvas->drawRect(offset_x+2, offset_y+2, _client_rect.w-4, _client_rect.h-4, 0xFFFFFFu);
 
     canvas->setTextDatum(m5gfx::datum_t::middle_center);
-    canvas->setTextColor(_is_success ? 0x20FF20u : 0xFF8080u);
+    canvas->setTextColor(_text_color);
     canvas->setTextSize(1, 2);
     canvas->drawString(_text.c_str(), x, y);
   }
