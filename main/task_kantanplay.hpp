@@ -134,6 +134,9 @@ Degree操作コマンド {
   // オモテ拍のタイミングで確定した半音上げ下げ(オンコード用)
   int8_t _bass_semitone_shift;
 
+  // 現在のサステインの状態
+  def::play::sustain_state_t _sustain_state;
+
   // Degreeボタンコマンドの処理
   void procChordDegree(const def::command::command_param_t& command_param, const bool is_pressed);
 
@@ -151,14 +154,19 @@ Degree操作コマンド {
   int32_t getOnbeatCycleBySongTempo(void);
   uint32_t autoProc(void);
   uint32_t chordProc(void);
+  void sustainProc(void);
+  void setSustain(bool sustain_on);
 
   void chordStepReset(void);
   void chordNoteOff(int part);
   void resetStepAndMute(void);
+  void resetStep(void);
+  void allPartsNoteOff(void);
   void procSoundEffect(const def::command::command_param_t& command_param, const bool is_pressed);
   void procNoteButton(const def::command::command_param_t& command_param, const bool is_pressed);
   void procDrumButton(const def::command::command_param_t& command_param, const bool is_pressed);
   void procChordStepResetRequest(const def::command::command_param_t& command_param, const bool is_pressed);
+  void procPlayEffect(const def::command::command_param_t& command_param, const bool is_pressed);
 
   void setPitchManage(uint8_t part, uint8_t pitch, uint8_t midi_ch, uint8_t note_number, int8_t velocity, int32_t press_usec, int32_t release_usec);
 

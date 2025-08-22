@@ -716,9 +716,6 @@ bool system_registry_t::song_data_t::loadText(uint8_t* data, size_t data_length)
     datafile_key_t kwd = datafile_key_t::kwd_Unknown;
     size_t kwd_index = 0;
 
-    // partset_info_t* ps = partset_list;
-    // part_info_t* pi = ps->getChannelInfo(0);
-    // play_control_t::global_part_info_t* gp = global_part_info;
     auto ps = &slot[0];
     auto pi = ps->chord_part;
     auto gp = &chord_part_drum[0];
@@ -927,14 +924,9 @@ size_t system_registry_t::song_data_t::saveText(uint8_t* data_buffer, size_t dat
     {
       auto pi = &(ps->chord_part[partidx]);
       auto gp = &(chord_part_drum[partidx]);
-      // part_info_t* pi = ps->getChannelInfo(partidx);
-      // play_control_t::global_part_info_t* gp = &(global_part_info[partidx]);
-      // gp は slot_set_info に変更
 
       for (int k = 0; k < kwd_max; ++k) {
         auto kwd = (datafile_key_t)k;
-        // int len = snprintf(linebuf, sizeof(linebuf), "\n%s\t", datafile_key[k]);
-        // file.write(linebuf, len);
 
         int32_t val = INT32_MAX;
         int len = 0;

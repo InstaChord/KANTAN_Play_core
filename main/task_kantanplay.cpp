@@ -33,6 +33,7 @@ void task_kantanplay_t::task_func(task_kantanplay_t* me)
   for (;;) {
     uint32_t next_usec;
     do {
+      me->sustainProc();
       me->_prev_usec = me->_current_usec;
       me->_current_usec = M5.micros();
       auto next1 = me->autoProc();
@@ -97,61 +98,122 @@ bool task_kantanplay_t::commandProccessor(void)
   case def::command::chord_step_reset_request:
     procChordStepResetRequest(command_param, is_pressed);
     break;
-  case def::command::panic_stop:
-    resetStepAndMute();
+  case def::command::play_control:
+    procPlayEffect(command_param, is_pressed);
     break;
 
   case def::command::autoplay_switch:
-    if (is_pressed)
     { // 自動演奏モードのオン・オフのトグル
       auto autoplay_state = system_registry.runtime_info.getChordAutoplayState();
 
-      // OTA実行中はオートプレイ禁止
-      if (system_registry.runtime_info.getWiFiOtaProgress() != 0) {
-        autoplay_state = def::play::auto_play_mode_t::auto_play_none;
-      } else {
-        auto iclink_port = system_registry.midi_port_setting.getInstaChordLinkPort();
-        auto iclink_style = system_registry.midi_port_setting.getInstaChordLinkStyle();
-
-        // インスタコードリンクのパッド演奏時はビート自動演奏モードに固定扱いとする
-        if ((iclink_port != def::command::instachord_link_port_t::iclp_off)
-        && (iclink_style == def::command::instachord_link_style_t::icls_pad))
-        {
-          autoplay_state = def::play::auto_play_mode_t::auto_play_beatmode;
+      if (is_pressed) {
+        // OTA実行中はオートプレイ禁止
+        if (system_registry.runtime_info.getWiFiOtaProgress() != 0) {
+          autoplay_state = def::play::auto_play_mode_t::auto_play_none;
         } else {
-          switch (command_param.getParam()) {
-            case def::command::autoplay_switch_t::autoplay_toggle:
-              if (autoplay_state == def::play::auto_play_mode_t::auto_play_none) {
-                autoplay_state = def::play::auto_play_mode_t::auto_play_waiting;
-              } else {
-                autoplay_state = def::play::auto_play_mode_t::auto_play_none;
-              }
-              break;
-    
-            case def::command::autoplay_switch_t::autoplay_start:
-              if (autoplay_state != def::play::auto_play_mode_t::auto_play_running) {
-                autoplay_state = def::play::auto_play_mode_t::auto_play_waiting;
-                system_registry.runtime_info.setChordAutoplayState(autoplay_state);
-                system_registry.player_command.addQueue( { def::command::chord_degree, 1 } );
-              }
-              break;
-    
+          auto iclink_port = system_registry.midi_port_setting.getInstaChordLinkPort();
+          auto iclink_style = system_registry.midi_port_setting.getInstaChordLinkStyle();
+
+          // インスタコードリンクのパッド演奏時はビート自動演奏モードに固定扱いとする
+          if ((iclink_port != def::command::instachord_link_port_t::iclp_off)
+          && (iclink_style == def::command::instachord_link_style_t::icls_pad))
+          {
+            autoplay_state = def::play::auto_play_mode_t::auto_play_beatmode;
+          } else {
+            switch (command_param.getParam()) {
+              case def::command::autoplay_switch_t::autoplay_toggle:
+                if (autoplay_state == def::play::auto_play_mode_t::auto_play_none) {
+                  autoplay_state = def::play::auto_play_mode_t::auto_play_waiting;
+                } else {
+                  autoplay_state = def::play::auto_play_mode_t::auto_play_none;
+                }
+                break;
+
+              case def::command::autoplay_switch_t::autoplay_start:
+                if (autoplay_state != def::play::auto_play_mode_t::auto_play_running) {
+                  autoplay_state = def::play::auto_play_mode_t::auto_play_waiting;
+                  system_registry.runtime_info.setChordAutoplayState(autoplay_state);
+                  system_registry.player_command.addQueue( { def::command::chord_degree, 1 } );
+                }
+                break;
+
             case def::command::autoplay_switch_t::autoplay_stop:
               autoplay_state = def::play::auto_play_mode_t::auto_play_none;
               break;
+
+            case def::command::autoplay_switch_t::autoplay_pause:
+              if (autoplay_state == def::play::auto_play_mode_t::auto_play_running) {
+                // オートプレイ実行中の場合は、一時停止に移行する
+                autoplay_state = def::play::auto_play_mode_t::auto_play_paused;
+              } else if (autoplay_state == def::play::auto_play_mode_t::auto_play_waiting) {
+                // オートプレイ待機中の場合は、終了する
+                autoplay_state = def::play::auto_play_mode_t::auto_play_none;
+              }
+              break;
+            }
+          }
+          if (autoplay_state == def::play::auto_play_mode_t::auto_play_none) {
+            resetStep();
+          }
+        }
+      } else {
+        // リリース時の処理
+        if (command_param.getParam() == def::command::autoplay_switch_t::autoplay_pause) {
+          // オートプレイ一時停止の場合は、待機状態に移行する
+          if (autoplay_state == def::play::auto_play_mode_t::auto_play_paused) {
+            autoplay_state = def::play::auto_play_mode_t::auto_play_waiting;
           }
         }
       }
       // M5_LOGV("autoplay %d", (int)autoplay);
       system_registry.runtime_info.setChordAutoplayState(autoplay_state);
-      if (autoplay_state == def::play::auto_play_mode_t::auto_play_none) {
-        resetStepAndMute();
-      }
     }
     break;
   }
 
   return true;
+}
+
+void task_kantanplay_t::setSustain(bool sustain_on)
+{
+  system_registry.runtime_info.setSustainState(sustain_on ? def::play::sustain_state_t::sustain_on : def::play::sustain_state_t::sustain_off);
+  sustainProc();
+}
+
+void task_kantanplay_t::sustainProc(void)
+{
+  auto sustain_state = system_registry.runtime_info.getSustainState();
+  if (_sustain_state == sustain_state) {
+    // サステインの状態が変わっていない場合は何もしない
+    return;
+  }
+  _sustain_state = sustain_state;
+
+  int32_t release_usec = 0; 
+  if (sustain_state == def::play::sustain_state_t::sustain_on)
+  {
+    // ノートオフの予定時間を最大値(約2000秒)にすることで実質的にノートオフを無効化する
+    release_usec = INT32_MAX; 
+  } else {
+    // 動作中のコードボタンの表示を解除
+    system_registry.working_command.clear( { def::command::chord_degree, _current_option.degree } );
+  }
+
+  {
+    // サステイン状態変更 (ノートオフタイミングを上書きして実現)
+    for (int part = 0; part < def::app::max_chord_part; ++part) {
+      for (int pitch = 0; pitch < def::app::max_pitch_with_drum; ++pitch) {
+        auto manage = &_midi_pitch_manage[part][pitch][max_manage_history - 1];
+        if (manage->release_usec >= 0) {
+          manage->release_usec = release_usec;
+        }
+      }
+    }
+    // ノートオフ設定する対象がなかった場合、念のためすべてのパートの音を停止する
+    if (sustain_state != def::play::sustain_state_t::sustain_on) {
+      allPartsNoteOff();
+    }
+  }
 }
 
 // オートプレイ処理
@@ -167,12 +229,17 @@ uint32_t task_kantanplay_t::autoProc(void)
   if (_auto_play_offbeat_remain_usec >= 0) {
     int remain_usec = _auto_play_offbeat_remain_usec - progress_usec;
     if (remain_usec < 0) {
-      const uint_fast8_t step_per_beat = system_registry.current_slot->slot_info.getStepPerBeat();
-      if (_current_beat_index < step_per_beat - 1) {
-        remain_usec += _auto_play_offbeat_cycle_usec[1 & _current_beat_index];
+      if (system_registry.runtime_info.getChordAutoplayState() == def::play::auto_play_paused) {
+        // 自動演奏の一時停止時は処理を保留にする (2msec後に再設定する)
+        remain_usec = 2048;
+      } else {
+        const uint_fast8_t step_per_beat = system_registry.current_slot->slot_info.getStepPerBeat();
+        if (_current_beat_index < step_per_beat - 1) {
+          remain_usec += _auto_play_offbeat_cycle_usec[1 & _current_beat_index];
+        }
+        // オフビートの演奏を行う
+        chordBeat(false);
       }
-      // オフビートの演奏を行う
-      chordBeat(false);
     }
     _auto_play_offbeat_remain_usec = remain_usec;
     if (next_event_timing > remain_usec) {
@@ -209,6 +276,9 @@ uint32_t task_kantanplay_t::autoProc(void)
 
         // オンビートの演奏を行う
         chordBeat(true);
+      } else if (autoplay_state == def::play::auto_play_paused) {
+        // 自動演奏の一時停止時は処理を保留にする (2msec後に再設定する)
+        remain_usec = 2048;
       }
     }
     _auto_play_onbeat_remain_usec = remain_usec;
@@ -274,8 +344,10 @@ uint32_t task_kantanplay_t::chordProc(void)
     }
   }
 
-  // パターン編集モードでない場合
-  if (system_registry.runtime_info.getPlayMode() != def::playmode::playmode_t::chord_edit_mode) {
+  // パターン編集モードでない場合 && 自動演奏の一時停止モードでない場合
+  if (system_registry.runtime_info.getPlayMode() != def::playmode::playmode_t::chord_edit_mode
+  &&  system_registry.runtime_info.getChordAutoplayState() != def::play::auto_play_paused)
+  {
     // アルペジエータのタイムアウト判定 (一定時間たつと強制的に先頭に戻す)
     if (_arpeggio_reset_remain_usec >= 0) {
       _arpeggio_reset_remain_usec -= progress_usec;
@@ -320,12 +392,8 @@ void task_kantanplay_t::procChordDegree(const def::command::command_param_t& com
       // ユーザーの演奏タイミングが遅れたものと見做してオモテ拍の処理を強制的に行うことで、
       // 演奏サイクルが乱れないようにする。
       _current_beat_index = step_per_beat - 1;
-//*
+
       chordStepAdvance(true);
-/*/
-      chordStepAdvance();
-      chordStepPlay();
-//*/
     }
   }
 
@@ -342,8 +410,9 @@ void task_kantanplay_t::procChordDegree(const def::command::command_param_t& com
       // 手動演奏の場合はここでステップ進行コマンドを発行する
       // オモテ拍・ウラ拍の区別は is_pressedフラグで行う
       system_registry.player_command.addQueue( { def::command::chord_beat, 0 }, is_pressed );
-    } else if (autoplay_state == def::play::auto_play_mode_t::auto_play_waiting) {
-      // 自動演奏の開始待ち受け状態の場合はこのタイミングで自動演奏の開始
+    } else if (autoplay_state == def::play::auto_play_mode_t::auto_play_waiting
+            || autoplay_state == def::play::auto_play_mode_t::auto_play_paused) {
+      // 自動演奏の開始待ち受け状態または一時停止状態の場合はこのタイミングで自動演奏の開始
       _auto_play_onbeat_remain_usec = 0;
       system_registry.runtime_info.setChordAutoplayState(def::play::auto_play_mode_t::auto_play_running);
     }
@@ -412,6 +481,9 @@ void task_kantanplay_t::chordBeat(const bool on_beat)
   // 何ステップ進むか調べる (ウラを飛ばしてオモテが連打されるケースに対応するため)
   int advance = calcStepAdvance(on_beat);
   if (advance == 0) return;
+
+  // サステイン解除
+  setSustain(false);
 
   do {
     // アルペジエータのステップを進める
@@ -945,6 +1017,28 @@ void task_kantanplay_t::procChordStepResetRequest(const def::command::command_pa
   chordStepReset();
 }
 
+void task_kantanplay_t::procPlayEffect(const def::command::command_param_t& command_param, const bool is_pressed)
+{
+  switch (command_param.getParam())
+  {
+  case def::command::play_control_t::pc_panic_stop:
+    if (is_pressed) {
+      resetStep();
+      allPartsNoteOff();
+    }
+    break;
+
+  case def::command::play_control_t::pc_sustain:
+    setSustain(is_pressed);
+    break;
+
+  case def::command::play_control_t::pc_reset_arpeggio:
+    if (is_pressed) {
+      resetStep();
+    }
+  }
+}
+
 void task_kantanplay_t::chordStepReset(void)
 {
   _step_reset_request = true;
@@ -959,26 +1053,40 @@ void task_kantanplay_t::chordStepReset(void)
 
 void task_kantanplay_t::resetStepAndMute(void)
 {
+  resetStep();
+  allPartsNoteOff();
+}
+
+void task_kantanplay_t::resetStep(void)
+{
 // 各種自動処理のタイミングをリセットする
   _reactive_onbeat_cycle_usec = -1;
   _auto_play_onbeat_remain_usec = -1;
   _auto_play_offbeat_remain_usec = -1;
   _auto_play_input_tolerating_remain_usec = -1;
 
-  // アルペジエータも先頭に戻す
+  // アルペジエータを先頭に戻す
   _step_reset_request = true;
   for (int part_index = 0; part_index < def::app::max_chord_part; ++part_index) {
     system_registry.chord_play.setPartStep(part_index, -1);
-    // 各パートの音を停止する
-    chordNoteOff(part_index);
   }
 
+  _arpeggio_reset_remain_usec = 1024;
+
+  // 動作中のコードボタンの表示を解除
+  system_registry.working_command.clear( { def::command::chord_degree, _current_option.degree } );
+}
+
+void task_kantanplay_t::allPartsNoteOff(void)
+{
+  // 各パートの音を停止する
+  for (int part_index = 0; part_index < def::app::max_chord_part; ++part_index) {
+    chordNoteOff(part_index);
+  }
   for (int i = 0; i < 16; ++i) { // CC#120はすべてのMIDI音を停止する
     system_registry.midi_out_control.setControlChange(i, 120, 0);
   }
-  _arpeggio_reset_remain_usec = 1024;
 }
-
 
 
 
