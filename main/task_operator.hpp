@@ -34,6 +34,7 @@ private:
   void changeSubbuttonMapping(const uint32_t *map);
 
   void afterMenuClose(void);
+  void syncButtonColor(void);
 
   uint8_t _modifier_press_order[8];
   uint8_t _base_degree_press_order[8];
