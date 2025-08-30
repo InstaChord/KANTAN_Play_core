@@ -45,6 +45,8 @@ public:
     size_t saveResumeJSON(uint8_t* data, size_t data_length);
     bool loadResumeJSON(const uint8_t* data, size_t data_length);
 
+    void syncParams(void);
+
     struct reg_working_command_t {
         void set(const def::command::command_param_t& command_param);
         void clear(const def::command::command_param_t& command_param);

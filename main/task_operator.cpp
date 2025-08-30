@@ -195,68 +195,73 @@ void task_operator_t::task_func(task_operator_t* me)
     if (working_command_change_counter != tmp)
     {
       working_command_change_counter = tmp;
+  
+      me->syncButtonColor();
+    }
+  }
+}
 
-      { // メインボタンの色設定
-        for (int i = 0; i < def::hw::max_main_button; ++i) {
-          auto pair = system_registry.command_mapping_current.getCommandParamArray(i);
-          uint32_t color = 0;
-          bool hit = true;
-          for (int j = 0; pair.array[j].command != def::command::none; ++j) {
-            auto command_param = pair.array[j];
-            color = getColorByCommand(command_param);
-            hit &= system_registry.working_command.check(command_param);
-          }
-
-          if (!hit) {
-            int r = (color >> 16) & 0xFF;
-            int g = (color >> 8) & 0xFF;
-            int b = color & 0xFF;
-            r = (r * 3) >> 3;
-            g = (g * 3) >> 3;
-            b = (b * 3) >> 3;
-            color = (r << 16) | (g << 8) | b;
-          }
-          system_registry.rgbled_control.setColor(i, color);
-        }
+void task_operator_t::syncButtonColor(void)
+{
+  { // メインボタンの色設定
+    for (int i = 0; i < def::hw::max_main_button; ++i) {
+      auto pair = system_registry.command_mapping_current.getCommandParamArray(i);
+      uint32_t color = 0;
+      bool hit = true;
+      for (int j = 0; pair.array[j].command != def::command::none; ++j) {
+        auto command_param = pair.array[j];
+        color = getColorByCommand(command_param);
+        hit &= system_registry.working_command.check(command_param);
       }
 
-      { // サブボタンの色設定
-        bool is_swap = isSubButtonSlotSwap();
-        for (int i = 0; i < def::hw::max_sub_button*2; ++i) {
-          auto pair = system_registry.sub_button.getCommandParamArray(i);
-          auto command_param = pair.array[0];
-          auto color = getColorByCommand(command_param);
-          bool isWorking = system_registry.working_command.check(command_param);
+      if (!hit) {
+        int r = (color >> 16) & 0xFF;
+        int g = (color >> 8) & 0xFF;
+        int b = color & 0xFF;
+        r = (r * 3) >> 3;
+        g = (g * 3) >> 3;
+        b = (b * 3) >> 3;
+        color = (r << 16) | (g << 8) | b;
+      }
+      system_registry.rgbled_control.setColor(i, color);
+    }
+  }
 
-          if (!isWorking) {
-            int r = (color >> 16) & 0xFF;
-            int g = (color >> 8) & 0xFF;
-            int b = color & 0xFF;
-            if (is_swap == (i < def::hw::max_sub_button)) {
-              // RGB色を合成してグレー化する
-              // gamma2.0 convert and ITU-R BT.601 RGB to Y convert
-              uint32_t y = ( (r * r * 19749)    // R 0.299
-                          + (g * g * 38771)    // G 0.587
-                          + (b * b *  7530)    // B 0.114
-                          ) >> 24;
-              y = (y * 3) >> 3;
-              color = y | (y << 8) | (y << 16);
-            } else {
-              int k = 7;
-              r = (r * k) >> 4;
-              g = (g * k) >> 4;
-              b = (b * k) >> 4;
-              color = (r << 16) | (g << 8) | b;
-            }
-          }
-          if (is_swap == (i >= def::hw::max_sub_button)) {
-            int sub_button_index = i % def::hw::max_sub_button;
-            system_registry.rgbled_control.setColor(sub_button_index + def::hw::max_main_button, color);
-  // M5_LOGE("sub_button_index:%d color:%08x", sub_button_index, color);
-          }
-          system_registry.sub_button.setSubButtonColor(i, color);
+  { // サブボタンの色設定
+    bool is_swap = isSubButtonSlotSwap();
+    for (int i = 0; i < def::hw::max_sub_button*2; ++i) {
+      auto pair = system_registry.sub_button.getCommandParamArray(i);
+      auto command_param = pair.array[0];
+      auto color = getColorByCommand(command_param);
+      bool isWorking = system_registry.working_command.check(command_param);
+
+      if (!isWorking) {
+        int r = (color >> 16) & 0xFF;
+        int g = (color >> 8) & 0xFF;
+        int b = color & 0xFF;
+        if (is_swap == (i < def::hw::max_sub_button)) {
+          // RGB色を合成してグレー化する
+          // gamma2.0 convert and ITU-R BT.601 RGB to Y convert
+          uint32_t y = ( (r * r * 19749)    // R 0.299
+                      + (g * g * 38771)    // G 0.587
+                      + (b * b *  7530)    // B 0.114
+                      ) >> 24;
+          y = (y * 3) >> 3;
+          color = y | (y << 8) | (y << 16);
+        } else {
+          int k = 7;
+          r = (r * k) >> 4;
+          g = (g * k) >> 4;
+          b = (b * k) >> 4;
+          color = (r << 16) | (g << 8) | b;
         }
       }
+      if (is_swap == (i >= def::hw::max_sub_button)) {
+        int sub_button_index = i % def::hw::max_sub_button;
+        system_registry.rgbled_control.setColor(sub_button_index + def::hw::max_main_button, color);
+// M5_LOGE("sub_button_index:%d color:%08x", sub_button_index, color);
+      }
+      system_registry.sub_button.setSubButtonColor(i, color);
     }
   }
 }
@@ -626,6 +631,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
               system_registry.file_command.setCurrentSongInfo(songinfo);
             }
           }
+          system_registry.syncParams();
         }
         break;
       }
@@ -824,11 +830,13 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
 
 // 最上位メニューから抜けた時の処理
 void task_operator_t::afterMenuClose(void)
-{ // メニューから抜ける時はオートプレイは無効にする
-  system_registry.runtime_info.setChordAutoplayState(def::play::auto_play_mode_t::auto_play_none);
-
+{
   system_registry.runtime_info.setMenuVisible( false );
   changeCommandMapping();
+
+ // メニューから抜ける時はオートプレイは無効にする
+  system_registry.runtime_info.setChordAutoplayState(def::play::auto_play_mode_t::auto_play_none);
+
   // 設定を保存しておく
   system_registry.operator_command.addQueue( { def::command::system_control, def::command::sc_save_settings } );
   system_registry.operator_command.addQueue( { def::command::system_control, def::command::sc_save_resume } );
@@ -1196,6 +1204,8 @@ void task_operator_t::changeCommandMapping(void)
   for (int i = 0; i < def::hw::max_sub_button*2; ++i) {
     system_registry.sub_button.setCommandParamArray(i, sub_map[i]);
   }
+
+  syncButtonColor();
 }
 
 //-------------------------------------------------------------------------

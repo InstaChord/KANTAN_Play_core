@@ -188,16 +188,20 @@ void system_registry_t::reset(void)
   midi_port_setting.setUSBPowerEnabled(true);
 
   // マスターボリューム設定
-  operator_command.addQueue( { def::command::master_vol_set, 75 } );
+  user_setting.setMasterVolume(75);
+  // operator_command.addQueue( { def::command::master_vol_set, 75 } );
 
   // スロット選択
-  operator_command.addQueue( { def::command::slot_select, 1 } );
+  runtime_info.setPlaySlot(0);
+  // operator_command.addQueue( { def::command::slot_select, 1 } );
 
   // 編集時のエンコーダ２のターゲット設定
-  operator_command.addQueue( { def::command::edit_enc2_target, def::command::edit_enc2_target_t::program } );
+  chord_play.setEditEnc2Target(def::command::edit_enc2_target_t::program);
+  // operator_command.addQueue( { def::command::edit_enc2_target, def::command::edit_enc2_target_t::program } );
 
   // 演奏時ベロシティ設定
-  operator_command.addQueue( { def::command::set_velocity, 127 } );
+  runtime_info.setPressVelocity(127);
+  // operator_command.addQueue( { def::command::set_velocity, 127 } );
 
 
   command_mapping_external.reset();
@@ -391,11 +395,13 @@ bool system_registry_t::loadSetting(void)
 {
   reset();
 
+  bool result = false;
   auto mem = file_manage.loadFile(def::app::data_type_t::data_setting, 0);
   if (mem != nullptr) {
-    return loadSettingJSON(mem->data, mem->size);
+    result = loadSettingJSON(mem->data, mem->size);
   }
-  return false;
+
+  return result;
 }
 
 bool system_registry_t::loadResume(void)
@@ -426,6 +432,25 @@ bool system_registry_t::load(void)
   result = loadSetting() & result;
   result = loadResume() & result;
   return result;
+}
+
+//-------------------------------------------------------------------------
+
+// 動作に影響のあるパラメータを演奏タスクに同期する。
+// 設定のリセットやロード後に呼び出すこと。
+void system_registry_t::syncParams(void)
+{
+  // マスターボリューム設定
+  operator_command.addQueue( { def::command::master_vol_set, user_setting.getMasterVolume() } );
+
+  // スロット選択
+  operator_command.addQueue( { def::command::slot_select, runtime_info.getPlaySlot() + 1 } );
+
+  // 編集時のエンコーダ２のターゲット設定
+  operator_command.addQueue( { def::command::edit_enc2_target, chord_play.getEditEnc2Target() } );
+
+  // 演奏時ベロシティ設定
+  operator_command.addQueue( { def::command::set_velocity, runtime_info.getPressVelocity() } );
 }
 
 //-------------------------------------------------------------------------
