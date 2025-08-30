@@ -160,11 +160,12 @@ storage_incbin_t storage_incbin;
 file_manage_t file_manage;
 
 static dir_manage_t dir_manage[def::app::data_type_t::data_type_max] =
-{ { nullptr          , "" },
-  { &storage_sd      , def::app::data_path[0] },
-  { &storage_sd      , def::app::data_path[1] },
-  { &storage_incbin  , def::app::data_path[2] },
-  { &storage_littlefs, def::app::data_path[3] },
+{ { nullptr          ,                     "" }, // data_unknown
+  { &storage_sd      , def::app::data_path[0] }, // data_song_users
+  { &storage_sd      , def::app::data_path[1] }, // data_song_extra
+  { &storage_incbin  , def::app::data_path[2] }, // data_song_preset
+  { &storage_littlefs, def::app::data_path[3] }, // data_setting
+  { &storage_littlefs, def::app::data_path[4] }, // data_resume
 };
 
 static std::string trimExtension(const std::string& filename)
@@ -456,6 +457,8 @@ int storage_littlefs_t::loadFromFileToMemory(const char* path, uint8_t* dst, siz
 
   int len = -1;
 #if __has_include(<LittleFS.h>)
+bool exists = LittleFS.exists(path);
+M5_LOGE("LittleFS open:%s exists:%d", path, exists);
   if (!LittleFS.exists(path)) { return len; }
   auto file = LittleFS.open(path);
   if (!file) { return len; }
@@ -490,20 +493,15 @@ int storage_littlefs_t::saveFromMemoryToFile(const char* path, const uint8_t* da
 {
   if (!_is_begin) { return -1; }
 
-  const char* tmpfile = "/tmpfile.tmp";
+  const char* tmpfile = "/.tmpsave.tmp";
   size_t writelen = 0;
 #if __has_include(<LittleFS.h>)
   // 一旦テンポラリファイルに保存する。
-  auto file = LittleFS.open(tmpfile, FILE_WRITE);
+  auto file = LittleFS.open(tmpfile, FILE_WRITE, true);
   if (!file) {
     return -1;
   }
-  do {
-    size_t len = std::min(length, 4096u);
-    length -= len;
-    writelen += file.write(data, len);
-    taskYIELD();
-  } while (length);
+  writelen = file.write(data, length);
   file.close();
   taskYIELD();
   // 元のファイルを削除してリネームする。
@@ -644,6 +642,16 @@ bool dir_manage_t::update(void)
   return result >= 0;
 }
 
+int dir_manage_t::search(const char* filename)
+{
+  for (size_t i = 0; i < _files.size(); ++i) {
+    if (_files[i].filename == filename) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 std::string dir_manage_t::getFullPath(size_t index)
 {
   if (index >= _files.size()) { return ""; }
@@ -671,6 +679,7 @@ bool file_manage_t::updateFileList(def::app::data_type_t dir_type)
 {
   M5_LOGV("updateFileList");
   auto dir = getDirManage(dir_type);
+  if (dir == nullptr) { return false; }
   if (!dir->update()) {
     auto st = dir->getStorage();
     st->endStorage();
@@ -678,6 +687,17 @@ bool file_manage_t::updateFileList(def::app::data_type_t dir_type)
     return !dir->update();
   }
   return true;
+}
+
+void file_manage_t::setLatestFileInfo(const char* filename, def::app::data_type_t data_type)
+{
+  if (data_type == def::app::data_type_t::data_song_preset
+   || data_type == def::app::data_type_t::data_song_users
+   || data_type == def::app::data_type_t::data_song_extra) {
+    _latest_data_type = data_type;
+    _latest_file_name = (filename != nullptr) ? filename : "";
+    _display_file_name = trimExtension(_latest_file_name);
+  }
 }
 
 memory_info_t* file_manage_t::createMemoryInfo(size_t length)
@@ -702,7 +722,7 @@ const memory_info_t* file_manage_t::loadFile(def::app::data_type_t dir_type, siz
 {
   auto dir = getDirManage(dir_type);
   if (index >= dir->getCount()) {
-    dir->update();
+    updateFileList(dir_type);
   }
   if ((int16_t)index < 0) { // マイナス指定されている場合は末尾側として扱えるようにindexを加算する
     index = ((int16_t)index) + dir->getCount();
@@ -719,8 +739,7 @@ const memory_info_t* file_manage_t::loadFile(def::app::data_type_t dir_type, siz
       memory->filename = fullpath;
       auto storage = dir->getStorage();
       if (0 <= storage->loadFromFileToMemory(fullpath.c_str(), memory->data, memory->size, index)) {
-        auto fn = trimExtension(info->filename);
-        _display_file_name = fn;
+        setLatestFileInfo(info->filename.c_str(), dir_type);
         return memory;
       }
     }
@@ -756,8 +775,7 @@ bool file_manage_t::saveFile(def::app::data_type_t dir_type, size_t memory_index
     return false;
   }
   if (!mem->filename.empty()) {
-    auto fn = trimExtension(mem->filename);
-    _display_file_name = fn;
+    setLatestFileInfo(mem->filename.c_str(), dir_type);
   }
 
   return true;

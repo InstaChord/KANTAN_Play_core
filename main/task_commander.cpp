@@ -286,6 +286,9 @@ static commander_t commander_port_b   { 8, false, ~0u };
 
 void task_commander_t::start(void)
 {
+  // ボタンのマスク状態をクリア
+  system_registry.internal_input.setButtonBitmask(0x00);
+
   commander_internal.start();
   commander_port_a.start();
   commander_port_b.start();

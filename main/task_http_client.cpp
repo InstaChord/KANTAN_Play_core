@@ -219,7 +219,7 @@ static void exec_ota_inner(const char* json_url)
     system_registry.runtime_info.setWiFiOtaProgress(def::command::wifi_ota_state_t::ota_update_done);
     // M5.delay(1024);
     // OTA完了後に本体リセット
-    system_registry.operator_command.addQueue( { def::command::power_control, 1 } );
+    system_registry.operator_command.addQueue( { def::command::system_control, def::command::system_control_t::sc_reset } );
   } else {
     system_registry.runtime_info.setWiFiOtaProgress(def::command::wifi_ota_state_t::ota_connection_error);
     ESP_LOGE(TAG, "Firmware upgrade failed");

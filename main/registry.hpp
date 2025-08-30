@@ -56,7 +56,7 @@ protected:
   void _execNotify(void) const {}
 #endif
   history_t* _history = nullptr;
-  history_code_t _history_code;
+  history_code_t _history_code = 0;
   uint16_t _history_count;
 };
 
