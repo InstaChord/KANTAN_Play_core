@@ -9,8 +9,6 @@
 #include <set>
 #include <mutex>
 
-#include <ArduinoJson.h>
-
 #if !defined (M5UNIFIED_PC_BUILD)
 
 #include <freertos/FreeRTOS.h>
@@ -116,10 +114,6 @@ void system_registry_t::init(void)
   clipboard_slot.init(true);
   clipboard_arpeggio.init(true);
   command_mapping_custom_main.init(true);
-
-  // ソングデータ読込 (incbinで埋め込んだプリセットデータを読み込む)
-  // song_data.loadSongJSON(preset_1_1, (size_t)sizeof_preset_1_1);
-  // unchanged_song_data.assign(song_data);
 
   // 設定値を読み込む
   load();
@@ -341,32 +335,97 @@ void system_registry_t::reset(void)
   color_setting.setButtonDefaultTextColor(0xBBBBBB); // ボタンのデフォルトのテキスト色
 }
 
-// 設定を保存する
-void system_registry_t::save(void)
+
+bool system_registry_t::saveSetting(void)
 {
+  // 各種設定を内蔵フラッシュに保存
   auto mem = file_manage.createMemoryInfo(def::app::max_file_len);
   mem->filename = "";
   mem->dir_type = def::app::data_type_t::data_setting;
   auto len = saveSettingJSON(mem->data, def::app::max_file_len);
+  if (len < 16) { // 極端に小さいサイズの場合は失敗と見做す
+    return false;
+  }
   mem->size = len;
+  // セーブリクエストは使用せず直接保存する。 (内蔵フラッシュへの保存なのでSPIタスクに任せる必要が無いため)
+
+  taskYIELD();
+  return file_manage.saveFile(def::app::data_type_t::data_setting, mem->index);
+
+/* // 以下はセーブリクエストを使用してSPIタスクで処理する場合のコード
   def::app::file_command_info_t info;
   info.mem_index = mem->index;
   info.dir_type = def::app::data_type_t::data_setting;
   info.file_index = -1;
   file_command.setFileSaveRequest(info);
+//*/
+}  
+
+bool system_registry_t::saveResume(void)
+{
+  // レジューム用ファイルを内蔵フラッシュに保存
+  auto mem = file_manage.createMemoryInfo(def::app::max_file_len);
+  mem->filename = "";
+  mem->dir_type = def::app::data_type_t::data_resume;
+  auto len = saveResumeJSON(mem->data, def::app::max_file_len);
+  if (len < 16) { // 極端に小さいサイズの場合は失敗と見做す
+    return false;
+  }
+  mem->size = len;
+
+  taskYIELD();
+  return file_manage.saveFile(def::app::data_type_t::data_resume, mem->index);
+}
+
+// 設定を保存する
+bool system_registry_t::save(void)
+{
+  bool result = true;
+  result = saveSetting() & result;
+  result = saveResume() & result;
+  return result;
 }
 
 // 設定を読み込む
-void system_registry_t::load(void)
+bool system_registry_t::loadSetting(void)
 {
   reset();
 
-  system_registry.file_command.setUpdateList(def::app::data_type_t::data_setting);
+  auto mem = file_manage.loadFile(def::app::data_type_t::data_setting, 0);
+  if (mem != nullptr) {
+    return loadSettingJSON(mem->data, mem->size);
+  }
+  return false;
+}
 
-  def::app::file_command_info_t songinfo;
-  songinfo.file_index = 0;
-  songinfo.dir_type = def::app::data_type_t::data_setting;
-  system_registry.file_command.setFileLoadRequest(songinfo);
+bool system_registry_t::loadResume(void)
+{
+  bool result = false;
+  auto mem = file_manage.loadFile(def::app::data_type_t::data_resume, 0);
+  if (mem != nullptr) {
+    result = loadResumeJSON(mem->data, mem->size);
+  }
+
+  if (result)
+  {
+    checkSongModified();
+  } else {
+    auto mem = file_manage.loadFile(def::app::data_type_t::data_song_preset, 0);
+    if (mem != nullptr) {
+      operator_command.addQueue( { def::command::file_load_notify, mem->index } );
+    } else {
+
+    }
+  }
+  return result;
+}
+
+bool system_registry_t::load(void)
+{
+  bool result = true;
+  result = loadSetting() & result;
+  result = loadResume() & result;
+  return result;
 }
 
 //-------------------------------------------------------------------------
@@ -465,6 +524,14 @@ void system_registry_t::reg_user_setting_t::setTimeZone15min(int8_t offset)
 }
 
 //-------------------------------------------------------------------------
+void system_registry_t::reg_file_command_t::wait(void) {
+  while (get32(UPDATE_LIST) != 0 || get32(FILE_LOAD) != 0 || get32(FILE_SAVE) != 0) { M5.delay(1); }
+}
+void system_registry_t::reg_file_command_t::waitUpdateList(void) { while (get32(UPDATE_LIST) != 0) { M5.delay(1); } }
+void system_registry_t::reg_file_command_t::waitFileLoad(void) { while (get32(FILE_LOAD) != 0) { M5.delay(1); } }
+void system_registry_t::reg_file_command_t::waitFileSave(void) { while (get32(FILE_SAVE) != 0) { M5.delay(1); } }
+
+//-------------------------------------------------------------------------
 namespace def::ctrl_assign {
   int get_index_from_command(const control_assignment_t* data, const def::command::command_param_array_t& command)
   {
@@ -491,17 +558,10 @@ const char* localize_text_t::get(void) const
 { auto i = (uint8_t)system_registry.user_setting.getLanguage(); return text[i] ? text[i] : text[0]; }
 
 //-------------------------------------------------------------------------
-size_t system_registry_t::saveSettingJSON(uint8_t* data, size_t data_length)
+bool system_registry_t::saveSettingInternal(JsonVariant& json_root)
 {
-  ArduinoJson::JsonDocument json_root;
-
-  json_root["format"] = "KANTANPlayCore";
-  json_root["type"] = "Config";
-  json_root["version"] = 2;
-
   {
     auto json = json_root["user_setting"].to<JsonObject>();
-
     json["led_brightness"]       = user_setting.getLedBrightness();
     json["display_brightness"]   = user_setting.getDisplayBrightness();
     json["language"]    = (uint8_t)user_setting.getLanguage();
@@ -515,6 +575,7 @@ size_t system_registry_t::saveSettingJSON(uint8_t* data, size_t data_length)
     json["chattering_threshold"] = user_setting.getChatteringThreshold();
     json["timezone"]             = user_setting.getTimeZone();
   }
+
   {
     auto json = json_root["midi_port_setting"].to<JsonObject>();
     json["instachord_link_dev"] = (uint8_t)midi_port_setting.getInstaChordLinkDev();
@@ -555,41 +616,32 @@ size_t system_registry_t::saveSettingJSON(uint8_t* data, size_t data_length)
     }
   }
 
+  return true;
+}
+
+size_t system_registry_t::saveSettingJSON(uint8_t* data, size_t data_length)
+{
+  ArduinoJson::JsonDocument json_root;
+
+  json_root["format"] = "KANTANPlayCore";
+
+  {
+    json_root["type"] = "Config";
+    json_root["version"] = 2;
+    auto variant = json_root.as<JsonVariant>();
+    saveSettingInternal(variant);
+  }
+
   auto result = serializeJson(json_root, (char*)data, data_length);
 // ESP_LOGV("sysreg", "saveSettingJSON result: %d\n", result);
 
   return result;
 }
 
-bool system_registry_t::loadSettingJSON(const uint8_t* data, size_t data_length)
+bool system_registry_t::loadSettingInternal(JsonVariant& json_root)
 {
-
-  ArduinoJson::JsonDocument json_root;
-  auto error = deserializeJson(json_root, (char*)data, data_length);
-  if (error)
-  {
-    M5_LOGE("deserializeJson error: %s", error.c_str());
-    return false;
-  }
-
-  if (json_root["format"] != "KANTANPlayCore")
-  {
-    M5_LOGE("format error: %s", json_root["format"].as<const char*>());
-    return false;
-  }
-
-  if (json_root["type"] != "Config")
-  {
-    M5_LOGE("type error: %s", json_root["type"].as<const char*>());
-    return false;
-  }
-
   auto data_version = json_root["version"].as<int>();
 
-  if (json_root["version"] > 2)
-  {
-    M5_LOGV("version mismatch: %d", json_root["version"].as<int>());
-  }
   {
     auto json = json_root["user_setting"].as<JsonObject>();
     user_setting.setLedBrightness(                           json["led_brightness"      ].as<uint8_t>());
@@ -661,8 +713,39 @@ bool system_registry_t::loadSettingJSON(const uint8_t* data, size_t data_length)
       }
     }
   }
-
   return true;
+}
+
+bool system_registry_t::loadSettingJSON(const uint8_t* data, size_t data_length)
+{
+
+  ArduinoJson::JsonDocument json_root;
+  auto error = deserializeJson(json_root, (char*)data, data_length);
+  if (error)
+  {
+    M5_LOGE("deserializeJson error: %s", error.c_str());
+    return false;
+  }
+
+  if (json_root["format"] != "KANTANPlayCore")
+  {
+    M5_LOGE("format error: %s", json_root["format"].as<const char*>());
+    return false;
+  }
+
+  auto data_version = json_root["version"].as<int>();
+  if (data_version < 4 && json_root["type"] == "Config")
+  {
+    auto variant = json_root.as<JsonVariant>();
+    return loadSettingInternal(variant);
+  }
+/*
+  auto variant = json_root["setting"].as<JsonVariant>();
+  if (!variant.isNull()) {
+    return loadSettingInternal(variant);
+  }
+//*/
+  return false;
 }
 
 //-------------------------------------------------------------------------
@@ -1068,22 +1151,17 @@ static def::playmode::playmode_t getPlayMode(const char* name)
   return def::playmode::playmode_t::chord_mode;
 }
 
-
-size_t system_registry_t::song_data_t::saveSongJSON(uint8_t* data_buffer, size_t data_length)
+static bool saveSongInternal(system_registry_t::song_data_t* song, JsonVariant &json)
 {
-  ArduinoJson::JsonDocument json;
-
-  json["format"] = "KANTANPlayCore";
-  json["type"] = "Song";
   json["version"] = 2;
-  json["tempo"] = song_info.getTempo();
-  json["swing"] = song_info.getSwing();
+  json["tempo"] = song->song_info.getTempo();
+  json["swing"] = song->song_info.getSwing();
   json["base_key"] = system_registry.runtime_info.getMasterKey();
 
   auto drum_note = json["drum_note"].to<JsonArray>();
   for (int part_index = 0; part_index < def::app::max_chord_part; ++part_index)
   {
-    auto gp = &chord_part_drum[part_index];
+    auto gp = &song->chord_part_drum[part_index];
     auto drum_note_array = drum_note.add<JsonArray>();
     for (int pitch = 0; pitch < def::app::max_pitch_with_drum; ++pitch)
     {
@@ -1091,18 +1169,18 @@ size_t system_registry_t::song_data_t::saveSongJSON(uint8_t* data_buffer, size_t
     }
   }
 
-  kanplay_slot_t slot_default;
+  system_registry_t::kanplay_slot_t slot_default;
   slot_default.init();
   slot_default.reset();
 
   auto json_slot = json["slot"].to<JsonArray>();
   for (int slot_index = 0; slot_index < def::app::max_slot; ++slot_index)
   {
-    auto reg_slot = &slot[slot_index];
+    auto reg_slot = &song->slot[slot_index];
     auto reg_chord_part = reg_slot->chord_part;
     auto slot_info = json_slot.add<JsonObject>();
     if (*reg_slot == slot_default) { continue; }
-    if (slot_index != 0 && *reg_slot == slot[slot_index - 1]) { continue; }
+    if (slot_index != 0 && *reg_slot == song->slot[slot_index - 1]) { continue; }
 
     slot_info["play_mode"] = getPlayModeName(reg_slot->slot_info.getPlayMode());
     slot_info["key_offset"] = reg_slot->slot_info.getKeyOffset();
@@ -1179,49 +1257,26 @@ size_t system_registry_t::song_data_t::saveSongJSON(uint8_t* data_buffer, size_t
       }
     }
   }
-
-  auto result = serializeJson(json, (char*)data_buffer, data_length);
-  return result;
+  return true;
 }
 
-bool system_registry_t::song_data_t::loadSongJSON(const uint8_t* data, size_t data_length)
+static bool loadSongInternal(system_registry_t::song_data_t* song, JsonVariant &json)
 {
-  reset();
-
-  ArduinoJson::JsonDocument json;
-  auto error = deserializeJson(json, (char*)data, data_length);
-  if (error)
-  {
-    M5_LOGE("deserializeJson error: %s", error.c_str());
-    return false;
-  }
-
-  if (json["format"] != "KANTANPlayCore")
-  {
-    M5_LOGE("format error: %s", json["format"].as<const char*>());
-    return false;
-  }
-
-  if (json["type"] != "Song")
-  {
-    M5_LOGE("type error: %s", json["type"].as<const char*>());
-    return false;
-  }
-
-  if (json["version"] > 1)
+  if (json["version"] > 2)
   {
     M5_LOGV("version mismatch: %d", json["version"].as<int>());
   }
 
-  song_info.setTempo(json["tempo"].as<int>());
-  song_info.setSwing(json["swing"].as<int>());
-  song_info.setBaseKey(json["base_key"].as<int>());
+  song->song_info.setTempo(json["tempo"].as<int>());
+  song->song_info.setSwing(json["swing"].as<int>());
+  song->song_info.setBaseKey(json["base_key"].as<int>());
+
   system_registry.runtime_info.setMasterKey(json["base_key"].as<int>());
 
   auto drum_note = json["drum_note"].as<JsonArray>();
   for (int part_index = 0; part_index < def::app::max_chord_part; ++part_index)
   {
-    auto gp = &chord_part_drum[part_index];
+    auto gp = &song->chord_part_drum[part_index];
     auto drum_note_array = drum_note[part_index].as<JsonArray>();
     for (int pitch = 0; pitch < def::app::max_pitch_with_drum; ++pitch)
     {
@@ -1234,12 +1289,12 @@ bool system_registry_t::song_data_t::loadSongJSON(const uint8_t* data, size_t da
   if (slot_size > def::app::max_slot) { slot_size = def::app::max_slot; }
   for (int slot_index = 0; slot_index < def::app::max_slot; ++slot_index)
   {
-    auto reg_slot = &slot[slot_index];
+    auto reg_slot = &song->slot[slot_index];
     if (slot_index >= slot_size || 
         json_slot[slot_index].as<JsonObject>().size() == 0)
     {
       if (slot_index > 0) { // 先頭以外のスロットで項目が省略されている場合は前のスロットの内容をコピー
-        slot[slot_index].assign(slot[slot_index - 1]);
+        song->slot[slot_index].assign(song->slot[slot_index - 1]);
 // M5_LOGV("slot copy: %d", slot_index);
       }
       continue;
@@ -1300,6 +1355,130 @@ bool system_registry_t::song_data_t::loadSongJSON(const uint8_t* data, size_t da
     }
   }
   return true;
+}
+
+
+size_t system_registry_t::song_data_t::saveSongJSON(uint8_t* data_buffer, size_t data_length)
+{
+  ArduinoJson::JsonDocument json;
+
+  json["format"] = "KANTANPlayCore";
+  json["type"] = "Song";
+
+  auto variant = json.as<JsonVariant>();
+  saveSongInternal(this, variant);
+
+  return serializeJson(json, (char*)data_buffer, data_length);
+}
+
+bool system_registry_t::song_data_t::loadSongJSON(const uint8_t* data, size_t data_length)
+{
+  reset();
+
+  ArduinoJson::JsonDocument json;
+  auto error = deserializeJson(json, (char*)data, data_length);
+  if (error)
+  {
+    M5_LOGE("deserializeJson error: %s", error.c_str());
+    return false;
+  }
+
+  if (json["format"] != "KANTANPlayCore")
+  {
+    M5_LOGE("format error: %s", json["format"].as<const char*>());
+    return false;
+  }
+
+  if (json["type"] != "Song")
+  {
+    M5_LOGE("type error: %s", json["type"].as<const char*>());
+    return false;
+  }
+
+  auto variant = json.as<JsonVariant>();
+  return loadSongInternal(this, variant);
+}
+
+size_t system_registry_t::saveResumeJSON(uint8_t* data, size_t data_length)
+{
+  ArduinoJson::JsonDocument json;
+
+  json["format"] = "KANTANPlayCore";
+  json["type"] = "Resume";
+
+  json["version"] = 1;
+
+  json["slot_index"] = runtime_info.getPlaySlot() + 1;
+
+  // 現在のソングデータの情報を保存
+  auto json_song = json["song"].to<JsonVariant>();
+  saveSongInternal(&song_data, json_song);
+
+  // 未変更のソングデータの情報を保存
+  auto json_unchanged_song = json["unchanged_song"].to<JsonVariant>();
+  saveSongInternal(&unchanged_song_data, json_unchanged_song);
+  {
+    json_unchanged_song["filename"] =          file_manage.getLatestFileName();
+    json_unchanged_song["datatype"] = (uint8_t)file_manage.getLatestDataType();
+  }
+
+
+  return serializeJson(json, (char*)data, data_length);
+}
+
+
+bool system_registry_t::loadResumeJSON(const uint8_t* data, size_t data_length)
+{
+  ArduinoJson::JsonDocument json;
+  auto error = deserializeJson(json, (char*)data, data_length);
+  if (error)
+  {
+    M5_LOGE("deserializeJson error: %s", error.c_str());
+    return false;
+  }
+
+  if (json["format"] != "KANTANPlayCore")
+  {
+    M5_LOGE("format error: %s", json["format"].as<const char*>());
+    return false;
+  }
+
+  if (json["type"] != "Resume")
+  {
+    M5_LOGE("type error: %s", json["type"].as<const char*>());
+    return false;
+  }
+  if (json["version"] > 1)
+  {
+    M5_LOGV("version mismatch: %d", json["version"].as<int>());
+  }
+
+  bool result = false;
+
+  auto json_unchanged_song = json["unchanged_song"].as<JsonVariant>();
+  if (!json_unchanged_song.isNull()) {
+    loadSongInternal(&unchanged_song_data, json_unchanged_song);
+
+    // 最後に開いたソングデータの情報
+    // 初期値として空の情報をセットしておく
+    file_manage.setLatestFileInfo("", kanplay_ns::def::app::data_type_t::data_song_preset);
+    auto song_filename = json_unchanged_song["filename"].as<const char*>();
+    if (song_filename != nullptr && song_filename[0] != 0) {
+      auto song_datatype = (def::app::data_type_t)(json_unchanged_song["datatype"].as<uint8_t>());
+      file_manage.setLatestFileInfo(song_filename, song_datatype);
+    }
+
+    song_data.assign(unchanged_song_data);
+    auto json_song = json["song"].as<JsonVariant>();
+    if (!json_song.isNull()) {
+      result = loadSongInternal(&song_data, json_song);
+    }
+  }
+
+  auto slot_index = json["slot_index"].as<int>();
+  operator_command.addQueue( { def::command::slot_select, slot_index } );
+
+  return result;
 }
 
 //-------------------------------------------------------------------------

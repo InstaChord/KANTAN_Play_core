@@ -503,7 +503,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
     }
     break;
 
-  case def::command::load_from_memory:
+  case def::command::file_load_notify:
     if (is_pressed) {
 
       // file_managerがファイルをメモリ上に展開し終えた後にload_memoryコマンドが実行される
@@ -530,10 +530,6 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
             system_registry.operator_command.addQueue( { def::command::slot_select, 1 } );
             system_registry.player_command.addQueue( { def::command::chord_step_reset_request, 1 } );
           }
-          break;
-
-        case def::app::data_type_t::data_setting:
-          system_registry.loadSettingJSON(mem->data, mem->size);
           break;
         }
         system_registry.checkSongModified();
@@ -586,12 +582,53 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
     }
     break;
 
-  case def::command::power_control:
+  case def::command::system_control:
     if (is_pressed) {
-      system_registry.save();
-      M5.delay(128);
-      system_registry.runtime_info.setPowerOff(param ? 2 : 1);
-      M5.delay(256);
+      switch (param) {
+      default: break;
+      case def::command::system_control_t::sc_power_off:
+        system_registry.save();
+        system_registry.runtime_info.setPowerOff(def::command::system_control_t::sc_power_off);
+        break;
+
+      case def::command::system_control_t::sc_reset:
+        system_registry.save();
+        system_registry.runtime_info.setPowerOff(def::command::system_control_t::sc_reset);
+        break;
+
+      case def::command::system_control_t::sc_save_settings:
+        system_registry.saveSetting();
+        break;
+
+      case def::command::system_control_t::sc_save_resume:
+        system_registry.saveResume();
+        break;
+
+      case def::command::system_control_t::sc_boot:
+        {
+          // 最後に扱ったソングデータのファイル名とデータタイプを取得
+          auto filename = file_manage.getLatestFileName();
+          auto datatype = file_manage.getLatestDataType();
+          M5_LOGV("file:%s  type:%d", filename.c_str(), (uint8_t)datatype);
+
+          system_registry.file_command.setUpdateList(datatype);
+          auto dm = file_manage.getDirManage(datatype);
+          if (dm != nullptr) {
+            // 前回使用していたファイルを特定する (ファイル名からindex特定)
+            for (int retry = 16; dm->isEmpty() && retry; --retry) {
+              M5.delay(16);
+            }
+            auto index = dm->search(filename.c_str());
+            if (index >= 0) {
+              def::app::file_command_info_t songinfo;
+              songinfo.file_index = index;
+              songinfo.dir_type = datatype;
+              system_registry.file_command.setCurrentSongInfo(songinfo);
+            }
+          }
+        }
+        break;
+      }
     }
     break;
 
@@ -724,10 +761,12 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
       default:
       case def::command::edit_exit_t::save:
         { // 確定操作は特になにもしなくてよい。
-          // system_registry.backup_song_data.assign(system_registry.song_data);
         }
         break;
       }
+      // 編集の終了時にレジューム情報も更新しておく
+      system_registry.operator_command.addQueue( { def::command::system_control, def::command::sc_save_resume } );
+
       // コード演奏モードに戻す
       system_registry.operator_command.addQueue( { def::command::play_mode_set, def::playmode::playmode_t::chord_mode } );
       // 演奏ステップを先頭に戻す
@@ -790,7 +829,9 @@ void task_operator_t::afterMenuClose(void)
 
   system_registry.runtime_info.setMenuVisible( false );
   changeCommandMapping();
-  system_registry.save();
+  // 設定を保存しておく
+  system_registry.operator_command.addQueue( { def::command::system_control, def::command::sc_save_settings } );
+  system_registry.operator_command.addQueue( { def::command::system_control, def::command::sc_save_resume } );
 }
 
 void task_operator_t::procEditFunction(const def::command::command_param_t& command_param)

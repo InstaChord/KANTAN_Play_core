@@ -86,7 +86,7 @@ TODO:CoreS3でのSDカード挿抜状態判定を追加する
           gui.procTouchControl(td);
         }
         if (M5.BtnPWR.wasHold()) {
-          system_registry.operator_command.addQueue( { def::command::power_control, 0 } );
+          system_registry.operator_command.addQueue( { def::command::system_control, def::command::system_control_t::sc_power_off } );
         }
 
         if (M5.BtnPWR.wasClicked() && M5.BtnPWR.getClickCount() == 8) {
@@ -125,8 +125,8 @@ TODO:CoreS3でのSDカード挿抜状態判定を追加する
             while (t > time(nullptr)) M5.delay(1);  /// Synchronization in seconds
             M5.Rtc.setDateTime( gmtime( &t ) );
           }
-          M5.delay(128);
-          if (off == 2) {
+          system_registry.file_command.wait();
+          if (off == def::command::system_control_t::sc_reset) {
             esp_restart();
           }
           M5.Power.powerOff();

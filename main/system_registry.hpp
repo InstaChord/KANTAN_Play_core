@@ -4,6 +4,8 @@
 #ifndef KANPLAY_SYSTEM_REGISTRY_HPP
 #define KANPLAY_SYSTEM_REGISTRY_HPP
 
+#include <ArduinoJson.h>
+
 #include <assert.h>
 
 #include "registry.hpp"
@@ -23,15 +25,25 @@ class system_registry_t;
 extern system_registry_t system_registry;
 
 class system_registry_t {
+    bool loadSettingInternal(JsonVariant& json);
+    bool saveSettingInternal(JsonVariant& json);
+
 public:
     void init(void);
 
     void reset(void);
-    void save(void);
-    void load(void);
+    bool save(void);
+    bool saveSetting(void);
+    bool saveResume(void);
+
+    bool load(void);
+    bool loadSetting(void);
+    bool loadResume(void);
 
     size_t saveSettingJSON(uint8_t* data, size_t data_length);
     bool loadSettingJSON(const uint8_t* data, size_t data_length);
+    size_t saveResumeJSON(uint8_t* data, size_t data_length);
+    bool loadResumeJSON(const uint8_t* data, size_t data_length);
 
     struct reg_working_command_t {
         void set(const def::command::command_param_t& command_param);
@@ -859,7 +871,7 @@ protected:
     };
 
     struct reg_file_command_t : public registry_t {
-        reg_file_command_t(void) : registry_t(16, 4, DATA_SIZE_32) {}
+        reg_file_command_t(void) : registry_t(16, 8, DATA_SIZE_32) {}
         enum index_t : uint8_t {
             CURRENT_SONG_INFO = 0x00,
             UPDATE_LIST = 0x04,
@@ -868,12 +880,23 @@ protected:
         };
         void setCurrentSongInfo(const def::app::file_command_info_t& info) { set32(CURRENT_SONG_INFO, info.raw, true); }
         def::app::file_command_info_t getCurrentSongInfo(void) const { return def::app::file_command_info_t(get32(CURRENT_SONG_INFO)); }
+
+        void wait(void);
+
+        void waitUpdateList(void);
         void setUpdateList(const def::app::file_command_info_t& info) { set32(UPDATE_LIST, info.raw, true); }
         def::app::file_command_info_t getUpdateList(void) const { return def::app::file_command_info_t(get32(UPDATE_LIST)); }
-        void setFileLoadRequest(const def::app::file_command_info_t& info) { set32(FILE_LOAD, info.raw, true); }
+        void clearUpdateList(void) { set32(UPDATE_LIST, 0, false); }
+
+        void waitFileLoad(void);
+        void setFileLoadRequest(const def::app::file_command_info_t& info) { waitFileLoad(); set32(FILE_LOAD, info.raw, true); }
         def::app::file_command_info_t getFileLoadRequest(void) const { return def::app::file_command_info_t(get32(FILE_LOAD)); }
-        void setFileSaveRequest(const def::app::file_command_info_t& info) { set32(FILE_SAVE, info.raw, true); }
+        void clearFileLoadRequest(void) { set32(FILE_LOAD, 0, false); }
+
+        void waitFileSave(void);
+        void setFileSaveRequest(const def::app::file_command_info_t& info) { waitFileSave(); set32(FILE_SAVE, info.raw, true); }
         def::app::file_command_info_t getFileSaveRequest(void) const { return def::app::file_command_info_t(get32(FILE_SAVE)); }
+        void clearFileSaveRequest(void) { set32(FILE_SAVE, 0, false); }
     };
 
     struct reg_song_info_t : public registry_t {
@@ -1127,7 +1150,7 @@ protected:
     reg_command_request_t  player_command;      // オペレータから演奏部への指示に限定したコマンド
 
     reg_chord_play_t       chord_play;          // コード演奏情報
-    kanplay_slot_t*        current_slot;        // 現在の操作対象スロット(編集中のスロット)
+    kanplay_slot_t*        current_slot = &song_data.slot[0];        // 現在の操作対象スロット(編集中のスロット)
     song_data_t            song_data;           // 演奏対象のソングデータ スロット1~8のデータ (保存用)
 
     // // 一時預かりデータ。ファイルから読込処理を行う際の一時利用や、編集モードに移行する前に元の状態を保持する

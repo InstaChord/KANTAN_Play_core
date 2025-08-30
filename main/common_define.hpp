@@ -318,9 +318,10 @@ Button Index mapping
       slot_select_ud, // スロット選択ボタンの上下操作
       chord_beat,
       chord_step_reset_request, // 演奏ステップを次回オンビートのタイミングで先頭に戻す
-      power_control,
+      system_control,
       file_index_ud, file_index_set,
-      load_from_memory,
+      file_load_notify,
+      file_save_notify,
       edit_enc2_ud,
       set_velocity,
       menu_open,
@@ -444,6 +445,14 @@ Button Index mapping
       pc_panic_stop = 0,
       pc_sustain,
       pc_reset_arpeggio,
+    };
+
+    enum system_control_t : uint8_t {
+      sc_boot = 0,
+      sc_power_off,
+      sc_reset,
+      sc_save_settings,
+      sc_save_resume,
     };
 
     // コマンドとパラメータのペア
@@ -927,7 +936,7 @@ Button Index mapping
     static constexpr const int16_t step_per_beat_default = 2; // 1ビートあたりのステップ数の初期値
     static constexpr const int16_t step_per_beat_max = 4; // 1ビートあたりのステップ数の最大値
 
-    static constexpr const size_t max_file_len = 65536 * 2;   // パターンファイル保存時の最大バイト数
+    static constexpr const size_t max_file_len = 1024 * 256;   // パターンファイル保存時の最大バイト数
 
     static constexpr const char* wifi_ap_ssid = "kanplay-ap";  // WiFiアクセスポイントモードのSSID
     static constexpr const char* wifi_ap_pass = "01234567";    // WiFiアクセスポイントモードのPASS
@@ -936,8 +945,8 @@ Button Index mapping
 
     static constexpr const uint32_t app_version_major = 0;
     static constexpr const uint32_t app_version_minor = 5;
-    static constexpr const uint32_t app_version_patch = 4;
-    static constexpr const char app_version_string[] = "054";
+    static constexpr const uint32_t app_version_patch = 7;
+    static constexpr const char app_version_string[] = "057";
     static constexpr const uint32_t app_version_raw = app_version_major<<16|app_version_minor<<8|app_version_patch;
 
     static constexpr const char url_manual[] = "https://kantan-play.com/core/manual/";
@@ -997,6 +1006,7 @@ Button Index mapping
       data_song_extra,
       data_song_preset,
       data_setting,
+      data_resume,
       data_type_max,
     };
     static constexpr const char* data_path[] = {
@@ -1004,6 +1014,7 @@ Button Index mapping
       "/songs/extra/",
       "",               // バイナリ埋め込みのためフォルダ情報なし
       "/setting.json",
+      "/resume.json",
     };
     struct file_command_info_t {
       union {

@@ -757,10 +757,10 @@ public:
 
     int xc = x + (w >> 1);
     int yc = y + (h >> 1) - 2;
-    canvas->fillCircle(xc, yc, 2, level > 0 ? TFT_WHITE : TFT_DARKGREY);
-    canvas->fillRoundRect(xc - 2, yc + 4, 5, 8, 2, level > 0 ? TFT_WHITE : TFT_DARKGREY);
-    canvas->fillArc(xc, yc,  5,  6, 150, 390, level > 1 ? TFT_WHITE : TFT_DARKGREY);
-    canvas->fillArc(xc, yc,  9, 10, 130, 410, level > 2 ? TFT_WHITE : TFT_DARKGREY);
+    canvas->fillCircle(xc, yc, 2, level > 0 ? 0xFFFFFFu : 0x3F3F3Fu);
+    canvas->fillRoundRect(xc - 2, yc + 4, 5, 8, 2, level > 0 ? 0xFFFFFFu : 0x3F3F3Fu);
+    canvas->fillArc(xc, yc,  5,  6, 150, 390, level > 1 ? 0xFFFFFFu : 0x3F3F3Fu);
+    canvas->fillArc(xc, yc,  9, 10, 130, 410, level > 2 ? 0xFFFFFFu : 0x3F3F3Fu);
     if (level < 0) {
       canvas->drawLine(offset_x, offset_y, offset_x+w, offset_y+h, TFT_RED);
       canvas->drawLine(offset_x, offset_y+h, offset_x+w, offset_y, TFT_RED);

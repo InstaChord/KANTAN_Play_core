@@ -128,7 +128,11 @@ void MIDI_Transport_UART::setUseTxRx(bool tx_enable, bool rx_enable)
       .stop_bits = UART_STOP_BITS_1,
       .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
       .rx_flow_ctrl_thresh = 58,
-      .source_clk = UART_SCLK_APB
+      .source_clk = UART_SCLK_APB,
+      .flags = {
+          .allow_pd = 0,
+          .backup_before_sleep = 0,
+      },
   };
 
   // Configure UART parameters

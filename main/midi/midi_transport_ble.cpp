@@ -50,6 +50,7 @@ static uint16_t _mtu_size = 23;
 // static int _tx_queue_index = 0;
 // static std::vector<uint8_t> _tx_queue[_tx_queue_size];
 
+#if defined (CONFIG_BLUEDROID_ENABLED)
 class MyServerCallbacks: public BLEServerCallbacks {
   void onConnect(BLEServer *pServer, esp_ble_gatts_cb_param_t *param) override {
     _conn_id = pServer->getConnId();
@@ -67,6 +68,55 @@ class MyServerCallbacks: public BLEServerCallbacks {
 // printf("BLE onMtuChanged : %d\n", param->mtu.mtu);
   }
 };
+
+class MyCallbacks: public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pCharacteristic, esp_ble_gatts_cb_param_t *param) override {
+    _instance->decodeReceive(pCharacteristic->getData(), pCharacteristic->getLength());
+    _instance->execTaskNotifyISR();
+    // printf("onWrite called.\n");
+    // fflush(stdout);
+  }
+  // void onRead(BLECharacteristic *pCharacteristic) override {
+  //   printf("onRead called.\n");
+  // }
+  // void onNotify(BLECharacteristic *pCharacteristic) override {
+  //   printf("onNotify called.\n");
+  // }
+  // void onStatus(BLECharacteristic *pCharacteristic, Status s, uint32_t code) override {
+  //   if (s == SUCCESS_NOTIFY || s == SUCCESS_INDICATE) {
+  //     // ESP_LOGV("BLE", "onStatus: success");
+  //     printf("onStatus: success\n");
+  //   } else {
+  //     // ESP_LOGE("BLE", "onStatus: error %d, code %d", s, code);
+  //     printf("onStatus: error %d, code %d", s, code);
+  //   }
+  //   fflush(stdout);
+  // }
+};
+#endif
+
+#if defined (CONFIG_NIMBLE_ENABLED)
+class MyServerCallbacks: public BLEServerCallbacks {
+  void onConnect(BLEServer *pServer, ble_gap_conn_desc *desc) override {
+    _conn_id = pServer->getConnId();
+    _instance->setPeripheralConnected(true);
+  };
+  void onDisconnect(BLEServer *pServer, ble_gap_conn_desc *desc) override {
+    _conn_id = -1;
+    _instance->setPeripheralConnected(false);
+  }
+  void onMtuChanged(BLEServer *pServer, ble_gap_conn_desc *desc, uint16_t mtu) override {
+  }
+};
+
+class MyCallbacks: public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pCharacteristic, ble_gap_conn_desc *desc) override {
+    _instance->decodeReceive(pCharacteristic->getData(), pCharacteristic->getLength());
+    _instance->execTaskNotifyISR();
+  }
+};
+#endif
+
 static MyServerCallbacks myServerCallbacks;
 
 void MIDI_Transport_BLE::decodeReceive(const uint8_t* data, size_t length)
@@ -103,31 +153,6 @@ void MIDI_Transport_BLE::decodeReceive(const uint8_t* data, size_t length)
     _rx_data.insert(_rx_data.end(), rxtmp.begin(), rxtmp.end());
   }
 }
-
-class MyCallbacks: public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic *pCharacteristic, esp_ble_gatts_cb_param_t *param) override {
-    _instance->decodeReceive(pCharacteristic->getData(), pCharacteristic->getLength());
-    _instance->execTaskNotifyISR();
-    // printf("onWrite called.\n");
-    // fflush(stdout);
-  }
-  // void onRead(BLECharacteristic *pCharacteristic) override {
-  //   printf("onRead called.\n");
-  // }
-  // void onNotify(BLECharacteristic *pCharacteristic) override {
-  //   printf("onNotify called.\n");
-  // }
-  // void onStatus(BLECharacteristic *pCharacteristic, Status s, uint32_t code) override {
-  //   if (s == SUCCESS_NOTIFY || s == SUCCESS_INDICATE) {
-  //     // ESP_LOGV("BLE", "onStatus: success");
-  //     printf("onStatus: success\n");
-  //   } else {
-  //     // ESP_LOGE("BLE", "onStatus: error %d, code %d", s, code);
-  //     printf("onStatus: error %d, code %d", s, code);
-  //   }
-  //   fflush(stdout);
-  // }
-};
 
 static std::vector<BLEAdvertisedDevice> ble_scan(void)
 {

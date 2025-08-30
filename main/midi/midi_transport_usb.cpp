@@ -237,6 +237,7 @@ namespace midi_driver {
       };
       esp_err_t err = usb_host_install(&config);
       // ESP_LOGI("", "usb_host_install: %x", err);
+      if (err != ESP_OK) { return false; }
 
       const usb_host_client_config_t client_config = {
         .is_synchronous = false,
@@ -248,6 +249,7 @@ namespace midi_driver {
       };
       err = usb_host_client_register(&client_config, &Client_Handle);
       // ESP_LOGI("", "usb_host_client_register: %x", err);
+      if (err != ESP_OK) { return false; }
 
       xTaskCreatePinnedToCore((TaskFunction_t)usb_host_task, "usb_host", 1024*3, this, kanplay_ns::def::system::task_priority_midi_sub, nullptr, kanplay_ns::def::system::task_cpu_midi_sub);
       xTaskCreatePinnedToCore((TaskFunction_t)usb_client_task, "usb_client", 1024*3, this, kanplay_ns::def::system::task_priority_midi_sub + 1, nullptr, kanplay_ns::def::system::task_cpu_midi_sub);
@@ -430,7 +432,7 @@ namespace midi_driver {
 
     static void usb_client_cb(const usb_host_client_event_msg_t *event_msg, void *arg)
     {
-      midi_usb_host *me = static_cast<midi_usb_host *>(arg);
+      // midi_usb_host *me = static_cast<midi_usb_host *>(arg);
 
       esp_err_t err;
       switch (event_msg->event)

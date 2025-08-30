@@ -115,6 +115,7 @@ public:
   size_t getCount(void) { return _files.size(); }
   const file_info_t* getInfo(size_t index) { return &_files[index]; }
   bool update(void);
+  int search(const char* filename);
   std::string getFullPath(size_t index);
   std::string makeFullPath(const char* filename) const;
 protected:
@@ -142,10 +143,19 @@ class file_manage_t
   static constexpr const size_t max_memory_info = 4;
   memory_info_t _memory_info[max_memory_info] = { {0}, {1}, {2}, {3} };
   uint8_t _load_queue_index = 0;
+  std::string _latest_file_name;
   std::string _display_file_name;
+  def::app::data_type_t _latest_data_type;
 public:
- 
-  // GUI表示用、現在使用中のファイル名
+  void setLatestFileInfo(const char* filename, def::app::data_type_t data_type);
+
+  // 現在使用中のファイル名 (拡張子あり)
+  const std::string& getLatestFileName(void) const { return _latest_file_name; }
+
+  // 現在使用中のファイルのデータタイプ
+  def::app::data_type_t getLatestDataType(void) const { return _latest_data_type; }
+
+  // GUI表示用、現在使用中のファイル名 (拡張子なし)
   const std::string& getDisplayFileName(void) const { return _display_file_name; }
 
   // ファイルアクセス用のメモリを確保しポインタを取得する
