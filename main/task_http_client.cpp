@@ -122,7 +122,7 @@ static TaskHandle_t _httpcl_task_handle = nullptr;
 void task_http_client_t::start(void)
 {
   if (_httpcl_task_handle == nullptr) {
-    xTaskCreatePinnedToCore((TaskFunction_t)task_func, "httpcl", 8192, this, def::system::task_priority_wifi, &_httpcl_task_handle, def::system::task_cpu_wifi);
+    xTaskCreatePinnedToCore((TaskFunction_t)task_func, "httpcl", 4096, this, def::system::task_priority_wifi, &_httpcl_task_handle, def::system::task_cpu_wifi);
   }
 }
 
@@ -204,25 +204,26 @@ static def::command::wifi_ota_state_t exec_get_binary_url(const char* json_url, 
 
 static void exec_ota_inner(const char* json_url)
 {
-  static constexpr const size_t MAX_HTTP_OUTPUT_BUFFER = 512;
-  char local_response_buffer[MAX_HTTP_OUTPUT_BUFFER + 1] = { 0 };
-
-  auto state = exec_get_binary_url(json_url, local_response_buffer, MAX_HTTP_OUTPUT_BUFFER);
-  system_registry.runtime_info.setWiFiOtaProgress(state);
-
-  if (state != def::command::wifi_ota_state_t::ota_update_available) {
-    return;
-  }
-  auto ret = exec_http_ota(local_response_buffer);
-  system_registry.wifi_control.setOperation(def::command::wifi_operation_t::wfop_disable);
-  if (ret == ESP_OK) {
-    system_registry.runtime_info.setWiFiOtaProgress(def::command::wifi_ota_state_t::ota_update_done);
-    // M5.delay(1024);
-    // OTA完了後に本体リセット
-    system_registry.operator_command.addQueue( { def::command::system_control, def::command::system_control_t::sc_reset } );
-  } else {
-    system_registry.runtime_info.setWiFiOtaProgress(def::command::wifi_ota_state_t::ota_connection_error);
-    ESP_LOGE(TAG, "Firmware upgrade failed");
+  static constexpr const size_t MAX_HTTP_OUTPUT_BUFFER = 1024 * 4;
+  auto local_response_buffer = (char*)m5gfx::heap_alloc_psram(MAX_HTTP_OUTPUT_BUFFER + 1);
+  if (local_response_buffer) {
+    auto state = exec_get_binary_url(json_url, local_response_buffer, MAX_HTTP_OUTPUT_BUFFER);
+    system_registry.runtime_info.setWiFiOtaProgress(state);
+  
+    if (state == def::command::wifi_ota_state_t::ota_update_available) {
+      auto ret = exec_http_ota(local_response_buffer);
+      system_registry.wifi_control.setOperation(def::command::wifi_operation_t::wfop_disable);
+      if (ret == ESP_OK) {
+        system_registry.runtime_info.setWiFiOtaProgress(def::command::wifi_ota_state_t::ota_update_done);
+        // M5.delay(1024);
+        // OTA完了後に本体リセット
+        system_registry.operator_command.addQueue( { def::command::system_control, def::command::system_control_t::sc_reset } );
+      } else {
+        system_registry.runtime_info.setWiFiOtaProgress(def::command::wifi_ota_state_t::ota_connection_error);
+        ESP_LOGE(TAG, "Firmware upgrade failed");
+      }
+    }
+    m5gfx::heap_free(local_response_buffer);
   }
 }
 

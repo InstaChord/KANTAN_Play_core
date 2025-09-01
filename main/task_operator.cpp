@@ -10,6 +10,10 @@
 #include "file_manage.hpp"
 #include "menu_data.hpp"
 
+#if !defined (M5UNIFIED_PC_BUILD)
+#include <nvs_flash.h>
+#endif
+
 namespace kanplay_ns {
 //-------------------------------------------------------------------------
 
@@ -634,6 +638,12 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
           system_registry.syncParams();
         }
         break;
+
+      case def::command::system_control_t::sc_erase_nvs:
+#if !defined (M5UNIFIED_PC_BUILD)
+        nvs_flash_erase();
+#endif
+        break;
       }
     }
     break;
@@ -1188,10 +1198,6 @@ void task_operator_t::changeCommandMapping(void)
   for (int i = 0; i < def::hw::max_button_mask; ++i) {
     auto pair = main_map[i];
     system_registry.command_mapping_current.setCommandParamArray(i, pair);
-    if (i < def::hw::max_main_button) {
-      auto color = getColorByCommand(pair.array[0]);
-      system_registry.button_basecolor.setColor(i, color);
-    }
   }
   if (custom_map) {
     for (int i = 0; i < def::hw::max_main_button; ++i) {

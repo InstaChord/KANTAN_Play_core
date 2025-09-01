@@ -90,7 +90,6 @@ void system_registry_t::init(void)
   sub_button.init();
   internal_input.init();
   internal_imu.init();
-  button_basecolor.init();
   rgbled_control.init();
   midi_out_control.init();
   operator_command.init();
@@ -189,19 +188,15 @@ void system_registry_t::reset(void)
 
   // マスターボリューム設定
   user_setting.setMasterVolume(75);
-  // operator_command.addQueue( { def::command::master_vol_set, 75 } );
 
   // スロット選択
   runtime_info.setPlaySlot(0);
-  // operator_command.addQueue( { def::command::slot_select, 1 } );
 
   // 編集時のエンコーダ２のターゲット設定
   chord_play.setEditEnc2Target(def::command::edit_enc2_target_t::program);
-  // operator_command.addQueue( { def::command::edit_enc2_target, def::command::edit_enc2_target_t::program } );
 
   // 演奏時ベロシティ設定
   runtime_info.setPressVelocity(127);
-  // operator_command.addQueue( { def::command::set_velocity, 127 } );
 
 
   command_mapping_external.reset();
@@ -353,7 +348,6 @@ bool system_registry_t::saveSetting(void)
   mem->size = len;
   // セーブリクエストは使用せず直接保存する。 (内蔵フラッシュへの保存なのでSPIタスクに任せる必要が無いため)
 
-  taskYIELD();
   return file_manage.saveFile(def::app::data_type_t::data_setting, mem->index);
 
 /* // 以下はセーブリクエストを使用してSPIタスクで処理する場合のコード
@@ -377,7 +371,6 @@ bool system_registry_t::saveResume(void)
   }
   mem->size = len;
 
-  taskYIELD();
   return file_manage.saveFile(def::app::data_type_t::data_resume, mem->index);
 }
 

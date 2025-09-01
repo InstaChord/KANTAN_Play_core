@@ -149,11 +149,25 @@ static esp_err_t _i2s_read(void* buf, size_t len, size_t* result, TickType_t tic
 
 #endif
 
+static int32_t* bufdata = nullptr;
+static constexpr const size_t buf_size = (overwrap + i2s_dma_frame_num) * sizeof(int32_t);
+
 bool task_i2s_t::start(void)
 {
 #if defined (M5UNIFIED_PC_BUILD)
   auto thread = SDL_CreateThread((SDL_ThreadFunction)task_func, "i2s", this);
 #else
+
+  // メモリブロックの断片化への対策として、小さい断片化領域から使用するため、敢えて最大領域を先回りして確保する。
+  auto dummy = m5gfx::heap_alloc_dma(heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+  // 上記の処理により、以下のメモリ確保は二番目に小さい領域から確保されることになる。
+  bufdata = (int32_t*)heap_caps_malloc(buf_size, MALLOC_CAP_DMA);
+  // 先回りして確保しておいた領域を解放する。
+  m5gfx::heap_free(dummy);
+  if (bufdata == nullptr) {
+    bufdata = (int32_t*)heap_caps_malloc(buf_size, MALLOC_CAP_DMA);
+  }
+  memset(bufdata, 0, buf_size);
 
   _i2s_init();
 
@@ -165,10 +179,7 @@ bool task_i2s_t::start(void)
 void task_i2s_t::task_func(task_i2s_t* me)
 {
 #if !defined (M5UNIFIED_PC_BUILD)
-  static constexpr const size_t buf_size = (overwrap + i2s_dma_frame_num) * sizeof(int32_t);
-  int32_t* bufdata = (int32_t*)heap_caps_malloc(buf_size, MALLOC_CAP_DMA);
   int32_t* i2sbuf = &bufdata[overwrap];
-  memset(bufdata, 0, buf_size);
 
   size_t transfer_size;
 

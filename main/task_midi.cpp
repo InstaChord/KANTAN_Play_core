@@ -30,11 +30,38 @@ private:
   bool _flg_instachord_out = false;
   bool _flg_instachord_pad = false;
 
+#if __has_include(<freertos/freertos.h>)
+  TaskHandle_t _handle = nullptr;
+#else
+  SDL_Thread* _handle = nullptr;
+#endif
+
 public:
   subtask_midi_t(midi_driver::MIDI_Transport* transport, system_registry_t::reg_task_status_t::bitindex_t task_status_index)
   : _midi { transport }
   , _task_status_index { task_status_index }
   {
+  }
+
+  void start(void)
+  {
+    if (_handle == nullptr) {
+      _midi.begin();
+#if __has_include(<freertos/freertos.h>)
+      xTaskCreatePinnedToCore((TaskFunction_t)task_func, "midi_subtask", 1024*3, this, def::system::task_priority_midi_sub, &_handle, def::system::task_cpu_midi_sub);
+#else
+      _handle = SDL_CreateThread((SDL_ThreadFunction)task_func, "midi_subtask", this);
+#endif
+    }
+  }
+
+  void execNotify(void)
+  {
+    if (_handle != nullptr) {
+#if __has_include(<freertos/freertos.h>)
+      xTaskNotifyGive(_handle);
+#endif
+    }
   }
 
   void setInstaChordLink(bool enable, def::command::instachord_link_dev_t dev, def::command::instachord_link_style_t style) {
@@ -289,12 +316,6 @@ static subtask_midi_t* subtask_array[] = {
 #endif
 static constexpr const size_t max_subtask = sizeof(subtask_array)/sizeof(subtask_array[0]);
 
-#if defined (M5UNIFIED_PC_BUILD)
- SDL_Thread* subtask_handle[max_subtask];
-#else
- TaskHandle_t subtask_handle[max_subtask];
-#endif
-
 void task_midi_t::start(void)
 {
 
@@ -306,9 +327,6 @@ void task_midi_t::start(void)
   // windows_midi_transport.changeEnable(true, false);
 
   // auto thread = SDL_CreateThread((SDL_ThreadFunction)task_func, "midi", this);
-  for (int i = 0; i < max_subtask; ++i) {
-    subtask_handle[i] = SDL_CreateThread((SDL_ThreadFunction)subtask_midi_t::task_func, "midi_subtask", &subtask_array[i]);
-  }
 #else
   {
     midi_driver::MIDI_Transport_UART::config_t config;
@@ -318,7 +336,8 @@ void task_midi_t::start(void)
     config.pin_tx = def::hw::pin::midi_tx;
     config.pin_rx = GPIO_NUM_NC;
     in_uart_midi_transport.setConfig(config);
-    in_uart_midi_transport.begin();
+    in_uart_midi_subtask.start();
+    // in_uart_midi_transport.begin();
     in_uart_midi_transport.setUseTxRx(true, false);
 
     // 外部PortC用MIDI
@@ -326,14 +345,14 @@ void task_midi_t::start(void)
     config.pin_tx = M5.getPin(m5::pin_name_t::port_c_txd);
     config.pin_rx = M5.getPin(m5::pin_name_t::port_c_rxd);
     portc_midi_transport.setConfig(config);
-    portc_midi_transport.begin();
+    // portc_midi_transport.begin();
     // オン・オフはsystem_registryで設定する
   }
 #ifdef MIDI_TRANSPORT_BLE_HPP
   {
     midi_driver::MIDI_Transport_BLE::config_t config;
     ble_midi_transport.setConfig(config);
-    ble_midi_transport.begin();
+    // ble_midi_transport.begin();
     // オン・オフはsystem_registryで設定する
   }
 #endif
@@ -341,7 +360,7 @@ void task_midi_t::start(void)
   {
     midi_driver::MIDI_Transport_USB::config_t config;
     usb_midi_transport.setConfig(config);
-    usb_midi_transport.begin();
+    // usb_midi_transport.begin();
   }
 #endif
 
@@ -349,11 +368,8 @@ void task_midi_t::start(void)
   xTaskCreatePinnedToCore((TaskFunction_t)task_func, "midi", 1024*3, this, def::system::task_priority_midi, &handle, def::system::task_cpu_midi);
   system_registry.midi_out_control.setNotifyTaskHandle(handle);
   system_registry.midi_port_setting.setNotifyTaskHandle(handle);
-
-  for (int i = 0; i < max_subtask; ++i) {
-    xTaskCreatePinnedToCore((TaskFunction_t)subtask_midi_t::task_func, "midi_subtask", 1024*3, subtask_array[i], def::system::task_priority_midi_sub, &subtask_handle[i], def::system::task_cpu_midi_sub);
-  }
 #endif
+
 }
 
 void task_midi_t::task_func(task_midi_t* me)
@@ -426,6 +442,9 @@ void task_midi_t::task_func(task_midi_t* me)
     bool portc_out = portc_setting & def::command::ex_midi_mode_t::midi_output;
     bool portc_in  = portc_setting & def::command::ex_midi_mode_t::midi_input;
     if (prev_portc_out != portc_out || prev_portc_in != portc_in) {
+      if (portc_in || portc_out) {
+        portc_midi_subtask.start();
+      }
       prev_portc_out = portc_out;
       prev_portc_in  = portc_in;
       portc_midi_transport.setUseTxRx(portc_out, portc_in);
@@ -441,6 +460,9 @@ void task_midi_t::task_func(task_midi_t* me)
       ble_in = true;
     }
     if (prev_ble_out != ble_out || prev_ble_in != ble_in) {
+      if (ble_in || ble_out) {
+        ble_midi_subtask.start();
+      }
       prev_ble_out = ble_out;
       prev_ble_in  = ble_in;
       ble_midi_transport.setUseTxRx(ble_out, ble_in);
@@ -463,6 +485,9 @@ void task_midi_t::task_func(task_midi_t* me)
         system_registry.popup_notify.setMessage(def::notify_type_t::MESSAGE_NEED_RESTART);
         usb_mode = usb_midi_transport.getUSBMode();
       }
+      if (usb_in || usb_out) {
+        usb_midi_subtask.start();
+      }
       prev_usb_mode = usb_mode;
       prev_usb_out = usb_out;
       prev_usb_in  = usb_in;
@@ -470,8 +495,8 @@ void task_midi_t::task_func(task_midi_t* me)
     }
 #endif
 
-    for (int i = 0; i < max_subtask; ++i) {
-      xTaskNotifyGive(subtask_handle[i]);
+    for (auto &subtask : subtask_array) {
+      subtask->execNotify();
     }
   }
 #endif

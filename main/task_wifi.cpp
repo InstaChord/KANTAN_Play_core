@@ -20,7 +20,7 @@ void task_wifi_t::task_func(task_wifi_t* me)
   for (;;) {
     ++counter;
     M5.delay(256);
-    auto mode = system_registry.wifi_control.getMode();
+    auto mode = system_registry.wifi_control.getWifiMode();
     auto op = system_registry.wifi_control.getOperation();
 
     auto sta_info = def::command::wifi_sta_info_t::wsi_off;
@@ -590,7 +590,7 @@ static esp_err_t response_post_wifi_handler(httpd_req_t *req) {
 
   if (res == ESP_OK) {
     WiFi.begin(ssid.c_str(), password.c_str());
-    system_registry.wifi_control.setMode(def::command::wifi_mode_t::wifi_enable_sta);
+    system_registry.wifi_control.setWifiMode(def::command::wifi_mode_t::wifi_enable_sta);
     system_registry.wifi_control.setOperation(def::command::wifi_operation_t::wfop_disable);
     return response_redirect(req, "/");
   }
@@ -701,6 +701,16 @@ static esp_err_t response_ws_handler(httpd_req_t *req)
   return ret;
 }
 
+static constexpr const httpd_uri uri_table[] = {
+  { "/"    , HTTP_GET , response_top_handler      , nullptr, false, false, nullptr },
+  { "/wifi", HTTP_GET , response_wifi_handler     , nullptr, false, false, nullptr },
+  { "/main", HTTP_GET , response_main_handler     , nullptr, false, false, nullptr },
+  { "/ctrl", HTTP_GET , response_ctrl_handler     , nullptr, false, false, nullptr },
+  { "/ssid", HTTP_GET , response_ssid_handler     , nullptr, false, false, nullptr },
+  { "/wifi", HTTP_POST, response_post_wifi_handler, nullptr, false, false, nullptr },
+  { "/ws"  , HTTP_GET , response_ws_handler       , nullptr,  true, false, nullptr },
+};
+
 static httpd_handle_t start_webserver(void)
 {
   httpd_handle_t server = NULL;
@@ -711,16 +721,6 @@ static httpd_handle_t start_webserver(void)
   if (httpd_start(&server, &config) == ESP_OK) {
     // Registering the ws handler
     M5_LOGI("Registering URI handlers");
-
-    static constexpr const httpd_uri uri_table[] = {
-      { "/"    , HTTP_GET , response_top_handler      , nullptr, false, false, nullptr },
-      { "/wifi", HTTP_GET , response_wifi_handler     , nullptr, false, false, nullptr },
-      { "/main", HTTP_GET , response_main_handler     , nullptr, false, false, nullptr },
-      { "/ctrl", HTTP_GET , response_ctrl_handler     , nullptr, false, false, nullptr },
-      { "/ssid", HTTP_GET , response_ssid_handler     , nullptr, false, false, nullptr },
-      { "/wifi", HTTP_POST, response_post_wifi_handler, nullptr, false, false, nullptr },
-      { "/ws"  , HTTP_GET , response_ws_handler       , nullptr,  true, false, nullptr },
-    };
 
     for (auto& uri : uri_table) {
       httpd_register_uri_handler(server, &uri);
@@ -735,8 +735,14 @@ static httpd_handle_t start_webserver(void)
 
 static esp_err_t stop_webserver(httpd_handle_t server)
 {
-  // Stop the httpd server
-  return server ? httpd_stop(server) : ESP_OK;
+  if (server) {
+    // Stop the httpd server
+    for (auto& uri : uri_table) {
+      httpd_unregister_uri(server, uri.uri);
+    }
+    return httpd_stop(server);
+  }
+  return ESP_OK;
 }
 
 static void disconnect_handler(void* arg, esp_event_base_t event_base,
@@ -892,7 +898,7 @@ static void wifiEvent(WiFiEvent_t event) {
     M5_LOGV("WPS Successful, stopping WPS and connecting to: %s", WiFi.SSID().c_str());
     wpsStop();
     system_registry.wifi_control.setOperation(def::command::wifi_operation_t::wfop_disable);
-    system_registry.wifi_control.setMode(def::command::wifi_mode_t::wifi_enable_sta);
+    system_registry.wifi_control.setWifiMode(def::command::wifi_mode_t::wifi_enable_sta);
     break;
   case ARDUINO_EVENT_WPS_ER_FAILED:
   case ARDUINO_EVENT_WPS_ER_TIMEOUT:
@@ -935,8 +941,8 @@ void task_wifi_t::start(void)
   webServer.onNotFound(response_404);
 #else
 
-  esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &connect_handler, &http_server);
-  esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnect_handler, &http_server);
+  // esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &connect_handler, &http_server);
+  // esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnect_handler, &http_server);
 
 #endif
 
@@ -959,7 +965,7 @@ void task_wifi_t::task_func(task_wifi_t* me)
       };
       uint8_t raw = 0;
     };
-    void set(def::command::wifi_mode_t m, def::command::wifi_operation_t o) {
+    void set(def::command::wifi_mode_t m, def::command::wifi_operation_t o, def::command::webserver_mode_t s) {
       raw = 0;
       switch (m) {
       default:
@@ -967,16 +973,13 @@ void task_wifi_t::task_func(task_wifi_t* me)
         break;
       case def::command::wifi_mode_t::wifi_enable_sta:
         sta = 1;
-        server = 1;
         break;
       case def::command::wifi_mode_t::wifi_enable_ap:
         ap = 1;
-        server = 1;
         break;
       case def::command::wifi_mode_t::wifi_enable_sta_ap:
         ap = 1;
         sta = 1;
-        server = 1;
         break;
       }
 
@@ -997,6 +1000,15 @@ void task_wifi_t::task_func(task_wifi_t* me)
         sta = 1;
         break;
       }
+    
+      switch (s) {
+      default: break;
+      case def::command::webserver_mode_t::ws_enable:
+        ap = 1;
+        sta = 1;
+        server = 1;
+        break;
+      }
     }
   };
   control_flg_t ctrl_flg;
@@ -1014,11 +1026,12 @@ void task_wifi_t::task_func(task_wifi_t* me)
     taskYIELD();
     ulTaskNotifyTake(pdTRUE, wait);
 
-    auto mode = system_registry.wifi_control.getMode();
+    auto mode = system_registry.wifi_control.getWifiMode();
     auto op = system_registry.wifi_control.getOperation();
+    auto webserver_mode = system_registry.wifi_control.getWebServerMode();
     control_flg_t prev;
     prev.raw = ctrl_flg.raw;
-    ctrl_flg.set(mode, op);
+    ctrl_flg.set(mode, op, webserver_mode);
     if (prev.raw != ctrl_flg.raw) {
 // M5_LOGI("wifi_ctrl: %d", mode);
       if (!ctrl_flg.wps && wps_enabled) {
@@ -1028,7 +1041,10 @@ void task_wifi_t::task_func(task_wifi_t* me)
 #if 0 // __has_include (<ESPAsyncWebServer.h>)
         webServer.end();
 #else
-        stop_webserver(http_server);
+        if (http_server) {
+          stop_webserver(http_server);
+          http_server = nullptr;
+        }
 #endif
         MDNS.end();
       }
@@ -1036,10 +1052,10 @@ void task_wifi_t::task_func(task_wifi_t* me)
         WiFi.scanDelete();
       }
       if (prev.ap != ctrl_flg.ap || prev.sta != ctrl_flg.sta || prev.wps != ctrl_flg.wps) {
-        if (!ctrl_flg.sta) {
+        if (prev.sta && !ctrl_flg.sta) {
           WiFi.STA.disconnect();
         }
-        if (!ctrl_flg.ap) {
+        if (prev.ap && !ctrl_flg.ap) {
           dnsServer.stop();
           WiFi.AP.end();
         }

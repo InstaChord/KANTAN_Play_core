@@ -21,8 +21,7 @@ public:
   static constexpr const size_t max_disp_buf_pixels = 48 * 96 + 2;
   static constexpr const uint8_t color_depth = 16;
 protected:
-  uint16_t* _draw_buffer[disp_buf_count];
-  M5Canvas _disp_buf;
+  uint16_t* _draw_buffer[disp_buf_count] = { nullptr, };
   M5Canvas disp_buf[disp_buf_count];
   uint16_t _delay_counter = 0;
   uint8_t _fps_counter = 0;

@@ -90,6 +90,11 @@ TODO:CoreS3でのSDカード挿抜状態判定を追加する
         }
 
         if (M5.BtnPWR.wasClicked() && M5.BtnPWR.getClickCount() == 8) {
+if (system_registry.runtime_info.getDeveloperMode()) {
+system_registry.operator_command.addQueue( { def::command::system_control, def::command::system_control_t::sc_erase_nvs } );
+}
+
+
           system_registry.runtime_info.setDeveloperMode(true);
           system_registry.popup_notify.setPopup(true, def::notify_type_t::NOTIFY_DEVELOPER_MODE);
         }
