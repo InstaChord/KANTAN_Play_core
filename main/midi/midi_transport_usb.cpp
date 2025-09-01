@@ -7,9 +7,9 @@
 #include "../system_registry.hpp"
 
 #include <string.h>
-#include <esp_log.h>
 #include <mutex>
 
+#if __has_include(<usb/usb_host.h>)
 
 namespace midi_driver {
 
@@ -36,6 +36,7 @@ namespace midi_driver {
 #include <USBMIDI.h>
 
 // #include <esp32-hal-tinyusb.h>
+#include <esp_log.h>
 #include <esp_mac.h>
 
 namespace midi_driver {
@@ -641,3 +642,5 @@ bool MIDI_Transport_USB::setUSBMode(kanplay_ns::def::command::usb_mode_t mode)
 //----------------------------------------------------------------
 
 } // namespace midi_driver
+
+#endif

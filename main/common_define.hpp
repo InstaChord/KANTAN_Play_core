@@ -376,6 +376,10 @@ Button Index mapping
       wifi_enable_ap,
       wifi_enable_sta_ap,
     };
+    enum class webserver_mode_t : uint8_t {
+      ws_disable = 0,
+      ws_enable,
+    };
     enum class wifi_operation_t : uint8_t {
       wfop_disable = 0,
       wfop_setup_ap,
@@ -384,8 +388,8 @@ Button Index mapping
       wfop_ota_progress,
     };
     enum wifi_ota_state_t : uint8_t {
-      ota_update_done = 101,
-      ota_connecting = 102,
+      ota_update_done = 249,
+      ota_connecting = 250,
       ota_update_failed = 251,
       ota_update_available = 252,
       ota_already_up_to_date = 253,
@@ -453,6 +457,7 @@ Button Index mapping
       sc_reset,
       sc_save_settings,
       sc_save_resume,
+      sc_erase_nvs,
     };
 
     // コマンドとパラメータのペア
@@ -944,9 +949,9 @@ Button Index mapping
     static constexpr const char* wifi_mdns = "kanplay";        // WiFi接続時のmDNS名 kanplay.local
 
     static constexpr const uint32_t app_version_major = 0;
-    static constexpr const uint32_t app_version_minor = 5;
-    static constexpr const uint32_t app_version_patch = 8;
-    static constexpr const char app_version_string[] = "058";
+    static constexpr const uint32_t app_version_minor = 6;
+    static constexpr const uint32_t app_version_patch = 2;
+    static constexpr const char app_version_string[] = "062";
     static constexpr const uint32_t app_version_raw = app_version_major<<16|app_version_minor<<8|app_version_patch;
 
     static constexpr const char url_manual[] = "https://kantan-play.com/core/manual/";

@@ -23,7 +23,7 @@ void task_spi_t::start(void)
   auto thread = SDL_CreateThread((SDL_ThreadFunction)task_func, "spi", this);
 #else
   TaskHandle_t handle = nullptr;
-  xTaskCreatePinnedToCore((TaskFunction_t)task_func, "spi", 4096, this, def::system::task_priority_spi, &handle, def::system::task_cpu_spi);
+  xTaskCreatePinnedToCore((TaskFunction_t)task_func, "spi", 1024*3, this, def::system::task_priority_spi, &handle, def::system::task_cpu_spi);
   system_registry.file_command.setNotifyTaskHandle(handle);
 #endif
 }

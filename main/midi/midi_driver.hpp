@@ -118,6 +118,8 @@ protected:
     MIDIDriver(MIDI_Transport* transport) : _transport(transport) {}
     virtual ~MIDIDriver() = default;
 
+    bool begin(void) { return _transport->begin(); }
+
     void setSendBufferSize(size_t size) { _send_buffer_size = size; }
 
     bool isConnected(void) const { return _transport->isConnected(); }

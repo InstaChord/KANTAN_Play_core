@@ -13,9 +13,6 @@
 
 #include <M5Unified.h>
 
-#if defined (__WIN32__) || defined (_WIN32) || defined (__CYGWIN__)
-  #define aligned_alloc(align,size) _aligned_malloc(size,align)
-#endif
 
 namespace kanplay_ns {
 
@@ -32,6 +29,24 @@ void registry_base_t::setNotifyTaskHandle(TaskHandle_t handle)
 }
 #endif
 
+static void* alloc_sram_anti_fragment(size_t size)
+{
+  void* result = nullptr;
+#if !defined (M5UNIFIED_PC_BUILD)
+  // メモリブロックの断片化への対策として、小さい断片化領域から使用するため、敢えて最大領域を先回りして確保する。
+  auto dummy = m5gfx::heap_alloc_dma(heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+  // 上記の処理により、以下のメモリ確保は二番目に小さい領域から確保されることになる。
+  result = m5gfx::heap_alloc_dma(size);
+  // 先回りして確保しておいた領域を解放する。
+  m5gfx::heap_free(dummy);
+#endif
+  if (result == nullptr)
+  {
+    result = m5gfx::heap_alloc_dma(size);
+  }
+  return result;
+}
+
 registry_base_t::registry_base_t(uint16_t history_count)
 : _history_code { 0 }
 , _history_count(history_count)
@@ -47,11 +62,11 @@ void registry_base_t::init(bool psram)
   if (_history_count) {
     size_t history_size = _history_count * sizeof(history_t);
     void* ptr = nullptr;
-    if (psram) {
+    // if (psram) {
       ptr = m5gfx::heap_alloc_psram(history_size);
-    }
+    // }
     if (ptr == nullptr) {
-      ptr = m5gfx::heap_alloc(history_size);
+      ptr = alloc_sram_anti_fragment(history_size);
     }
     memset(ptr, 0xFF, history_size);
     _history = (history_t*)ptr;
@@ -132,7 +147,7 @@ void registry_t::init(bool psram)
   if (psram) {
     _reg_data = (uint8_t*)m5gfx::heap_alloc_psram(_registry_size);
   } else {
-    _reg_data = (uint8_t*)m5gfx::heap_alloc(_registry_size);
+    _reg_data = (uint8_t*)alloc_sram_anti_fragment(_registry_size);
   }
   if (_reg_data) {
     memset(_reg_data, 0, _registry_size);

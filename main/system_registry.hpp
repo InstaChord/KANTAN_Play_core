@@ -352,7 +352,7 @@ protected:
     } runtime_info;
 
     struct reg_popup_notify_t : public registry_t {
-        reg_popup_notify_t(void) : registry_t(8, 8, DATA_SIZE_8) {}
+        reg_popup_notify_t(void) : registry_t(8, 4, DATA_SIZE_8) {}
         enum category_t : uint16_t {
             ERROR_NOTIFY = 0x00,
             SUCCESS_NOTIFY = 0x01,
@@ -379,19 +379,23 @@ protected:
     } popup_qr;
 
     struct reg_wifi_control_t : public registry_t {
-        reg_wifi_control_t(void) : registry_t(16, 0, DATA_SIZE_8) {}
+        reg_wifi_control_t(void) : registry_t(8, 0, DATA_SIZE_8) {}
         enum index_t : uint16_t {
-            MODE,
+            WIFIMODE,
             OPERATION,
+            WEBSERVER,
         };
 
         // WiFi APモード
-        void setMode(def::command::wifi_mode_t ctrl) { set8(MODE, static_cast<uint8_t>(ctrl)); }
-        def::command::wifi_mode_t getMode(void) const { return static_cast<def::command::wifi_mode_t>(get8(MODE)); }
+        void setWifiMode(def::command::wifi_mode_t ctrl) { set8(WIFIMODE, static_cast<uint8_t>(ctrl)); }
+        def::command::wifi_mode_t getWifiMode(void) const { return static_cast<def::command::wifi_mode_t>(get8(WIFIMODE)); }
 
         // WiFi 操作指示
         void setOperation(def::command::wifi_operation_t operation) { set8(OPERATION, static_cast<uint8_t>(operation)); }
         def::command::wifi_operation_t getOperation(void) const { return static_cast<def::command::wifi_operation_t>(get8(OPERATION)); }
+
+        void setWebServerMode(def::command::webserver_mode_t value) { set8(WEBSERVER, static_cast<uint8_t>(value)); }
+        def::command::webserver_mode_t getWebServerMode(void) const { return static_cast<def::command::webserver_mode_t>(get8(WEBSERVER)); }
     } wifi_control;
 
     struct reg_sub_button_t : public registry_t {
@@ -1145,7 +1149,6 @@ protected:
     reg_sub_button_t       sub_button;          // サブボタンのコマンド
     reg_internal_input_t   internal_input;      // かんぷれ本体ボタンの入力状態
     reg_internal_imu_t     internal_imu;        // かんぷれ本体のIMU情報
-    reg_rgbled_control_t   button_basecolor;    // かんぷれ本体ボタンおよび画面上のボタンの色 (操作状態を反映する前の色)
     reg_rgbled_control_t   rgbled_control;      // かんぷれ本体ボタンのカラーLED制御(操作状態が反映された色)
 
     reg_command_request_t  operator_command;    // コマンダーからオペレータへの全体的な動作指示

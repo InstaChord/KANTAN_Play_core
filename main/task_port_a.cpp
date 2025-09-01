@@ -31,7 +31,7 @@ bool task_port_a_t::start(void)
   M5.Ex_I2C.begin();
 #if defined (M5UNIFIED_PC_BUILD)
 #else
-  xTaskCreatePinnedToCore((TaskFunction_t)task_func, "port_a", 4096, this, def::system::task_priority_port_a, nullptr, def::system::task_cpu_port_a);
+  xTaskCreatePinnedToCore((TaskFunction_t)task_func, "port_a", 1024*3, this, def::system::task_priority_port_a, nullptr, def::system::task_cpu_port_a);
 #endif
   return true;
 }

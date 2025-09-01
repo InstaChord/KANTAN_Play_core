@@ -3158,8 +3158,20 @@ void gui_t::init(void)
   _gfx->setColorDepth(color_depth);
   _gfx->setFont(&fonts::efontJA_16_b);
 
+#if !defined (M5UNIFIED_PC_BUILD)
+  // メモリブロックの断片化への対策として、小さい断片化領域から使用するため、敢えて最大領域を先回りして確保する。
+  auto dummy = m5gfx::heap_alloc_dma(heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+  // 上記の処理により、以下のメモリ確保は二番目に小さい領域から確保されることになる。
   for (int i = 0; i < disp_buf_count; ++i) {
     _draw_buffer[i] = (uint16_t*)m5gfx::heap_alloc_dma(max_disp_buf_pixels * color_depth >> 3);
+  }
+  // 先回りして確保しておいた領域を解放する。
+  m5gfx::heap_free(dummy);
+#endif
+  for (int i = 0; i < disp_buf_count; ++i) {
+    if (_draw_buffer[i] == nullptr) {
+      _draw_buffer[i] = (uint16_t*)m5gfx::heap_alloc_dma(max_disp_buf_pixels * color_depth >> 3);
+    }
   }
 
   // disp_width  = _gfx->width();

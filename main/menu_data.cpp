@@ -476,24 +476,43 @@ public:
 };
 
 struct mi_wave_view_t : public mi_enable_selector_t {
-  public:
-    constexpr mi_wave_view_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-    : mi_enable_selector_t { cate, seq, level, title } {}
-  
-    int getValue(void) const override
-    {
-      return getMinValue() + static_cast<uint8_t>(system_registry.user_setting.getGuiWaveView());
-    }
-    bool setValue(int value) const override
-    {
-      if (mi_selector_t::setValue(value) == false) { return false; }
-      value -= getMinValue();
-      system_registry.user_setting.setGuiWaveView(value);
-      return true;
-    }
-  };
+public:
+  constexpr mi_wave_view_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
+  : mi_enable_selector_t { cate, seq, level, title } {}
+
+  int getValue(void) const override
+  {
+    return getMinValue() + static_cast<uint8_t>(system_registry.user_setting.getGuiWaveView());
+  }
+  bool setValue(int value) const override
+  {
+    if (mi_selector_t::setValue(value) == false) { return false; }
+    value -= getMinValue();
+    system_registry.user_setting.setGuiWaveView(value);
+    return true;
+  }
+};
 
 
+struct mi_webserver_t : public mi_enable_selector_t {
+public:
+  constexpr mi_webserver_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
+  : mi_enable_selector_t { cate, seq, level, title } {}
+
+  int getValue(void) const override
+  {
+    return getMinValue() + static_cast<uint8_t>(system_registry.wifi_control.getWebServerMode());
+  }
+  bool setValue(int value) const override
+  {
+    if (mi_selector_t::setValue(value) == false) { return false; }
+    value -= getMinValue();
+    system_registry.wifi_control.setWebServerMode(static_cast<def::command::webserver_mode_t>(value));
+    return true;
+  }
+};
+
+/*
 struct mi_usewifi_t : public mi_enable_selector_t {
 public:
   constexpr mi_usewifi_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
@@ -511,6 +530,7 @@ public:
     return true;
   }
 };
+//*/
 
 struct mi_all_reset_t : public mi_selector_t {
 protected:
@@ -1474,7 +1494,8 @@ struct mi_otaupdate_t : public mi_normal_t {
   }
   bool exit(void) const override
   {
-    if (getSelectingValue() <= 127) {
+    auto v = getSelectingValue();
+    if (0 < v && v <= 100) {
       // OTAの途中でメニューを閉じることはできない
       return true;
     }
@@ -1748,7 +1769,8 @@ static constexpr menu_item_ptr menu_system[] = {
   (const mi_song_step_beat_t[]){{ def::menu_category_t::menu_system, 16,  2  , { "Step / Beat"    , "ステップ／ビート"}}},
   (const mi_tree_t          []){{ def::menu_category_t::menu_system, 17, 1   , { "System"         , "システム"     }}},
   (const mi_tree_t          []){{ def::menu_category_t::menu_system, 18,  2  , { "WiFi"           , "WiFi通信"     }}},
-  (const mi_usewifi_t       []){{ def::menu_category_t::menu_system, 19,   3 , { "Connection"     , "接続"         }}},
+  // (const mi_usewifi_t       []){{ def::menu_category_t::menu_system, 19,   3 , { "Connection"     , "接続"         }}},
+  (const mi_webserver_t     []){{ def::menu_category_t::menu_system, 19,   3 , { "Web server"     , "Webサーバ"       }}},
   (const mi_otaupdate_t     []){{ def::menu_category_t::menu_system, 20,   3 , { "Firm Update"    , "ファーム更新" }}},
   (const mi_wifiap_t        []){{ def::menu_category_t::menu_system, 21,   3 , { "WiFi Setup"     , "WiFi設定"     }}},
   (const mi_tree_t          []){{ def::menu_category_t::menu_system, 22,  2   , { "Control Assignment", "操作割り当て"   }}},
