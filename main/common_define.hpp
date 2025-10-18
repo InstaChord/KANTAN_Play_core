@@ -355,6 +355,9 @@ Button Index mapping
     enum menu_function_t : uint8_t {
       mf_0, mf_1, mf_2, mf_3, mf_4, mf_5, mf_6, mf_7, mf_8, mf_9, mf_back, mf_enter, mf_down, mf_up, mf_exit,
     };
+    enum slot_select_ud_t : uint8_t {
+      slot_prev = 1, slot_next,
+    };
     enum edit_function_t : uint8_t {
       left = 1, right, edit_down, edit_up, page_left, page_right, backhome, ef_on, ef_off, ef_mute, onoff, clear, copy, paste,
     };
@@ -818,6 +821,8 @@ Button Index mapping
       "♭"   , nullptr, "m7-5" , { command::chord_semitone, 1,                               command::chord_modifier, KANTANMusic_Modifier_m7_5 },
       "♯"   , nullptr, "m7-5" , { command::chord_semitone, 2,                               command::chord_modifier, KANTANMusic_Modifier_m7_5 },
       "5/7" , nullptr, nullptr, { command::chord_bass_degree, 7, command::chord_degree, 5 },
+      "", " -1" , "Slot" , { command::slot_select_ud, command::slot_select_ud_t::slot_prev },
+      "", " +1" , "Slot" , { command::slot_select_ud, command::slot_select_ud_t::slot_next },
       nullptr,nullptr,nullptr, {},
     };
   };
@@ -950,8 +955,8 @@ Button Index mapping
 
     static constexpr const uint32_t app_version_major = 0;
     static constexpr const uint32_t app_version_minor = 6;
-    static constexpr const uint32_t app_version_patch = 2;
-    static constexpr const char app_version_string[] = "062";
+    static constexpr const uint32_t app_version_patch = 3;
+    static constexpr const char app_version_string[] = "063";
     static constexpr const uint32_t app_version_raw = app_version_major<<16|app_version_minor<<8|app_version_patch;
 
     static constexpr const char url_manual[] = "https://kantan-play.com/core/manual/";
@@ -1116,6 +1121,8 @@ Button Index mapping
       { "sharp[dim]"   , { "♯ [ dim ]"      , nullptr              }, { command::chord_semitone, 2,                               command::chord_modifier, KANTANMusic_Modifier_dim  } },
       { "flat[m7_5]"   , { "♭ [ m7-5 ]"    , nullptr              }, { command::chord_semitone, 1,                               command::chord_modifier, KANTANMusic_Modifier_m7_5 } },
       { "sharp[m7_5]"  , { "♯ [ m7-5 ]"     , nullptr              }, { command::chord_semitone, 2,                               command::chord_modifier, KANTANMusic_Modifier_m7_5 } },
+      { "slot -1"      , { "Slot -1"       , "スロット -1"          }, { command::slot_select_ud  , command::slot_select_ud_t::slot_prev } },
+      { "slot +1"      , { "Slot +1"       , "スロット +1"          }, { command::slot_select_ud  , command::slot_select_ud_t::slot_next } },
       { nullptr        , nullptr                                   , {} },
     };
     static constexpr const control_assignment_t external_table[] = {
@@ -1245,6 +1252,8 @@ Button Index mapping
       { "p4_edit"      , { "Part 4 Edit"    , "パート4 編集"       }, { command::part_edit, 4 } },
       { "p5_edit"      , { "Part 5 Edit"    , "パート5 編集"       }, { command::part_edit, 5 } },
       { "p6_edit"      , { "Part 6 Edit"    , "パート6 編集"       }, { command::part_edit, 6 } },
+      { "slot -1"      , { "Slot -1"       , "スロット -1"          }, { command::slot_select_ud  , command::slot_select_ud_t::slot_prev } },
+      { "slot +1"      , { "Slot +1"       , "スロット +1"          }, { command::slot_select_ud  , command::slot_select_ud_t::slot_next } },
       { ""             , { "---"            , nullptr             }, {} },
       { nullptr        , nullptr                                   , {} },
     };
