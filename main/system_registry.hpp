@@ -527,6 +527,7 @@ protected:
             setMessage((status | channel), note, value & 0x7F);
         }
         void setProgramChange(uint8_t channel, uint8_t value) {
+            _program_number[channel] = value;
             uint8_t status = 0xC0;
             setMessage((status | channel), value);
         }
@@ -535,8 +536,18 @@ protected:
             setMessage((status | channel), control, value);
         }
         void setChannelVolume(uint8_t channel, uint8_t value) {
+            _channel_volume[channel] = value;
             setControlChange(channel, 7, value);
         }
+        uint8_t getProgramChange(uint8_t channel) const {
+            return _program_number[channel];
+        }
+        uint8_t getChannelVolume(uint8_t channel) const {
+            return _channel_volume[channel];
+        }
+    protected:
+        uint8_t _channel_volume[def::midi::channel_max] = { 0, };
+        uint8_t _program_number[def::midi::channel_max] = { 0, };
     } midi_out_control;
 
     // コード演奏アルペジオパターン

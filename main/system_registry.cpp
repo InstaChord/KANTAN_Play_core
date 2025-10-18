@@ -262,8 +262,8 @@ void system_registry_t::reset(void)
 
     command_mapping_midicc16.reset();
     static constexpr const note_cp_t cc16_cp_table[] = {
-      {  2, { def::command::slot_select_ud  ,  1 } },
-      {  3, { def::command::slot_select_ud  , -1 } },
+      {  2, { def::command::slot_select_ud  , def::command::slot_select_ud_t::slot_next } },
+      {  3, { def::command::slot_select_ud  , def::command::slot_select_ud_t::slot_prev } },
       {  7, { def::command::internal_button , 21 } },
       {  8, { def::command::internal_button , 27 } },
       {  9, { def::command::chord_semitone  ,  1 } },

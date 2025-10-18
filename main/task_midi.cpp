@@ -80,9 +80,6 @@ public:
     bool prev_tx_enable = false;
     bool prev_rx_enable = false;
     uint8_t prev_slot_key = 255;
-    uint8_t channel_volume[def::midi::channel_max] = { 0, };
-    uint8_t program_number[def::midi::channel_max] = { 0, };
-    memset(channel_volume, 100, sizeof(channel_volume));
 
     uint8_t tx_count = 0;
     uint8_t rx_count = 0;
@@ -185,8 +182,17 @@ public:
       bool queued = false;
       if (prev_tx_enable != tx_enable) {
         prev_tx_enable = tx_enable;
-        prev_midi_volume = 255;
+        if (tx_enable) {
+          prev_midi_volume = 255;
+          prev_slot_key = 255;
+          history_code_midi_out = system_registry.midi_out_control.getHistoryCode();
+          for (int i = 0; i < 16; ++i) { // CC#120はすべてのMIDI音を停止する
+            midi->sendControlChange(def::midi::channel_1 + i, 120, 0);
+          }
+          queued = true;
+        }
       }
+
       if (tx_enable) {
         if (me->_flg_instachord_link)
         { // InstaChord連携モードのときは、かんぷれ側のキー変更をインスタコード側に反映する
@@ -206,59 +212,39 @@ public:
           auto midi_volume = system_registry.user_setting.getMIDIMasterVolume();
           if (prev_midi_volume != midi_volume) {
             prev_midi_volume = midi_volume;
-            
+
             // マスターボリューム設定
             midi->sendControlChange(def::midi::channel_1, 99, 55);
             midi->sendControlChange(def::midi::channel_1, 98,  7);
             midi->sendControlChange(def::midi::channel_1,  6, midi_volume);
             for (int i = 0; i < 16; ++i) {
               // チャンネルボリュームおよびプログラムチェンジを設定
-              uint8_t vol = channel_volume[i];
+              uint8_t vol = system_registry.midi_out_control.getChannelVolume(i);
+              uint8_t prg = system_registry.midi_out_control.getProgramChange(i);
               midi->sendControlChange(def::midi::channel_1 + i, 7, vol);
-              uint8_t prg = program_number[i];
               midi->sendProgramChange(def::midi::channel_1 + i, prg);
   // printf("MIDI Channel %d Volume: %d, Program: %d\n", i, vol, prg);
   // fflush(stdout);
             }
             queued = true;
           }
-        }
-      }
-      const registry_t::history_t* history;
-      while (nullptr != (history = system_registry.midi_out_control.getHistory(history_code_midi_out))) {
-        uint8_t status = history->index & 0xFF;
-        uint8_t midi_ch = status & 0x0F;
-        uint8_t data1 = history->value & 0xFF;
-        uint8_t data2 = (history->value >> 8) & 0xFF;
-        bool send = true;
-        switch (status & 0xF0) {
-        case 0xB0: // Control Change
-          if (data1 == 7) { // Channel Volume
-            send = channel_volume[midi_ch] != data2;
-            channel_volume[midi_ch] = data2;
-          }
-          break;
 
-        case 0xC0: // Program Change
-          send = program_number[midi_ch] != data1;
-          program_number[midi_ch] = data1;
-          break;
-
-        default:
-          break;
-        }
-        if (send) {
-          if (tx_enable && (!me->_flg_instachord_link || me->_flg_instachord_out)) {
+          const registry_t::history_t* history;
+          while (nullptr != (history = system_registry.midi_out_control.getHistory(history_code_midi_out))) {
+            uint8_t status = history->index & 0xFF;
+            uint8_t midi_ch = status & 0x0F;
+            uint8_t data1 = history->value & 0xFF;
+            uint8_t data2 = (history->value >> 8) & 0xFF;
             midi->sendMessage(status, data1, data2);
             queued = true;
           }
         }
-      }
-      if (queued) {
-        // MIDI送信バッファをフラッシュ
-        if (midi->sendFlush()) {
-          tx_count++;
-        };
+        if (queued) {
+          // MIDI送信バッファをフラッシュ
+          if (midi->sendFlush()) {
+            tx_count++;
+          };
+        }
       }
 
       switch (me->_task_status_index) {

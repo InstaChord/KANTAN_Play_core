@@ -1234,16 +1234,15 @@ struct ui_main_buttons_t : public ui_base_t
           }
         }
 
-        if (pindex != 0) {
-          for (auto data: def::command::button_text_table) {
-            if (data.command == cp_pair) {
-              name = data.text;
-              _text_lower[i] = data.lower;
-              _text_upper[i] = data.upper;
-              break;
-            }
+        for (auto data: def::command::button_text_table) {
+          if (data.command == cp_pair) {
+            name = data.text;
+            _text_lower[i] = data.lower;
+            _text_upper[i] = data.upper;
+            break;
           }
-        } else {
+        }
+        if (pindex == 0) {
           switch (command) {
           default:
             break;

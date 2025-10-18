@@ -399,7 +399,11 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
       // パターン編集モードの場合、スロット切替を許可しない
       if (system_registry.runtime_info.getPlayMode() != def::playmode::playmode_t::chord_edit_mode) {
         auto slot_index = (int)system_registry.runtime_info.getPlaySlot();
-        slot_index += param;  // paramは-1,1のいずれか
+        switch (param) {
+        case def::command::slot_select_ud_t::slot_next:  slot_index += 1; break;
+        case def::command::slot_select_ud_t::slot_prev:  slot_index -= 1; break;
+        default: break;
+        }
         // スロット番号を範囲内に収まるようループさせる
         while (slot_index < 0) {
           slot_index += def::app::max_slot;
@@ -636,6 +640,9 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
             }
           }
           system_registry.syncParams();
+
+          // 演奏の強制停止処理を入れておく
+          system_registry.player_command.addQueue( { def::command::play_control, def::command::play_control_t::pc_panic_stop } );
         }
         break;
 
