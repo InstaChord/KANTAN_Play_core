@@ -913,7 +913,7 @@ public:
 };
 static ui_midiport_info_t ui_midiport_info;
 
-struct ui_icon_sequance_play_t : public ui_base_t
+struct ui_icon_auto_play_t : public ui_base_t
 {
 protected:
   def::play::auto_play_mode_t _autoplay_style;
@@ -966,7 +966,7 @@ public:
     }
   }
 };
-static ui_icon_sequance_play_t ui_icon_sequance_play;
+static ui_icon_auto_play_t ui_icon_auto_play;
 
 struct ui_song_modified_t : public ui_base_t
 {
@@ -3208,8 +3208,8 @@ void gui_t::init(void)
   ui_wifi_sta_info.setClientRect(r);
   ui_wifi_ap_info.setTargetRect(r);
   ui_wifi_ap_info.setClientRect(r);
-  ui_icon_sequance_play.setTargetRect(r);
-  ui_icon_sequance_play.setClientRect(r);
+  ui_icon_auto_play.setTargetRect(r);
+  ui_icon_auto_play.setClientRect(r);
   ui_midiport_info.setTargetRect(r);
   ui_midiport_info.setClientRect(r);
 
@@ -3252,7 +3252,7 @@ void gui_t::init(void)
   ui_left_icon_container.addChild(&ui_song_modified);
   ui_left_icon_container.addChild(&ui_filename);
 
-  ui_right_icon_container.addChild(&ui_icon_sequance_play);  
+  ui_right_icon_container.addChild(&ui_icon_auto_play);  
   ui_right_icon_container.addChild(&ui_midiport_info);
   ui_right_icon_container.addChild(&ui_wifi_ap_info);
   ui_right_icon_container.addChild(&ui_wifi_sta_info);
