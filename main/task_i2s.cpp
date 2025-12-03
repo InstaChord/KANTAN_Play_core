@@ -21,10 +21,11 @@
 namespace kanplay_ns {
 //-------------------------------------------------------------------------
 
+static constexpr const uint16_t i2s_dma_frame_num = 96;
+
 #if !defined (M5UNIFIED_PC_BUILD)
 
 static constexpr const i2s_port_t i2s_port = I2S_NUM_1;
-static constexpr const uint16_t i2s_dma_frame_num = 96;
 static constexpr const uint16_t i2s_dma_desc_num = 4;
 
 static const size_t overwrap = 0;
@@ -150,7 +151,7 @@ static esp_err_t _i2s_read(void* buf, size_t len, size_t* result, TickType_t tic
 #endif
 
 static int32_t* bufdata = nullptr;
-static constexpr const size_t buf_size = (overwrap + i2s_dma_frame_num) * sizeof(int32_t);
+static constexpr const size_t buf_size = (i2s_dma_frame_num) * sizeof(int32_t);
 
 bool task_i2s_t::start(void)
 {

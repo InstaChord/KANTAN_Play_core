@@ -17,38 +17,19 @@ static int _input_number_result;
 static menu_item_ptr_array getMenuArray(def::menu_category_t category);
 
 // 指定したメニューの直属の親階層のインデックスを取得する
-static uint8_t getParentIndex(const menu_item_ptr_array &menu, uint8_t child_index)
+static size_t getParentIndex(const menu_item_ptr_array &menu, size_t child_index)
 {
-  uint8_t target_level = menu[child_index]->getLevel();
-  for (uint8_t i = child_index; i > 0; --i) {
+  auto target_level = menu[child_index]->getLevel();
+  for (size_t i = child_index; i > 0; --i) {
     if (menu[i]->getLevel() < target_level) {
       return i;
     }
   }
   return 0;
 }
-/*
+
 // 指定したメニューの直下の子階層インデックスリストを取得する
-static size_t getSubMenuIndexList(uint8_t* index_list, const menu_item_ptr_array &menu, size_t size, uint8_t parent_index)
-{
-  size_t i = 0;
-  // 親階層よりひとつ深い階層のメニューを探索ターゲットとする
-  auto target_level = 1 + menu[parent_index]->getLevel();
-  for (size_t j = parent_index + 1; menu[j] != nullptr; ++j) {
-    // 目的の階層より浅い階層のメニューが見つかったら終了
-    if (menu[j]->getLevel() < target_level) { break; }
-    // 目的の階層より深い階層のメニューは無視
-    if (menu[j]->getLevel() > target_level) { continue; }
-    index_list[i++] = j;
-    if (i >= size) { break; }
-// M5_LOGV("getSubMenuIndexList: %d", j);
-  }
-  // 取得した数を返す
-  return i;
-}
-//*/
-// 指定したメニューの直下の子階層インデックスリストを取得する
-static int getSubMenuIndexList(std::vector<uint16_t> *index_list, const menu_item_ptr_array &menu, uint8_t parent_index)
+static int getSubMenuIndexList(std::vector<uint16_t> *index_list, const menu_item_ptr_array &menu, size_t parent_index)
 {
   int result = 0;
   // 親階層よりひとつ深い階層のメニューを探索ターゲットとする
@@ -70,15 +51,15 @@ static int getSubMenuIndexList(std::vector<uint16_t> *index_list, const menu_ite
 
 bool menu_item_t::exit(void) const
 {
-  if (_seq == 0) {
+  if (_menu_id == 0) {
     return false;
   }
   auto array = getMenuArray(_category);
 
-  uint8_t parent_index = getParentIndex(array, _seq);
+  auto parent_index = getParentIndex(array, _menu_id);
   auto level = array[parent_index]->getLevel();
   system_registry.menu_status.setCurrentLevel(level);
-  system_registry.menu_status.setCurrentSequence(parent_index);
+  system_registry.menu_status.setCurrentMenuID(parent_index);
   return true;
 }
 
@@ -87,27 +68,27 @@ bool menu_item_t::enter(void) const
   _input_number_result = 0;
   auto array = getMenuArray(_category);
 
-  system_registry.menu_status.setSelectIndex(_level - 1, _seq);
+  system_registry.menu_status.setSelectIndex(_level - 1, _menu_id);
   system_registry.menu_status.setCurrentLevel(_level);
-  system_registry.menu_status.setCurrentSequence(_seq);
-  if (array[_seq + 1] != nullptr && _level + 1 == array[_seq + 1]->getLevel()) {
-    system_registry.menu_status.setSelectIndex(_level, _seq + 1);
+  system_registry.menu_status.setCurrentMenuID(_menu_id);
+  if (array[_menu_id + 1] != nullptr && _level + 1 == array[_menu_id + 1]->getLevel()) {
+    system_registry.menu_status.setSelectIndex(_level, _menu_id + 1);
     return true;
   }
-  system_registry.menu_status.setSelectIndex(_level, _seq);
+  system_registry.menu_status.setSelectIndex(_level, _menu_id);
   return false;
 }
 
 struct mi_tree_t : public menu_item_t {
-  constexpr mi_tree_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : menu_item_t { cate, seq, level, title } {}
+  constexpr mi_tree_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : menu_item_t { cate, menu_id, level, title } {}
 
   menu_item_type_t getType(void) const override { return menu_item_type_t::mt_tree; }
 
   size_t getSelectorCount(void) const override {
     auto array = getMenuArray(_category);
 
-    return getSubMenuIndexList(nullptr, array, _seq);
+    return getSubMenuIndexList(nullptr, array, _menu_id);
   }
 
   bool inputNumber(uint8_t number) const override
@@ -115,7 +96,7 @@ struct mi_tree_t : public menu_item_t {
     auto array = getMenuArray(_category);
 
     std::vector<uint16_t> child_list;
-    auto child_count = getSubMenuIndexList(&child_list, array, _seq);
+    auto child_count = getSubMenuIndexList(&child_list, array, _menu_id);
     int max_value = child_count + getMinValue();
 
     int tmp = (_input_number_result * 10) + number;
@@ -153,7 +134,7 @@ struct mi_tree_t : public menu_item_t {
     auto array = getMenuArray(_category);
 
     std::vector<uint16_t> child_list;
-    auto child_count = getSubMenuIndexList(&child_list, array, _seq);
+    auto child_count = getSubMenuIndexList(&child_list, array, _menu_id);
 
     if (!child_count) { return false; }
 
@@ -185,8 +166,8 @@ protected:
 };
 
 struct mi_normal_t : public menu_item_t {
-  constexpr mi_normal_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : menu_item_t { cate, seq, level, title } {}
+  constexpr mi_normal_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : menu_item_t { cate, menu_id, level, title } {}
 
   menu_item_type_t getType(void) const override { return menu_item_type_t::mt_normal; }
 
@@ -254,8 +235,8 @@ int mi_normal_t::_selecting_value = 0;
 
 
 struct mi_selector_t : public mi_normal_t {
-  constexpr mi_selector_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title, const text_array_t* names)
-  : mi_normal_t { cate, seq, level, title }
+  constexpr mi_selector_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, const text_array_t* names)
+  : mi_normal_t { cate, menu_id, level, title }
   , _names { names }
   {}
 
@@ -279,8 +260,8 @@ protected:
   }};
 
 public:
-  constexpr mi_language_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array } {}
+  constexpr mi_language_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array } {}
 
   int getValue(void) const override
   {
@@ -305,8 +286,8 @@ protected:
   }};
 
 public:
-  constexpr mi_imu_velocity_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array } {}
+  constexpr mi_imu_velocity_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array } {}
 
   int getValue(void) const override
   {
@@ -332,14 +313,14 @@ protected:
   }};
 
 public:
-  constexpr mi_brightness_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array } {}
+  constexpr mi_brightness_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array } {}
 };
 
 struct mi_lcd_backlight_t : public mi_brightness_t {
 public:
-  constexpr mi_lcd_backlight_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_brightness_t { cate, seq, level, title } {}
+  constexpr mi_lcd_backlight_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_brightness_t { cate, menu_id, level, title } {}
   int getValue(void) const override
   {
     return getMinValue() + system_registry.user_setting.getDisplayBrightness();
@@ -355,8 +336,8 @@ public:
 
 struct mi_led_brightness_t : public mi_brightness_t {
 public:
-  constexpr mi_led_brightness_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_brightness_t { cate, seq, level, title } {}
+  constexpr mi_led_brightness_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_brightness_t { cate, menu_id, level, title } {}
   int getValue(void) const override
   {
     return getMinValue() + system_registry.user_setting.getLedBrightness();
@@ -372,8 +353,8 @@ public:
 };
 
 struct mi_vol_midi_t : public mi_normal_t {
-  constexpr mi_vol_midi_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_normal_t { cate, seq, level, title }
+  constexpr mi_vol_midi_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_normal_t { cate, menu_id, level, title }
   {}
 protected:
   int getMinValue(void) const override { return 10; }
@@ -406,8 +387,8 @@ protected:
 };
 
 struct mi_vol_adcmic_t : public mi_normal_t {
-  constexpr mi_vol_adcmic_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_normal_t { cate, seq, level, title }
+  constexpr mi_vol_adcmic_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_normal_t { cate, menu_id, level, title }
   {}
 protected:
   int getMinValue(void) const override { return 0; }
@@ -447,8 +428,8 @@ protected:
   }};
 
 public:
-  constexpr mi_detail_view_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array } {}
+  constexpr mi_detail_view_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array } {}
 
   int getValue(void) const override
   {
@@ -471,14 +452,14 @@ protected:
   }};
 
 public:
-  constexpr mi_enable_selector_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array } {}
+  constexpr mi_enable_selector_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array } {}
 };
 
 struct mi_wave_view_t : public mi_enable_selector_t {
 public:
-  constexpr mi_wave_view_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_enable_selector_t { cate, seq, level, title } {}
+  constexpr mi_wave_view_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_enable_selector_t { cate, menu_id, level, title } {}
 
   int getValue(void) const override
   {
@@ -496,8 +477,8 @@ public:
 
 struct mi_webserver_t : public mi_enable_selector_t {
 public:
-  constexpr mi_webserver_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_enable_selector_t { cate, seq, level, title } {}
+  constexpr mi_webserver_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_enable_selector_t { cate, menu_id, level, title } {}
 
   int getValue(void) const override
   {
@@ -515,8 +496,8 @@ public:
 /*
 struct mi_usewifi_t : public mi_enable_selector_t {
 public:
-  constexpr mi_usewifi_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_enable_selector_t { cate, seq, level, title } {}
+  constexpr mi_usewifi_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_enable_selector_t { cate, menu_id, level, title } {}
 
   int getValue(void) const override
   {
@@ -540,8 +521,8 @@ protected:
   }};
 
 public:
-  constexpr mi_all_reset_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array } {}
+  constexpr mi_all_reset_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array } {}
 
   const char* getValueText(void) const override { return "..."; }
 
@@ -565,8 +546,8 @@ public:
   
 #if 0
 struct mi_intvalue_t : public mi_normal_t {
-  constexpr mi_intvalue_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title, const int16_t min_value, const int16_t max_value, const int16_t step)
-  : mi_normal_t { cate, seq, level, title }
+  constexpr mi_intvalue_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, const int16_t min_value, const int16_t max_value, const int16_t step)
+  : mi_normal_t { cate, menu_id, level, title }
   , _min_value { min_value }
   , _max_value { max_value }
   , _step { step }
@@ -604,8 +585,8 @@ protected:
 #endif
 
 struct mi_program_t : public mi_selector_t {
-  constexpr mi_program_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &def::midi::program_name_table }
+  constexpr mi_program_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &def::midi::program_name_table }
   {}
 protected:
   int getValue(void) const override
@@ -624,8 +605,8 @@ protected:
 };
 
 struct mi_octave_t : public mi_normal_t {
-  constexpr mi_octave_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_normal_t { cate, seq, level, title }
+  constexpr mi_octave_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_normal_t { cate, menu_id, level, title }
   {}
 protected:
   const char* getSelectorText(size_t index) const override {
@@ -654,8 +635,8 @@ protected:
 };
 
 struct mi_voicing_t : public mi_normal_t {
-  constexpr mi_voicing_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_normal_t { cate, seq, level, title }
+  constexpr mi_voicing_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_normal_t { cate, menu_id, level, title }
   {}
 protected:
   const char* getSelectorText(size_t index) const override {
@@ -684,8 +665,8 @@ protected:
 };
 
 struct mi_clear_notes_t : public mi_normal_t {
-  constexpr mi_clear_notes_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_normal_t { cate, seq, level, title }
+  constexpr mi_clear_notes_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_normal_t { cate, menu_id, level, title }
   {}
 protected:
   const char* getValueText(void) const override { return "..."; }
@@ -720,14 +701,14 @@ struct mi_percent_t : public mi_selector_t {
     "85%",  "90%",  "95%", "100%",
   }};
 
-  constexpr mi_percent_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array }
+  constexpr mi_percent_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array }
   {}
 };
 
 struct mi_partvolume_t : public mi_percent_t {
-  constexpr mi_partvolume_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_percent_t { cate, seq, level, title}
+  constexpr mi_partvolume_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_percent_t { cate, menu_id, level, title}
   {}
 protected:
   int getValue(void) const override
@@ -754,8 +735,8 @@ struct mi_velocity_t : public mi_selector_t {
     "85%",  "90%",  "95%", "100%",
   }};
 
-  constexpr mi_velocity_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array }
+  constexpr mi_velocity_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array }
   {}
 
 protected:
@@ -782,14 +763,14 @@ struct mi_arpeggio_step_t : public mi_selector_t {
     "25", "26", "27", "28", "29", "30", "31", "32",
   }};
 
-  constexpr mi_arpeggio_step_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array }
+  constexpr mi_arpeggio_step_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array }
   {}
 };
 
 struct mi_loop_length_t : public mi_arpeggio_step_t {
-  constexpr mi_loop_length_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_arpeggio_step_t { cate, seq, level, title }
+  constexpr mi_loop_length_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_arpeggio_step_t { cate, menu_id, level, title }
   {}
 protected:
   int getValue(void) const override
@@ -807,8 +788,8 @@ protected:
 };
 
 struct mi_anchor_step_t : public mi_arpeggio_step_t {
-  constexpr mi_anchor_step_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_arpeggio_step_t { cate, seq, level, title }
+  constexpr mi_anchor_step_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_arpeggio_step_t { cate, menu_id, level, title }
   {}
 protected:
   int getValue(void) const override
@@ -832,8 +813,8 @@ struct mi_stroke_speed_t : public mi_selector_t {
     "45 msec", "50 msec"
   }};
 
-  constexpr mi_stroke_speed_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array }
+  constexpr mi_stroke_speed_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array }
   {}
 protected:
   int getValue(void) const override
@@ -856,8 +837,8 @@ struct mi_offbeat_style_t : public mi_selector_t {
     { "Self", "手動" },
   }};
 
-  constexpr mi_offbeat_style_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array }
+  constexpr mi_offbeat_style_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array }
   {}
 
   int getValue(void) const override
@@ -884,8 +865,8 @@ struct mi_slot_playmode_t : public mi_selector_t {
     { "Drum Mode",  "ドラム" },
   }};
 
-  constexpr mi_slot_playmode_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array }
+  constexpr mi_slot_playmode_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array }
   {}
 
   int getValue(void) const override
@@ -918,8 +899,8 @@ struct mi_slot_key_t : public mi_selector_t {
     "+ 9", "+ 10","+ 11"
   }};
 
-  constexpr mi_slot_key_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array }
+  constexpr mi_slot_key_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array }
   {}
 
   int getValue(void) const override
@@ -942,8 +923,8 @@ struct mi_slot_step_beat_t : public mi_selector_t {
     "1", "2", "3", "4"
   }};
 
-  constexpr mi_slot_step_beat_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array }
+  constexpr mi_slot_step_beat_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array }
   {}
 
   int getValue(void) const override
@@ -964,8 +945,8 @@ struct mi_song_step_beat_t : public mi_selector_t {
     "1", "2", "3", "4", "Each"
   }};
 
-  constexpr mi_song_step_beat_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array }
+  constexpr mi_song_step_beat_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array }
   {}
 
   int getValue(void) const override
@@ -1008,8 +989,8 @@ struct mi_slot_clipboard_t : public mi_selector_t {
 
   const char* getValueText(void) const override { return "..."; }
 
-  constexpr mi_slot_clipboard_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array }
+  constexpr mi_slot_clipboard_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array }
   {}
 
   bool execute(void) const override
@@ -1051,8 +1032,8 @@ struct mi_part_clipboard_t : public mi_selector_t {
 
   const char* getValueText(void) const override { return "..."; }
 
-  constexpr mi_part_clipboard_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array }
+  constexpr mi_part_clipboard_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array }
   {}
 
   bool execute(void) const override
@@ -1084,8 +1065,8 @@ struct mi_part_clipboard_t : public mi_selector_t {
 };
 
 struct mi_song_tempo_t : public mi_normal_t {
-  constexpr mi_song_tempo_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_normal_t { cate, seq, level, title }
+  constexpr mi_song_tempo_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_normal_t { cate, menu_id, level, title }
   {}
 protected:
   int getMinValue(void) const override { return def::app::tempo_bpm_min; }
@@ -1126,8 +1107,8 @@ protected:
 };
 
 struct mi_song_swing_t : public mi_normal_t {
-  constexpr mi_song_swing_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_normal_t { cate, seq, level, title }
+  constexpr mi_song_swing_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_normal_t { cate, menu_id, level, title }
   {}
 protected:
   int getMinValue(void) const override { return def::app::swing_percent_min; }
@@ -1167,8 +1148,8 @@ protected:
 };
 
 struct mi_drum_note_t : public mi_selector_t {
-  constexpr mi_drum_note_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title, uint8_t pitch_number )
-  : mi_selector_t { cate, seq, level, title, &def::midi::drum_note_name_tbl } // 35 = Acoustic Bass Drum, 81 = Open Triangle
+  constexpr mi_drum_note_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, uint8_t pitch_number )
+  : mi_selector_t { cate, menu_id, level, title, &def::midi::drum_note_name_tbl } // 35 = Acoustic Bass Drum, 81 = Open Triangle
   , _pitch_number { pitch_number }
   {}
 protected:
@@ -1193,8 +1174,8 @@ protected:
 
 
 struct mi_ctrl_assign_t : public mi_normal_t {
-  constexpr mi_ctrl_assign_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title, const def::ctrl_assign::control_assignment_t table[], size_t size)
-  : mi_normal_t { cate, seq, level, title }
+  constexpr mi_ctrl_assign_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, const def::ctrl_assign::control_assignment_t table[], size_t size)
+  : mi_normal_t { cate, menu_id, level, title }
   , _table { table }
   , _size { size }
   {}
@@ -1215,8 +1196,8 @@ protected:
 // control assignment for internal
 struct mi_ca_internal_t : public mi_ctrl_assign_t {
 public:
-  constexpr mi_ca_internal_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title, uint8_t button_index)
-  : mi_ctrl_assign_t { cate, seq, level, title, def::ctrl_assign::playbutton_table, sizeof(def::ctrl_assign::playbutton_table) / sizeof(def::ctrl_assign::playbutton_table[0])-1 }
+  constexpr mi_ca_internal_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, uint8_t button_index)
+  : mi_ctrl_assign_t { cate, menu_id, level, title, def::ctrl_assign::playbutton_table, sizeof(def::ctrl_assign::playbutton_table) / sizeof(def::ctrl_assign::playbutton_table[0])-1 }
   , _button_index { button_index } {}
 
   int getValue(void) const override
@@ -1243,8 +1224,8 @@ protected:
 // control assignment for internal
 struct mi_ca_external_t : public mi_ctrl_assign_t {
 public:
-  constexpr mi_ca_external_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title, uint8_t button_index)
-  : mi_ctrl_assign_t { cate, seq, level, title, def::ctrl_assign::external_table, sizeof(def::ctrl_assign::external_table) / sizeof(def::ctrl_assign::external_table[0])-1 }
+  constexpr mi_ca_external_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, uint8_t button_index)
+  : mi_ctrl_assign_t { cate, menu_id, level, title, def::ctrl_assign::external_table, sizeof(def::ctrl_assign::external_table) / sizeof(def::ctrl_assign::external_table[0])-1 }
   , _button_index { button_index } {}
 
   int getValue(void) const override
@@ -1270,8 +1251,8 @@ protected:
 
 struct mi_ca_midinote_t : public mi_ctrl_assign_t {
 public:
-  constexpr mi_ca_midinote_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title, uint8_t button_index)
-  : mi_ctrl_assign_t { cate, seq, level, title, def::ctrl_assign::external_table, sizeof(def::ctrl_assign::external_table) / sizeof(def::ctrl_assign::external_table[0])-1 }
+  constexpr mi_ca_midinote_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, uint8_t button_index)
+  : mi_ctrl_assign_t { cate, menu_id, level, title, def::ctrl_assign::external_table, sizeof(def::ctrl_assign::external_table) / sizeof(def::ctrl_assign::external_table[0])-1 }
   , _button_index { button_index } {}
 
   int getValue(void) const override
@@ -1305,13 +1286,13 @@ protected:
   }};
 
 public:
-  constexpr mi_midi_selector_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array } {}
+  constexpr mi_midi_selector_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array } {}
 };
 
 struct mi_portc_midi_t : public mi_midi_selector_t {
-  constexpr mi_portc_midi_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_midi_selector_t { cate, seq, level, title } {}
+  constexpr mi_portc_midi_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_midi_selector_t { cate, menu_id, level, title } {}
   int getValue(void) const override
   {
     return getMinValue() + system_registry.midi_port_setting.getPortCMIDI();
@@ -1326,8 +1307,8 @@ struct mi_portc_midi_t : public mi_midi_selector_t {
 };
 
 struct mi_ble_midi_t : public mi_midi_selector_t {
-  constexpr mi_ble_midi_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_midi_selector_t { cate, seq, level, title } {}
+  constexpr mi_ble_midi_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_midi_selector_t { cate, menu_id, level, title } {}
   int getValue(void) const override
   {
     return getMinValue() + system_registry.midi_port_setting.getBLEMIDI();
@@ -1342,8 +1323,8 @@ struct mi_ble_midi_t : public mi_midi_selector_t {
 };
 
 struct mi_usb_midi_t : public mi_midi_selector_t {
-  constexpr mi_usb_midi_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_midi_selector_t { cate, seq, level, title } {}
+  constexpr mi_usb_midi_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_midi_selector_t { cate, menu_id, level, title } {}
   int getValue(void) const override
   {
     return getMinValue() + system_registry.midi_port_setting.getUSBMIDI();
@@ -1365,8 +1346,8 @@ protected:
   }};
 
 public:
-  constexpr mi_usb_mode_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array } {}
+  constexpr mi_usb_mode_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array } {}
   int getValue(void) const override
   {
     return getMinValue() + system_registry.midi_port_setting.getUSBMode();
@@ -1388,8 +1369,8 @@ protected:
   }};
 
 public:
-  constexpr mi_usb_power_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array } {}
+  constexpr mi_usb_power_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array } {}
   int getValue(void) const override
   {
     return getMinValue() + system_registry.midi_port_setting.getUSBPowerEnabled();
@@ -1412,8 +1393,8 @@ protected:
   }};
 
 public:
-  constexpr mi_iclink_port_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array } {}
+  constexpr mi_iclink_port_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array } {}
   int getValue(void) const override
   {
     return getMinValue() + system_registry.midi_port_setting.getInstaChordLinkPort();
@@ -1435,8 +1416,8 @@ protected:
   }};
 
 public:
-  constexpr mi_iclink_dev_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array } {}
+  constexpr mi_iclink_dev_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array } {}
   int getValue(void) const override
   {
     return getMinValue() + system_registry.midi_port_setting.getInstaChordLinkDev();
@@ -1458,8 +1439,8 @@ protected:
   }};
 
 public:
-  constexpr mi_iclink_style_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array } {}
+  constexpr mi_iclink_style_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array } {}
   int getValue(void) const override
   {
     return getMinValue() + system_registry.midi_port_setting.getInstaChordLinkStyle();
@@ -1474,8 +1455,8 @@ public:
 };
 
 struct mi_otaupdate_t : public mi_normal_t {
-  constexpr mi_otaupdate_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_normal_t { cate, seq, level, title } {}
+  constexpr mi_otaupdate_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_normal_t { cate, menu_id, level, title } {}
   menu_item_type_t getType(void) const override { return menu_item_type_t::show_progress; }
 
   bool setSelectingValue(int value) const override { return false; }
@@ -1536,8 +1517,8 @@ protected:
   }};
 
 public:
-  constexpr mi_wifiap_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_selector_t { cate, seq, level, title, &name_array } {}
+  constexpr mi_wifiap_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array } {}
 
   const char* getValueText(void) const override { return "..."; }
 
@@ -1581,8 +1562,8 @@ public:
 };
 
 struct mi_manual_qr_t : public mi_normal_t {
-  constexpr mi_manual_qr_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : mi_normal_t { cate, seq, level, title } {}
+  constexpr mi_manual_qr_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_normal_t { cate, menu_id, level, title } {}
 
   const char* getValueText(void) const override { return "..."; }
   const char* getSelectorText(size_t index) const override { return _title.get(); }
@@ -1605,8 +1586,8 @@ struct mi_manual_qr_t : public mi_normal_t {
 
 static std::string _tmp_filename;
 struct mi_filelist_t : public mi_normal_t {
-  constexpr mi_filelist_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title, def::app::data_type_t dir_type )
-  : mi_normal_t { cate, seq, level, title }
+  constexpr mi_filelist_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, def::app::data_type_t dir_type )
+  : mi_normal_t { cate, menu_id, level, title }
   , _dir_type { dir_type }
   {}
 protected:
@@ -1644,8 +1625,8 @@ protected:
 };
 
 struct mi_load_file_t : public mi_filelist_t {
-  constexpr mi_load_file_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title, def::app::data_type_t dir_type, size_t top_index = 1 )
-  : mi_filelist_t { cate, seq, level, title, dir_type }
+  constexpr mi_load_file_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, def::app::data_type_t dir_type, size_t top_index = 1 )
+  : mi_filelist_t { cate, menu_id, level, title, dir_type }
   , _top_index { top_index }
   {
   }
@@ -1679,8 +1660,8 @@ protected:
 };
 
 struct mi_save_t : public mi_normal_t {
-  constexpr mi_save_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title, def::app::data_type_t dir_type )
-  : mi_normal_t { cate, seq, level, title }
+  constexpr mi_save_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, def::app::data_type_t dir_type )
+  : mi_normal_t { cate, menu_id, level, title }
   , _dir_type { dir_type }
   {}
   static constexpr const size_t max_filenames = 4;
@@ -2030,8 +2011,8 @@ bool menu_control_t::enter(void)
 {
   auto current_level = system_registry.menu_status.getCurrentLevel();
   auto select_index = system_registry.menu_status.getSelectIndex(current_level);
-  auto current_seq = system_registry.menu_status.getCurrentSequence();
-  if (current_seq == select_index) {
+  auto current_menu_id = system_registry.menu_status.getCurrentMenuID();
+  if (current_menu_id == select_index) {
     return _menu_array[select_index]->execute();
   }
   return _menu_array[select_index]->enter();
@@ -2039,29 +2020,24 @@ bool menu_control_t::enter(void)
 
 bool menu_control_t::exit(void)
 {
-  auto current_index = system_registry.menu_status.getCurrentSequence();
+  auto current_index = system_registry.menu_status.getCurrentMenuID();
   return _menu_array[current_index]->exit();
 }
 
 bool menu_control_t::inputNumber(uint8_t number)
 {
-  auto current_index = system_registry.menu_status.getCurrentSequence();
+  auto current_index = system_registry.menu_status.getCurrentMenuID();
   return _menu_array[current_index]->inputNumber(number);
 }
 
 bool menu_control_t::inputUpDown(int updown)
 {
-  auto current_index = system_registry.menu_status.getCurrentSequence();
+  auto current_index = system_registry.menu_status.getCurrentMenuID();
 
   return _menu_array[current_index]->inputUpDown(updown);
 }
 
-// size_t menu_control_t::getChildrenSequenceList(uint8_t* index_list, size_t size, uint8_t parent_index)
-// {
-//   return getSubMenuIndexList(index_list, _menu_array, size, parent_index);
-// }
-
-int menu_control_t::getChildrenSequenceList(std::vector<uint16_t>* index_list, uint8_t parent_index)
+int menu_control_t::getChildrenMenuIDList(std::vector<uint16_t>* index_list, uint16_t parent_index)
 {
   return getSubMenuIndexList(index_list, _menu_array, parent_index);
 }
@@ -2069,14 +2045,14 @@ int menu_control_t::getChildrenSequenceList(std::vector<uint16_t>* index_list, u
 #if defined ( M5UNIFIED_PC_BUILD )
 // メニューの定義部に間違いがないか確認する関数
 // PCビルド時のみ有効
-static bool menu_seq_check(const menu_item_ptr_array &menu)
+static bool menu_id_check(const menu_item_ptr_array &menu)
 {
   auto cat = menu[0]->getCategory();
   for (size_t i = 0; menu[i] != nullptr; ++i) {
     if (menu[i]->getCategory() != cat) {
       return false;
     }
-    if (menu[i]->getSequence() != i) {
+    if (menu[i]->getMenuID() != i) {
       return false;
     }
   }
@@ -2087,9 +2063,9 @@ static bool menu_seq_check(const menu_item_ptr_array &menu)
 static menu_item_ptr_array getMenuArray(def::menu_category_t category)
 {
 #if defined ( M5UNIFIED_PC_BUILD )
-  assert(menu_seq_check(menu_system) && "menu_system definition error");
-  assert(menu_seq_check(menu_part) && "menu_part definition error");
-  assert(menu_seq_check(menu_file) && "menu_file definition error");
+  assert(menu_id_check(menu_system) && "menu_system definition error");
+  assert(menu_id_check(menu_part) && "menu_part definition error");
+  assert(menu_id_check(menu_file) && "menu_file definition error");
 #endif
 
   switch (category) {

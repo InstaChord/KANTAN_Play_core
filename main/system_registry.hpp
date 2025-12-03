@@ -1127,8 +1127,8 @@ protected:
         enum index_t : uint16_t {
           CURRENT_LEVEL,
           MENU_CATEGORY,
-          CURRENT_SEQUENCE_L,
-          CURRENT_SEQUENCE_H,
+          CURRENT_MENU_ID_L,
+          CURRENT_MENU_ID_H,
           SELECT_INDEX_LEVEL_0L,
           SELECT_INDEX_LEVEL_0H,
           SELECT_INDEX_LEVEL_1L,
@@ -1143,8 +1143,8 @@ protected:
         void reset(void) { for (int i = 0; i < 16; ++i) { set8(i, 0); } }
         void setCurrentLevel(uint8_t level) { set8(CURRENT_LEVEL, level); }
         uint8_t getCurrentLevel(void) const { return get8(CURRENT_LEVEL); }
-        void setCurrentSequence(uint16_t seq) { set16(CURRENT_SEQUENCE_L, seq); }
-        uint16_t getCurrentSequence(void) const { return get16(CURRENT_SEQUENCE_L); }
+        void setCurrentMenuID(uint16_t menu_id) { set16(CURRENT_MENU_ID_L, menu_id); }
+        uint16_t getCurrentMenuID(void) const { return get16(CURRENT_MENU_ID_L); }
         void setMenuCategory(uint8_t index) {
             assert(index < 8 && "Menu category index is out of range.");
             set8(MENU_CATEGORY, index);

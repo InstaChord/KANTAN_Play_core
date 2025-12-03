@@ -76,19 +76,19 @@ void registry_base_t::init(bool psram)
 void registry_base_t::_addHistory(uint16_t index, uint32_t value, data_size_t data_size)
 {
   uint16_t history_index = _history_code & 0xFFFF;
-  uint8_t history_seq = _history_code >> 16;
+  uint8_t history_uid = _history_code >> 16;
   if (_history != nullptr) {
     _history[history_index].value = value;
     _history[history_index].index = index;
     _history[history_index].data_size = data_size;
-    _history[history_index].seq = history_seq;
+    _history[history_index].uid = history_uid;
   }
   if (++history_index >= _history_count)
   {
     history_index = 0;
-    history_seq++;
+    history_uid++;
   }
-  _history_code = history_index | history_seq << 16;
+  _history_code = history_index | history_uid << 16;
 }
 
 
@@ -103,16 +103,16 @@ const registry_base_t::history_t* registry_base_t::getHistory(history_code_t &co
     M5_LOGE("history index out of range : %d", index);
     return nullptr;
   }
-  uint8_t seq = code >> 16;
-  if (seq != _history[index].seq) {
-    M5_LOGW("history seq looping : request:%08x  seq:%d  data seq:%d", code, seq, _history[index].seq);
+  uint8_t uid = code >> 16;
+  if (uid != _history[index].uid) {
+    M5_LOGW("history uid looping : request:%08x  uid:%d  data uid:%d", code, uid, _history[index].uid);
   }
   auto res = &_history[index];
   if (++index >= _history_count) {
     index = 0;
-    ++seq;
+    ++uid;
   }
-  code = index | (seq << 16);
+  code = index | (uid << 16);
   return res;
 }
 

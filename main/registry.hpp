@@ -27,7 +27,7 @@ public:
     uint32_t value = 0;
     uint16_t index = 0;
     data_size_t data_size = DATA_NONE;
-    uint8_t seq = 0;
+    uint8_t uid = 0;
   };
 
   typedef uint32_t history_code_t;

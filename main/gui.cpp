@@ -2498,9 +2498,9 @@ static ui_menu_header_t ui_menu_header;
 struct menu_drawer_t
 {
   static constexpr const int scroll_gap = 32;
-  menu_drawer_t(uint8_t menu_index, menu_item_ptr menu_item)
-  : _menu_index { menu_index }
-  , _menu_item { menu_item }
+  menu_drawer_t(uint16_t menu_index, menu_item_ptr menu_item)
+  : _menu_item { menu_item }
+  , _menu_index { menu_index }
   {}
 
   virtual void update(ui_base_t* ui, draw_param_t *param, int offset_x, int offset_y)
@@ -2567,10 +2567,10 @@ struct menu_drawer_t
       , 0x808080u);
   }
 protected:
-  uint8_t _menu_index = 0;
   menu_item_ptr _menu_item = nullptr;
   rect_t _current_focus_rect;
   rect_t _target_focus_rect;
+  uint16_t _menu_index = 0;
   int16_t _y_scroll = 0;
   int16_t _scroll_limit = 0;
 };
@@ -2584,7 +2584,7 @@ protected:
   int16_t _stored_pos = -1;
   bool _draw_index = true;
 public:
-  menu_drawer_list_t(uint8_t menu_index, menu_item_ptr menu_item)
+  menu_drawer_list_t(uint16_t menu_index, menu_item_ptr menu_item)
   : menu_drawer_t(menu_index, menu_item)
   {
     _min_value = menu_item->getMinValue();
@@ -2665,22 +2665,15 @@ protected:
   uint8_t _level;
 
 public:
-  menu_drawer_tree_t(uint8_t menu_index, menu_item_ptr menu_item)
+  menu_drawer_tree_t(uint16_t menu_index, menu_item_ptr menu_item)
   : menu_drawer_list_t(menu_index, menu_item)
   {
     _level = menu_item->getLevel();
-    std::vector<uint16_t> seq_list;
-    _childrens_count = menu_control.getChildrenSequenceList(&seq_list, menu_index);
+    std::vector<uint16_t> menu_id_list;
+    _childrens_count = menu_control.getChildrenMenuIDList(&menu_id_list, menu_index);
     for (int i = 0; i < _childrens_count; ++i) {
-      _item_array.push_back(menu_control.getItemBySequance(seq_list[i]));
+      _item_array.push_back(menu_control.getItemByMenuID(menu_id_list[i]));
     }
-/*
-uint8_t seq_list[max_children_size];
-_childrens_count = menu_control.getChildrenSequenceList(seq_list, max_children_size, menu_index);
-for (int i = 0; i < _childrens_count; ++i) {
-  _item_array[i] = menu_control.getItemBySequance(seq_list[i]);
-}
-*/
   }
 
   void update(ui_base_t* ui, draw_param_t *param, int offset_x, int offset_y) override
@@ -2690,7 +2683,7 @@ for (int i = 0; i < _childrens_count; ++i) {
       _history_code = code;
 
       auto focus_index = system_registry.menu_status.getSelectIndex(_level);
-      auto focus_item = menu_control.getItemBySequance(focus_index);
+      auto focus_item = menu_control.getItemByMenuID(focus_index);
 
       for (int i = 0; i < _childrens_count; ++i) {
         auto item = _item_array[i];
@@ -2712,7 +2705,7 @@ struct menu_drawer_normal_t : public menu_drawer_list_t
 protected:
   size_t _count;
 public:
-  menu_drawer_normal_t(uint8_t menu_index, menu_item_ptr menu_item)
+  menu_drawer_normal_t(uint16_t menu_index, menu_item_ptr menu_item)
   : menu_drawer_list_t(menu_index, menu_item)
   {
     _count = menu_item->getSelectorCount();
@@ -2742,7 +2735,7 @@ public:
 
 struct menu_drawer_input_number_t : public menu_drawer_normal_t
 {
-  menu_drawer_input_number_t(uint8_t menu_index, menu_item_ptr menu_item)
+  menu_drawer_input_number_t(uint16_t menu_index, menu_item_ptr menu_item)
   : menu_drawer_normal_t(menu_index, menu_item)
   {}
 };
@@ -2755,7 +2748,7 @@ struct menu_drawer_qrcode_t : public menu_drawer_t
   int8_t _current_scale = 0;
   int8_t _target_scale = 0;
 public:
-  menu_drawer_qrcode_t(uint8_t menu_index, menu_item_ptr menu_item)
+  menu_drawer_qrcode_t(uint16_t menu_index, menu_item_ptr menu_item)
   : menu_drawer_t(menu_index, menu_item)
   {
     _qr_canvas.setColorDepth(1);
@@ -2798,7 +2791,7 @@ struct menu_drawer_progress_t : public menu_drawer_t
   uint16_t _value = UINT16_MAX;
   std::string _text;
 public:
-  menu_drawer_progress_t(uint8_t menu_index, menu_item_ptr menu_item)
+  menu_drawer_progress_t(uint16_t menu_index, menu_item_ptr menu_item)
   : menu_drawer_t(menu_index, menu_item)
   {}
 
@@ -2875,7 +2868,7 @@ protected:
                       : -main_area_width;
 
       auto current_index = _level ? system_registry.menu_status.getSelectIndex(_level - 1) : 0;
-      auto menu_item = menu_control.getItemBySequance(current_index);
+      auto menu_item = menu_control.getItemByMenuID(current_index);
       if (menu_item) {
         switch (menu_item->getType()) {
         default:
