@@ -182,7 +182,7 @@ protected:
 
     // 実行時に変化する保存されない情報 (設定画面が存在しない可変情報)
     struct reg_runtime_info_t : public registry_t {
-        reg_runtime_info_t(void) : registry_t(40, 0, DATA_SIZE_8) {}
+        reg_runtime_info_t(void) : registry_t(44, 0, DATA_SIZE_8) {}
         enum index_t : uint16_t {
             PART_EFFECT_1,
             PART_EFFECT_2,
@@ -224,6 +224,9 @@ protected:
             MIDI_RX_COUNT_BLE,
             MIDI_TX_COUNT_USB,
             MIDI_RX_COUNT_USB,
+            CHORD_MINOR_SWAP_PRESS_COUNT,
+            CHORD_SEMITONE_FLAT_PRESS_COUNT,
+            CHORD_SEMITONE_SHARP_PRESS_COUNT,
         };
 
         // 音が鳴ったパートへの発光エフェクト設定
@@ -296,6 +299,9 @@ protected:
             switch (getSequenceMode()) {
             case def::seqmode::seq_song_edit:
                 return def::playmode::seq_edit_mode;
+            case def::seqmode::seq_auto_song:
+            case def::seqmode::seq_guide_play:
+                return def::playmode::seq_play_mode;
             default:
                 break;
             }
@@ -327,8 +333,15 @@ protected:
             auto res = def::play::auto_play_mode_t::auto_play_none;
             if (seq == def::seqmode::seq_beat_play || seq == def::seqmode::seq_auto_song) {
                 res = (def::play::auto_play_mode_t)get8(CHORD_AUTOPLAY_STATE);
+                // ビート演奏モードと自動演奏モード時はnoneは無効化してwaitingにする
                 if (res == def::play::auto_play_mode_t::auto_play_none) {
                     res = def::play::auto_play_mode_t::auto_play_waiting;
+                }
+            } else if (seq == def::seqmode::seq_guide_play || seq == def::seqmode::seq_song_edit) {
+                res = (def::play::auto_play_mode_t)get8(CHORD_AUTOPLAY_STATE);
+                // ガイド演奏モードとシーケンス編集モード時はビートモード以外は無効化
+                if (res != def::play::auto_play_mode_t::auto_play_beatmode) {
+                    res = def::play::auto_play_mode_t::auto_play_none;
                 }
             }
             return res;
@@ -394,6 +407,34 @@ protected:
         // 現在のシーケンスのステップ位置
         uint16_t getSequenceStepIndex(void) const { return get16(SEQUENCE_STEP_L); }
         void setSequenceStepIndex(uint16_t step_index) { set16(SEQUENCE_STEP_L, step_index); }
+
+        void addChordMinorSwapPressCount(int count) {
+            count += get8(CHORD_MINOR_SWAP_PRESS_COUNT);
+            if (count < 0) { count = 0; } else if (count > 255) { count = 255; }
+            set8(CHORD_MINOR_SWAP_PRESS_COUNT, count);
+        }
+        void clearChordMinorSwapPressCount(void) { set8(CHORD_MINOR_SWAP_PRESS_COUNT, 0); }
+        uint8_t getChordMinorSwapPressCount(void) const { return get8(CHORD_MINOR_SWAP_PRESS_COUNT); }
+        void addChordSemitoneFlatPressCount(int count) {
+            count += get8(CHORD_SEMITONE_FLAT_PRESS_COUNT);
+            if (count < 0) { count = 0; } else if (count > 255) { count = 255; }
+            set8(CHORD_SEMITONE_FLAT_PRESS_COUNT, count);
+        }
+        void clearChordSemitoneFlatPressCount(void) { set8(CHORD_SEMITONE_FLAT_PRESS_COUNT, 0); }
+        uint8_t getChordSemitoneFlatPressCount(void) const { return get8(CHORD_SEMITONE_FLAT_PRESS_COUNT); }
+        void addChordSemitoneSharpPressCount(int count) {
+            count += get8(CHORD_SEMITONE_SHARP_PRESS_COUNT);
+            if (count < 0) { count = 0; } else if (count > 255) { count = 255; }
+            set8(CHORD_SEMITONE_SHARP_PRESS_COUNT, count);
+        }
+        void clearChordSemitoneSharpPressCount(void) { set8(CHORD_SEMITONE_SHARP_PRESS_COUNT, 0); }
+        uint8_t getChordSemitoneSharpPressCount(void) const { return get8(CHORD_SEMITONE_SHARP_PRESS_COUNT); }
+        int getChordSemitoneShift(void) {
+            int res = 0;
+            if (get8(CHORD_SEMITONE_FLAT_PRESS_COUNT)) { --res; }
+            if (get8(CHORD_SEMITONE_SHARP_PRESS_COUNT)) { ++res; }
+            return res;
+        }
     } runtime_info;
 
     struct reg_popup_notify_t : public registry_t {
@@ -562,7 +603,7 @@ protected:
     // MIDI出力コントロール
     struct reg_midi_out_control_t : public registry_base_t {
         // 読み出しには非対応、値をセットすると履歴として取得できる
-        reg_midi_out_control_t(void) : registry_base_t(128) {}
+        reg_midi_out_control_t(void) : registry_base_t(256) {}
 
         void setMessage(uint8_t status, uint8_t data1, uint8_t data2 = 0) {
             set16(status, data1 + (data2 << 8), true);
@@ -572,6 +613,7 @@ protected:
             setMessage((status | channel), note, value & 0x7F);
         }
         void setProgramChange(uint8_t channel, uint8_t value) {
+            if (_program_number[channel] == value) { return; }
             _program_number[channel] = value;
             uint8_t status = 0xC0;
             setMessage((status | channel), value);
@@ -581,6 +623,7 @@ protected:
             setMessage((status | channel), control, value);
         }
         void setChannelVolume(uint8_t channel, uint8_t value) {
+            if (_channel_volume[channel] == value) { return; }
             _channel_volume[channel] = value;
             setControlChange(channel, 7, value);
         }
@@ -591,8 +634,8 @@ protected:
             return _channel_volume[channel];
         }
     protected:
-        uint8_t _channel_volume[def::midi::channel_max] = { 0, };
-        uint8_t _program_number[def::midi::channel_max] = { 0, };
+        uint8_t _channel_volume[def::midi::channel_max] = { 255, 255, 255, 255,  255, 255, 255, 255,  255, 255, 255, 255,  255, 255, 255, 255 };
+        uint8_t _program_number[def::midi::channel_max] = { 255, 255, 255, 255,  255, 255, 255, 255,  255, 255, 255, 255,  255, 255, 255, 255 };
     } midi_out_control;
 
     // コード演奏アルペジオパターン
@@ -863,12 +906,12 @@ protected:
         KANTANMusic_Modifier getChordModifier(void) const { return (KANTANMusic_Modifier)get8(CHORD_MODIFIER); }
         void setChordMinorSwap(uint8_t swap) { set8(CHORD_MINOR_SWAP, swap); }
         uint8_t getChordMinorSwap(void) const { return get8(CHORD_MINOR_SWAP); }
-        void setChordSemitone(int semitone) { set8(CHORD_SEMITONE, semitone); }
-        int getChordSemitone(void) const { return (int8_t)get8(CHORD_SEMITONE); }
+        void setChordSemitoneShift(int semitone) { set8(CHORD_SEMITONE, semitone); }
+        int getChordSemitoneShift(void) const { return (int8_t)get8(CHORD_SEMITONE); }
         void setChordBassDegree(uint8_t degree) { set8(CHORD_BASS_DEGREE, degree); }
         uint8_t getChordBassDegree(void) const { return get8(CHORD_BASS_DEGREE); }
-        void setChordBassSemitone(int semitone) { set8(CHORD_BASS_SEMITONE, semitone); }
-        int getChordBassSemitone(void) const { return (int8_t)get8(CHORD_BASS_SEMITONE); }
+        void setChordBassSemitoneShift(int semitone) { set8(CHORD_BASS_SEMITONE, semitone); }
+        int getChordBassSemitoneShift(void) const { return (int8_t)get8(CHORD_BASS_SEMITONE); }
         void setPartStep(uint8_t part_index, int8_t step) { set8(PART_1_STEP + part_index, step); }
         int8_t getPartStep(uint8_t part_index) const { return get8(PART_1_STEP + part_index); }
         void setPartEnable(uint8_t part_index, uint8_t enable) { set8(PART_1_ENABLE + part_index, enable); }
@@ -1031,11 +1074,11 @@ protected:
         }
     };
 
-    struct reg_command_request_t : public registry_t {
+    struct reg_command_request_t : public registry_base_t {
 #if __has_include (<freertos/FreeRTOS.h>)
-        using registry_t::setNotifyTaskHandle;
+        using registry_base_t::setNotifyTaskHandle;
 #endif
-        reg_command_request_t(void) : registry_t(4, 64, DATA_SIZE_16) {}
+        reg_command_request_t(void) : registry_base_t(64) {}
         enum index_t : uint16_t {
             COMMAND_RELEASED = 0,
             COMMAND_PRESSED = 2,
@@ -1048,10 +1091,10 @@ protected:
             *is_pressed = history->index == COMMAND_PRESSED;
             return true;
         }
-        void addQueue(const def::command::command_param_t& command_param, bool is_pressed)
+        void addQueue(const def::command::command_param_t& command_param, bool is_pressed = true)
         { set16(is_pressed ? COMMAND_PRESSED : COMMAND_RELEASED, command_param.raw, true); }
 
-        void addQueue(const def::command::command_param_t& command_param) {
+        void addQueueW(const def::command::command_param_t& command_param) {
             addQueue(command_param, true);
             addQueue(command_param, false);
         }

@@ -1227,7 +1227,7 @@ struct ui_main_buttons_t : public ui_base_t
     uint8_t play_mode = system_registry.runtime_info.getCurrentMode();
     uint8_t master_key = system_registry.runtime_info.getMasterKey();
     uint8_t minor_swap = system_registry.chord_play.getChordMinorSwap();
-    int8_t semitone = system_registry.chord_play.getChordSemitone();
+    int8_t semitone = system_registry.chord_play.getChordSemitoneShift();
     uint8_t modifier = system_registry.chord_play.getChordModifier();
     int8_t offset_key = system_registry.current_slot->slot_info.getKeyOffset();
 
@@ -2447,6 +2447,7 @@ protected:
       case def::playmode::note_mode:
       case def::playmode::drum_mode:
       case def::playmode::seq_edit_mode:
+      case def::playmode::seq_play_mode:
         setTargetRect({0, header_height, main_area_width, main_area_height}); // TODO: 仮の値
         break;
 

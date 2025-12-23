@@ -76,6 +76,8 @@ public:
     auto midi = &(me->_midi);
     registry_t::history_code_t history_code_midi_out = 0;
     uint32_t prev_on_beat_msec = 0;
+    degree_param_t prev_on_beat_degree;
+    degree_param_t on_beat_degree;
     uint8_t prev_midi_volume = 0;
     bool prev_tx_enable = false;
     bool prev_rx_enable = false;
@@ -134,6 +136,9 @@ public:
                   velocity = 127;
                 } else if (channel == 0x0F) {
                   command_param_array = system_registry.command_mapping_midicc16.getCommandParamArray(control);
+                  if (command_param_array.array[0].getCommand() == def::command::chord_degree) {
+                    on_beat_degree = command_param_array.array[0].getParam();
+                  }
                 }
               }
             }
@@ -158,9 +163,11 @@ public:
                 uint32_t diff_msec = (msec - prev_on_beat_msec);
                 prev_on_beat_msec = msec;
                 // 100msec以内の連続したオンビートはキャンセルする(暫定実装)
-                if (diff_msec >= 100) {
+                // ※ Degreeが変化した場合はキャンセルしない
+                if (diff_msec >= 100 || prev_on_beat_degree.getDegree() != on_beat_degree.getDegree()) {
                   system_registry.operator_command.addQueue( { def::command::chord_beat, 0 }, true );
                 }
+                prev_on_beat_degree = on_beat_degree;
               }
             }
           }

@@ -243,18 +243,18 @@ void system_registry_t::reset(void)
       { 57, { def::command::chord_minor_swap, 1 } },
       { 58, { def::command::chord_modifier  , KANTANMusic_Modifier_Add9 } },
       { 59, { def::command::chord_modifier  , KANTANMusic_Modifier_M7 } },
-      { 60, {                                  def::command::chord_degree, 1 } },
-      { 61, { def::command::chord_semitone, 1, def::command::chord_degree, 2 } },
-      { 62, {                                  def::command::chord_degree, 2 } },
-      { 63, { def::command::chord_semitone, 1, def::command::chord_degree, 3 } },
-      { 64, {                                  def::command::chord_degree, 3 } },
-      { 65, {                                  def::command::chord_degree, 4 } },
-      { 66, { def::command::chord_semitone, 1, def::command::chord_degree, 5 } },
-      { 67, {                                  def::command::chord_degree, 5 } },
-      { 68, { def::command::chord_semitone, 1, def::command::chord_degree, 6 } },
-      { 69, {                                  def::command::chord_degree, 6 } },
-      { 70, { def::command::chord_semitone, 1, def::command::chord_degree, 7 } },
-      { 71, {                                  def::command::chord_degree, 7 } },
+      { 60, { def::command::chord_degree, make_degree(1, false               ) } },
+      { 61, { def::command::chord_degree, make_degree(2, false, semitone_flat) } },
+      { 62, { def::command::chord_degree, make_degree(2, false               ) } },
+      { 63, { def::command::chord_degree, make_degree(3, false, semitone_flat) } },
+      { 64, { def::command::chord_degree, make_degree(3, false               ) } },
+      { 65, { def::command::chord_degree, make_degree(4, false               ) } },
+      { 66, { def::command::chord_degree, make_degree(5, false, semitone_flat) } },
+      { 67, { def::command::chord_degree, make_degree(5, false               ) } },
+      { 68, { def::command::chord_degree, make_degree(6, false, semitone_flat) } },
+      { 69, { def::command::chord_degree, make_degree(6, false               ) } },
+      { 70, { def::command::chord_degree, make_degree(7, false, semitone_flat) } },
+      { 71, { def::command::chord_degree, make_degree(7, false               ) } },
     };
     for (const auto& cp : note_cp_table) {
       command_mapping_midinote.setCommandParamArray(cp.note, cp.command_param);
@@ -262,6 +262,7 @@ void system_registry_t::reset(void)
   }
 
   { // InstaChord連携用のコントロールチェンジへの機能マッピング
+    // CC15: キーチェンジ
     command_mapping_midicc15.reset();
     static constexpr const note_cp_t cc15_cp_table[] = {
       {  0, { def::command::target_key_set  ,  0 } },
@@ -281,39 +282,44 @@ void system_registry_t::reset(void)
       command_mapping_midicc15.setCommandParamArray(cp.note, cp.command_param);
     }
 
+    // CC16: 演奏操作
     command_mapping_midicc16.reset();
     static constexpr const note_cp_t cc16_cp_table[] = {
-      {  2, { def::command::slot_select_ud  , def::command::slot_select_ud_t::slot_next } },
-      {  3, { def::command::slot_select_ud  , def::command::slot_select_ud_t::slot_prev } },
-      {  7, { def::command::internal_button , 21 } },
-      {  8, { def::command::internal_button , 27 } },
-      {  9, { def::command::chord_semitone  ,  1 } },
-      { 10, { def::command::chord_minor_swap,  1 } },
-      { 11, { def::command::chord_modifier  , KANTANMusic_Modifier_m7_5 } },
-      { 12, { def::command::chord_modifier  , KANTANMusic_Modifier_7    } },
-      { 13, { def::command::chord_modifier  , KANTANMusic_Modifier_M7   } },
-      { 14, { def::command::chord_modifier  , KANTANMusic_Modifier_sus4 } },
-      { 15, { def::command::chord_modifier  , KANTANMusic_Modifier_dim  } },
-      { 16, { def::command::chord_modifier  , KANTANMusic_Modifier_Add9 } },
-      { 17, { def::command::chord_modifier  , KANTANMusic_Modifier_aug  } },
-      { 18, { def::command::chord_degree    ,  1 } },
-      { 19, { def::command::chord_degree    ,  2 } },
-      { 20, { def::command::chord_degree    ,  3 } },
-      { 21, { def::command::chord_degree    ,  4 } },
-      { 22, { def::command::chord_degree    ,  5 } },
-      { 23, { def::command::chord_degree    ,  6 } },
-      { 24, { def::command::chord_degree    ,  7 } },
-      { 25, { def::command::chord_semitone  ,  1 , def::command::chord_degree, 3 } },
-      { 26, { def::command::chord_semitone  ,  1 , def::command::chord_degree, 7 } },
-      { 27, { def::command::chord_degree    ,  6 } },
-      { 28, { def::command::chord_degree    ,  7 } },
-      { 29, { def::command::chord_degree    ,  1 } },
-      { 30, { def::command::chord_degree    ,  2 } },
-      { 31, { def::command::chord_minor_swap,  1 , def::command::chord_degree, 3 } },
-      { 32, { def::command::chord_degree    ,  4 } },
-      { 33, { def::command::chord_degree    ,  5 } },
-      { 34, { def::command::chord_semitone  ,  1 , def::command::chord_degree, 3 } },
-      { 35, { def::command::chord_semitone  ,  1 , def::command::chord_degree, 7 } },
+//    {  1,                                                                               }, // 十字ボタン中央  
+      {  2, { def::command::slot_select_ud  , def::command::slot_select_ud_t::slot_next } }, // 十字ボタン上(楽器順送り)
+      {  3, { def::command::slot_select_ud  , def::command::slot_select_ud_t::slot_prev } }, // 十字ボタン下(楽器逆送り)
+//    {  4,                                                                               }, // 十字ボタン♭  
+//    {  5,                                                                               }, // 十字ボタン＃  
+//    {  6,                                                                               }, // 21ボタン pos  
+      {  7, { def::command::internal_button , 21                                   } }, // 21ボタン menu
+      {  8, { def::command::internal_button , 27                                   } }, // 21ボタン key
+      {  9, { def::command::chord_semitone  ,  1                                   } }, // 21ボタン ♭
+      { 10, { def::command::chord_minor_swap,  1                                   } }, // 21ボタン ～
+      { 11, { def::command::chord_modifier  , KANTANMusic_Modifier_m7_5            } }, // 21ボタン コード種 m7-5
+      { 12, { def::command::chord_modifier  , KANTANMusic_Modifier_7               } }, // 21ボタン コード種 7
+      { 13, { def::command::chord_modifier  , KANTANMusic_Modifier_M7              } }, // 21ボタン コード種 M7
+      { 14, { def::command::chord_modifier  , KANTANMusic_Modifier_sus4            } }, // 21ボタン コード種 sus4
+      { 15, { def::command::chord_modifier  , KANTANMusic_Modifier_dim             } }, // 21ボタン コード種 dim
+      { 16, { def::command::chord_modifier  , KANTANMusic_Modifier_Add9            } }, // 21ボタン コード種 add9
+      { 17, { def::command::chord_modifier  , KANTANMusic_Modifier_aug             } }, // 21ボタン コード種 aug
+      { 18, { def::command::chord_degree    , make_degree(1                      ) } }, // 21ボタン ルート根1
+      { 19, { def::command::chord_degree    , make_degree(2                      ) } }, // 21ボタン ルート根2
+      { 20, { def::command::chord_degree    , make_degree(3                      ) } }, // 21ボタン ルート根3
+      { 21, { def::command::chord_degree    , make_degree(4                      ) } }, // 21ボタン ルート根4
+      { 22, { def::command::chord_degree    , make_degree(5                      ) } }, // 21ボタン ルート根5
+      { 23, { def::command::chord_degree    , make_degree(6                      ) } }, // 21ボタン ルート根6
+      { 24, { def::command::chord_degree    , make_degree(7                      ) } }, // 21ボタン ルート根7
+      { 25, { def::command::chord_degree    , make_degree(3, false, semitone_flat) } }, // 21ボタン ルート根8
+      { 26, { def::command::chord_degree    , make_degree(7, false, semitone_flat) } }, // 21ボタン ルート根9
+      { 27, { def::command::chord_degree    , make_degree(6                      ) } }, // 21ボタン ルート根1(短調モード時)
+      { 28, { def::command::chord_degree    , make_degree(7                      ) } }, // 21ボタン ルート根2(短調モード時)
+      { 29, { def::command::chord_degree    , make_degree(1                      ) } }, // 21ボタン ルート根3(短調モード時)
+      { 30, { def::command::chord_degree    , make_degree(2                      ) } }, // 21ボタン ルート根4(短調モード時)
+      { 31, { def::command::chord_degree    , make_degree(3, true                ) } }, // 21ボタン ルート根5(短調モード時)
+      { 32, { def::command::chord_degree    , make_degree(4                      ) } }, // 21ボタン ルート根6(短調モード時)
+      { 33, { def::command::chord_degree    , make_degree(5                      ) } }, // 21ボタン ルート根7(短調モード時)
+      { 34, { def::command::chord_degree    , make_degree(3, false, semitone_flat) } }, // 21ボタン ルート根8(短調モード時)
+      { 35, { def::command::chord_degree    , make_degree(7, false, semitone_flat) } }, // 21ボタン ルート根9(短調モード時)
     };
     for (const auto& cp : cc16_cp_table) {
       command_mapping_midicc16.setCommandParamArray(cp.note, cp.command_param);

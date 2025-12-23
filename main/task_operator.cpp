@@ -304,7 +304,10 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
     }
     break;
 
-  default: // 動作中コマンドの更新
+  case def::command::chord_bass_semitone:
+  case def::command::mapping_switch:
+  case def::command::chord_modifier:
+    // 動作中コマンドの更新
     if (is_pressed) {
       system_registry.working_command.set(command_param);
     } else {
@@ -312,11 +315,10 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
     }
     break;
 
-  case def::command::slot_select_ud:
-  case def::command::slot_select:  // スロット選択操作に関してはスロット変更関数の中で処理する。
-    break;
-
-  case def::command::chord_degree:  // Degree操作に関しては task_kanplay_t で処理する。
+  default: 
+  // case def::command::slot_select_ud:
+  // case def::command::slot_select:  // スロット選択操作に関してはスロット変更関数の中で処理する。
+  // case def::command::chord_degree:  // Degree操作に関しては task_kanplay_t で処理する。
     break;
   }
 
@@ -675,7 +677,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
           system_registry.clearUpdateSettingFlag();
 
           // 演奏の強制停止処理を入れておく
-          system_registry.player_command.addQueue( { def::command::play_control, def::command::play_control_t::pc_panic_stop } );
+          system_registry.player_command.addQueueW( { def::command::play_control, def::command::play_control_t::pc_panic_stop } );
         }
         break;
 
@@ -699,11 +701,9 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
     {
       int8_t target = system_registry.chord_play.getEditEnc2Target();
       if (is_pressed) {
-        system_registry.working_command.clear( { def::command::edit_enc2_target, target } );
         target = param;
         system_registry.chord_play.setEditEnc2Target(target);
       }
-      system_registry.working_command.set( { def::command::edit_enc2_target, target } );
     }
     break;
 
@@ -1098,7 +1098,21 @@ void task_operator_t::procChordModifier(const def::command::command_param_t& com
 
 void task_operator_t::procChordMinorSwap(const def::command::command_param_t& command_param, const bool is_pressed)
 {
-  system_registry.chord_play.setChordMinorSwap(system_registry.working_command.check( { def::command::chord_minor_swap, 1 } ));
+  system_registry.runtime_info.addChordMinorSwapPressCount( is_pressed ? 3 : -4);
+
+  bool prev_value = system_registry.chord_play.getChordMinorSwap();
+  bool value = system_registry.runtime_info.getChordMinorSwapPressCount() > 0;
+  if (prev_value != value)
+  {
+    system_registry.chord_play.setChordMinorSwap(value);
+    if (value) {
+      system_registry.working_command.set(  { def::command::chord_minor_swap, 1 } );
+    } else {
+      system_registry.working_command.clear({ def::command::chord_minor_swap, 1 } );
+    }
+  }
+
+  // system_registry.chord_play.setChordMinorSwap(system_registry.working_command.check( { def::command::chord_minor_swap, 1 } ));
   // system_registry.chord_play.setChordMinorSwap(is_pressed);
   // メジャー・マイナースワップボタンを押したタイミングでコード演奏のアルペジオパターン先頭にステップを戻す
   // system_registry.player_command.addQueue( { def::command::chord_step_reset_request, 1 } );
@@ -1106,10 +1120,36 @@ void task_operator_t::procChordMinorSwap(const def::command::command_param_t& co
 
 void task_operator_t::procChordSemitone(const def::command::command_param_t& command_param, const bool is_pressed)
 {
-  int value = 0;
-  if (system_registry.working_command.check( { def::command::chord_semitone, 1 } )) { --value; }
-  if (system_registry.working_command.check( { def::command::chord_semitone, 2 } )) { ++value; }
-  system_registry.chord_play.setChordSemitone(value);
+  switch (command_param.getParam()) {
+  case semitone_flat:  system_registry.runtime_info.addChordSemitoneFlatPressCount( is_pressed ? 3 : -4); break;
+  case semitone_sharp: system_registry.runtime_info.addChordSemitoneSharpPressCount(is_pressed ? 3 : -4); break;
+  default: break;
+  }
+  int value = system_registry.runtime_info.getChordSemitoneShift();
+  int prev_value = system_registry.chord_play.getChordSemitoneShift();
+
+  if (prev_value != value)
+  {
+    system_registry.chord_play.setChordSemitoneShift(value);
+    switch (value) {
+    case -1:
+      system_registry.working_command.set(  { def::command::chord_semitone, semitone_flat } );
+      system_registry.working_command.clear({ def::command::chord_semitone, semitone_sharp } );
+      break;
+    case 1:
+      system_registry.working_command.set(  { def::command::chord_semitone, semitone_sharp } );
+      system_registry.working_command.clear({ def::command::chord_semitone, semitone_flat } );
+      break;
+    default:
+      system_registry.working_command.clear({ def::command::chord_semitone, semitone_flat } );
+      system_registry.working_command.clear({ def::command::chord_semitone, semitone_sharp } );
+      break;
+    }
+  }
+
+  // if (system_registry.working_command.check( { def::command::chord_semitone, 1 } )) { --value; }
+  // if (system_registry.working_command.check( { def::command::chord_semitone, 2 } )) { ++value; }
+  // system_registry.chord_play.setChordSemitone(value);
   // 半音変更ボタンを操作したタイミングでコード演奏のアルペジオパターン先頭にステップを戻す
   // system_registry.player_command.addQueue( { def::command::chord_step_reset_request, 1 } );
 }
@@ -1142,7 +1182,7 @@ void task_operator_t::procChordBassSemitone(const def::command::command_param_t&
   int value = 0;
   if (system_registry.working_command.check( { def::command::chord_bass_semitone, 1 } )) { --value; }
   if (system_registry.working_command.check( { def::command::chord_bass_semitone, 2 } )) { ++value; }
-  system_registry.chord_play.setChordBassSemitone(value);
+  system_registry.chord_play.setChordBassSemitoneShift(value);
 }
 
 // スロット番号設定操作
@@ -1228,6 +1268,19 @@ void task_operator_t::changeCommandMapping(void)
     {
       static constexpr const def::command::command_param_array_t* tbl[] = {
         def::command::command_mapping_sequence_edit_table,
+        def::command::command_mapping_chord_alt1_table,
+        def::command::command_mapping_chord_alt2_table,
+        def::command::command_mapping_chord_alt3_table,
+      };
+      main_map = tbl[map_index];
+      custom_map = (map_index == 0);
+    }
+    break;
+
+  case def::playmode::playmode_t::seq_play_mode:
+    {
+      static constexpr const def::command::command_param_array_t* tbl[] = {
+        def::command::command_mapping_sequence_play_table,
         def::command::command_mapping_chord_alt1_table,
         def::command::command_mapping_chord_alt2_table,
         def::command::command_mapping_chord_alt3_table,
