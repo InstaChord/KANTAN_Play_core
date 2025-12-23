@@ -41,6 +41,7 @@ namespace kanplay_ns {
 system_registry_t system_registry;
 
 static std::set<def::command::command_param_t> working_command_param;
+// static std::map<def::command::command_param_t, uint16_t> working_command_counter;
 static std::mutex mtx_working_command_param;
 
 #if __has_include (<freertos/freertos.h>)
@@ -56,19 +57,37 @@ void system_registry_t::reg_working_command_t::setNotifyTaskHandle(TaskHandle_t 
 
 void system_registry_t::reg_working_command_t::set(const def::command::command_param_t& command_param)
 {
-  std::lock_guard<std::mutex> lock(mtx_working_command_param);
-   // M5_LOGV("set %04x", command_param);
-  working_command_param.insert(command_param);
-  ++_working_command_change_counter;
-  _execNotify();
+  bool notify = false;
+  {
+    // M5_LOGV("set %04x", command_param);
+    std::lock_guard<std::mutex> lock(mtx_working_command_param);
+    auto it = working_command_param.find(command_param);
+    if (it == working_command_param.end()) {
+      working_command_param.insert(command_param);
+      ++_working_command_change_counter;
+      notify = true;
+    }
+  }
+  if (notify) {
+    _execNotify();
+  }
 }
 void system_registry_t::reg_working_command_t::clear(const def::command::command_param_t& command_param)
 {
-  std::lock_guard<std::mutex> lock(mtx_working_command_param);
-  // M5_LOGV("clear %04x", command_param);
-  working_command_param.erase(command_param);
-  ++_working_command_change_counter;
-  _execNotify();
+  bool notify = false;
+  {
+    // M5_LOGV("clear %04x", command_param);
+    std::lock_guard<std::mutex> lock(mtx_working_command_param);
+    auto it = working_command_param.find(command_param);
+    if (it != working_command_param.end()) {
+      working_command_param.erase(it);
+      ++_working_command_change_counter;
+      notify = true;
+    }
+  }
+  if (notify) {
+    _execNotify();
+  }
 }
 bool system_registry_t::reg_working_command_t::check(const def::command::command_param_t& command_param) const
 {
@@ -113,6 +132,8 @@ void system_registry_t::init(void)
   clipboard_slot.init(true);
   clipboard_arpeggio.init(true);
   command_mapping_custom_main.init(true);
+  // sequence_play.init(true);
+  // current_sequence_timeline.init(true);
 
   // 設定値を読み込む
   load();
@@ -378,8 +399,20 @@ bool system_registry_t::saveResume(void)
 bool system_registry_t::save(void)
 {
   bool result = true;
-  result = saveSetting() & result;
-  result = saveResume() & result;
+  if (_update_setting_flag) {
+    if (saveSetting()) {
+      _update_setting_flag = false;
+    } else {
+      result = false;
+    }
+  }
+  if (_update_resume_flag) {
+    if (saveResume()) {
+      _update_resume_flag = false;
+    } else {
+      result = false;
+    }
+  }
   return result;
 }
 
@@ -422,8 +455,16 @@ bool system_registry_t::loadResume(void)
 bool system_registry_t::load(void)
 {
   bool result = true;
-  result = loadSetting() & result;
-  result = loadResume() & result;
+  if (loadSetting()) {
+    _update_setting_flag = false;
+  } else {
+    result = false;
+  }
+  if (loadResume()) {
+    _update_resume_flag = false;
+  } else {
+    result = false;
+  }
   return result;
 }
 
@@ -535,7 +576,7 @@ void system_registry_t::reg_task_status_t::setSuspend(bitindex_t index)
 
 void system_registry_t::reg_user_setting_t::setTimeZone15min(int8_t offset)
 {
-  set8(TIMEZONE, offset);
+  if (set8(TIMEZONE, offset)) { system_registry.setUpdateSettingFlag(); }
 #if !defined (M5UNIFIED_PC_BUILD)
   configTime(offset * 15 * 60, 0, def::ntp::server1, def::ntp::server2, def::ntp::server3);
 #endif
@@ -597,6 +638,7 @@ bool system_registry_t::saveSettingInternal(JsonVariant& json_root)
   {
     auto json = json_root["midi_port_setting"].to<JsonObject>();
     json["instachord_link_dev"] = (uint8_t)midi_port_setting.getInstaChordLinkDev();
+    json["instachord_link_style"] = (uint8_t)midi_port_setting.getInstaChordLinkStyle();
     json["usb_mode"] = (uint8_t)midi_port_setting.getUSBMode();
     json["usb_power"] = (uint8_t)midi_port_setting.getUSBPowerEnabled();
   }
@@ -678,6 +720,7 @@ bool system_registry_t::loadSettingInternal(JsonVariant& json_root)
   {
     auto json = json_root["midi_port_setting"].as<JsonObject>();
     midi_port_setting.setInstaChordLinkDev((def::command::instachord_link_dev_t)json["instachord_link_dev"      ].as<uint8_t>());
+    midi_port_setting.setInstaChordLinkStyle((def::command::instachord_link_style_t)json["instachord_link_style"].as<uint8_t>());
     midi_port_setting.setUSBMode((def::command::usb_mode_t)json["usb_mode"].as<uint8_t>());
     midi_port_setting.setUSBPowerEnabled(json["usb_power"].as<bool>());
   }
@@ -1169,12 +1212,186 @@ static def::playmode::playmode_t getPlayMode(const char* name)
   return def::playmode::playmode_t::chord_mode;
 }
 
+static int degree_param_to_str(const degree_param_t& param, char* buf, size_t bufsize)
+{
+  const char* semitone = "";
+  const char* swap = "";
+  switch (param.getSemitone()) {
+  case semitone_t::semitone_flat:  semitone = "b"; break;
+  case semitone_t::semitone_sharp: semitone = "#"; break;
+  default: break;
+  }
+  if (param.getMinorSwap()) swap = "~";
+  return snprintf(buf, bufsize, "%d%s%s", param.getDegree(), semitone, swap);
+}
+
+static void degree_param_from_str(const char* str, degree_param_t& param)
+{
+  param.setSemitone(semitone_t::semitone_none);
+  param.setMinorSwap(false);
+
+  int i = 0;
+  int degree = 0;
+  if (str[i] >= '0' && str[i] <= '9') {
+    degree = str[i] - '0';
+    ++i;
+  }
+  param.setDegree(degree);
+
+  auto semitone = semitone_t::semitone_none;
+  if (str[i] == 'b' || str[i] == '#') {
+    semitone = (str[i] == 'b') ? semitone_t::semitone_flat : semitone_t::semitone_sharp;
+    ++i;
+  }
+  param.setSemitone(semitone);
+
+  bool swap = (str[i] == '~');
+  param.setMinorSwap(swap);
+}
+
+bool system_registry_t::reg_sequence_timeline_t::saveJson(JsonVariant &json)
+{
+  char buf[32];
+  sequence_chord_desc_t prev_desc;
+  prev_desc.setSlotIndex(0xFF); // 強制的に最初のデータを保存させるため
+  for (const auto &pair : _data)
+  {
+    if (prev_desc == pair.second) { continue; }
+
+    itoa(pair.first, buf, 10);
+    auto obj = json[buf].to<JsonObject>();
+    degree_param_to_str(pair.second.main_degree, buf, sizeof(buf));
+    obj["main"] = buf;
+
+    {
+      auto modifier = pair.second.getModifier();
+      if (KANTANMusic_Modifier_None != modifier) {
+        obj["mod"] = def::command::command_name_table[def::command::chord_modifier][modifier];
+      }
+    }
+    if (0 != pair.second.bass_degree.raw) {
+      degree_param_to_str(pair.second.bass_degree, buf, sizeof(buf));
+      obj["bass"] = buf;
+    }
+    auto slot_index = pair.second.getSlotIndex();
+    if (prev_desc.getSlotIndex() != slot_index) {
+      obj["slot"] = slot_index;
+    }
+    if (prev_desc.getPartBits() != pair.second.getPartBits()) {
+      auto parts = obj["part"].to<JsonArray>();
+      for (int part_index = 0; part_index < def::app::max_chord_part; ++part_index)
+      {
+        if (pair.second.getPartEnable(part_index)) {
+          parts.add(part_index);
+        }
+      }
+    }
+    prev_desc = pair.second;
+  }
+  return true;
+}
+
+bool system_registry_t::reg_sequence_timeline_t::loadJson(const JsonVariant &json)
+{
+  decltype(_data) tmpdata;
+
+  sequence_chord_desc_t desc;
+  for (auto kvp : json.as<JsonObject>())
+  {
+    uint_fast16_t step = atoi(kvp.key().c_str());
+    auto obj = kvp.value().as<JsonObject>();
+
+    {
+      const char* main_str = obj["main"].as<const char*>();
+      if (main_str != nullptr) {
+        degree_param_from_str(main_str, desc.main_degree);
+      }
+    }
+    {
+      desc.bass_degree = degree_param_t(); // リセット
+      const char* bass_str = obj["bass"].as<const char*>();
+      if (bass_str != nullptr) {
+        degree_param_from_str(bass_str, desc.bass_degree);
+      }
+    }
+
+    {
+      auto modifier = KANTANMusic_Modifier_None;
+      const char* mod_str = obj["mod"].as<const char*>();
+      if (mod_str != nullptr) {
+        for (int i = 0; i < KANTANMusic_MAX_MODIFIER; ++i) {
+          if (strcmp(mod_str, def::command::command_name_table[def::command::chord_modifier][i]) == 0) {
+            modifier = (KANTANMusic_Modifier)i;
+            break;
+          }
+        }
+      }
+      desc.setModifier(modifier);
+    }
+
+    if (obj["slot"].is<int>())
+    {
+      int slot_index = obj["slot"].as<int>();
+      if (slot_index >= 0 && slot_index < def::app::max_slot) {
+        desc.setSlotIndex((uint8_t)slot_index);
+      }
+    }
+    if (obj["part"].is<JsonArray>())
+    {
+      auto parts = obj["part"].as<JsonArray>();
+      if (!parts.isNull()) {
+        desc.clearPartEnable();
+        for (auto part_index : parts) {
+          if (part_index >= 0 && part_index < def::app::max_chord_part) {
+            desc.setPartEnable(part_index, true);
+          }
+        }
+      }
+    }
+    tmpdata[step] = desc;
+  }
+  std::swap(_data, tmpdata);
+
+  return true;
+}
+
+static bool saveSequenceInternal(system_registry_t::sequence_data_t* sequence, JsonVariant &json)
+{
+  json["version"] = 1;
+  json["length"] = sequence->info.getLength();
+  auto json_timeline = json["timeline"].to<JsonVariant>();
+  return sequence->timeline.saveJson(json_timeline);
+}
+
+static bool loadSequenceInternal(system_registry_t::sequence_data_t* sequence, const JsonVariant &json)
+{
+  if (json.isNull()) { return false; }
+  if (json.size() == 0) { return false; }
+
+  if (json["version"] > 1)
+  {
+    M5_LOGV("version mismatch: %d", json["version"].as<int>());
+  }
+  auto json_timeline = json["timeline"].as<JsonVariant>();
+
+  sequence->reset();
+  sequence->timeline.loadJson(json_timeline);
+  sequence->info.setLength(json["length"].as<int>());
+
+  return true;
+}
+
 static bool saveSongInternal(system_registry_t::song_data_t* song, JsonVariant &json)
 {
   json["version"] = 2;
   json["tempo"] = song->song_info.getTempo();
   json["swing"] = song->song_info.getSwing();
   json["base_key"] = system_registry.runtime_info.getMasterKey();
+
+  {
+    auto json_sequence = json["sequence"].to<JsonVariant>();
+    saveSequenceInternal(&song->sequence, json_sequence);
+  }
 
   auto drum_note = json["drum_note"].to<JsonArray>();
   for (int part_index = 0; part_index < def::app::max_chord_part; ++part_index)
@@ -1278,7 +1495,7 @@ static bool saveSongInternal(system_registry_t::song_data_t* song, JsonVariant &
   return true;
 }
 
-static bool loadSongInternal(system_registry_t::song_data_t* song, JsonVariant &json)
+static bool loadSongInternal(system_registry_t::song_data_t* song, const JsonVariant &json)
 {
   if (json["version"] > 2)
   {
@@ -1290,6 +1507,11 @@ static bool loadSongInternal(system_registry_t::song_data_t* song, JsonVariant &
   song->song_info.setBaseKey(json["base_key"].as<int>());
 
   system_registry.runtime_info.setMasterKey(json["base_key"].as<int>());
+
+  {
+    loadSequenceInternal(&(song->sequence), json["sequence"].as<JsonVariant>());
+    system_registry.runtime_info.setSequenceStepIndex(0);
+  }
 
   auto drum_note = json["drum_note"].as<JsonArray>();
   for (int part_index = 0; part_index < def::app::max_chord_part; ++part_index)
@@ -1374,7 +1596,6 @@ static bool loadSongInternal(system_registry_t::song_data_t* song, JsonVariant &
   }
   return true;
 }
-
 
 size_t system_registry_t::song_data_t::saveSongJSON(uint8_t* data_buffer, size_t data_length)
 {

@@ -155,6 +155,12 @@ static constexpr const size_t buf_size = (i2s_dma_frame_num) * sizeof(int32_t);
 
 bool task_i2s_t::start(void)
 {
+  int len = system_registry.raw_wave_length;
+  auto wav_buf = system_registry.raw_wave;
+  for (int i = 0; i < len; ++i) {
+    wav_buf[i] = std::make_pair(128, 128);
+  }
+
 #if defined (M5UNIFIED_PC_BUILD)
   auto thread = SDL_CreateThread((SDL_ThreadFunction)task_func, "i2s", this);
 #else
@@ -179,7 +185,23 @@ bool task_i2s_t::start(void)
 
 void task_i2s_t::task_func(task_i2s_t* me)
 {
-#if !defined (M5UNIFIED_PC_BUILD)
+#if defined (M5UNIFIED_PC_BUILD)
+  auto raw_wave_pos = system_registry.raw_wave_pos;
+  auto wav_buf = system_registry.raw_wave;
+  for (;;) {
+    uint8_t min_level = 32 + (rand() & 127);
+    uint8_t max_level = min_level + 64;
+
+    wav_buf[raw_wave_pos] = std::make_pair(min_level, max_level);
+  
+    if (++raw_wave_pos >= (system_registry.raw_wave_length)) {
+      raw_wave_pos = 0;
+    }
+    system_registry.raw_wave_pos = raw_wave_pos;
+    SDL_Delay(1);
+  }
+
+#else
   int32_t* i2sbuf = &bufdata[overwrap];
 
   size_t transfer_size;
@@ -238,7 +260,7 @@ void task_i2s_t::task_func(task_i2s_t* me)
 
     auto wav_buf = system_registry.raw_wave;
     auto raw_wave_pos = system_registry.raw_wave_pos;
-    wav_buf[raw_wave_pos ++] = std::make_pair(min_level, max_level);
+    wav_buf[raw_wave_pos ++] = std::make_pair<uint8_t, uint8_t>(min_level, max_level);
 
     if (raw_wave_pos >= (system_registry.raw_wave_length)) {
       raw_wave_pos = 0;

@@ -681,16 +681,113 @@ protected:
   }
 
   size_t getSelectorCount(void) const override { return 1; }
+  int getValue(void) const override { return 0; }
+  bool setValue(int value) const override { return true;}
+};
+
+struct mi_sequence_mode_t : public mi_selector_t {
+  static constexpr const localize_text_array_t name_array = { 5, (const localize_text_t[]){
+    { "Free Play",  "手動演奏" },
+    { "Beat Play",  "自動ビート演奏" },
+    { "Guide Play", "ガイド付き演奏" },
+    { "Auto Song",  "完全自動演奏" },
+    { "Song Edit",  "演奏記録" },
+  }};
+
+  constexpr mi_sequence_mode_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array }
+  {}
 
   int getValue(void) const override
   {
-    return 0;
+    uint32_t res = system_registry.runtime_info.getSequenceMode();
+    if (res >= def::seqmode::seqmode_max) {
+      res = 0;
+    }
+    return static_cast<int>(res) + getMinValue();
   }
   bool setValue(int value) const override
   {
+    if (mi_selector_t::setValue(value) == false) { return false; }
+    value -= getMinValue();
+    if (value < 0) {
+      value = 0;
+    }
+    if (value >= def::seqmode::seqmode_t::seqmode_max) {
+      value = 0;
+    }
+    static constexpr def::seqmode::seqmode_t modes[] = {
+      def::seqmode::seqmode_t::seq_free_play,
+      def::seqmode::seqmode_t::seq_beat_play,
+      def::seqmode::seqmode_t::seq_guide_play,
+      def::seqmode::seqmode_t::seq_auto_song,
+      def::seqmode::seqmode_t::seq_song_edit,
+    };
+    auto mode = modes[value];
+
+    system_registry.operator_command.addQueue({ def::command::sequence_mode_set, mode });
     return true;
   }
 };
+/*
+struct mi_clear_seq_t : public mi_normal_t {
+  constexpr mi_clear_seq_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_normal_t { cate, menu_id, level, title }
+  {}
+protected:
+  const char* getValueText(void) const override { return "..."; }
+  const char* getSelectorText(size_t index) const override { return "Clear"; }
+
+  bool execute(void) const override
+  {
+    system_registry.current_sequence->deleteAfter(system_registry.runtime_info.getSequenceStepIndex());
+    return mi_normal_t::execute();
+  }
+
+  size_t getSelectorCount(void) const override { return 1; }
+  int getValue(void) const override { return 0; }
+  bool setValue(int value) const override { return true;}
+};
+*/
+
+struct mi_clear_seq_t : public mi_selector_t {
+protected:
+  static constexpr const localize_text_array_t name_array = { 2, (const localize_text_t[]){
+    { "Cancel", "キャンセル" },
+    { "Clear",  "クリア"   },
+  }};
+
+public:
+  constexpr mi_clear_seq_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : mi_selector_t { cate, menu_id, level, title, &name_array } {}
+
+  const char* getValueText(void) const override { return "..."; }
+
+  int getValue(void) const override
+  {
+    return getMinValue();
+  }
+  bool setValue(int value) const override
+  {
+    if (mi_selector_t::setValue(value) == false) { return false; }
+    value -= getMinValue();
+    if (value == 1) {
+      system_registry.current_sequence->deleteAfter(system_registry.runtime_info.getSequenceStepIndex());
+      system_registry.popup_notify.setPopup(true, def::notify_type_t::NOTIFY_CLEAR_AFTER_CURSOR);
+    }
+    return true;
+  }
+/*
+  bool execute(void) const override
+  {
+    if (!setValue(_selecting_value)) { return false; }
+    // 値を確定したときに親階層に戻る場合はここでexit
+    exit();
+    return true;
+  }
+//*/
+};
+
 
 struct mi_percent_t : public mi_selector_t {
   static constexpr const simple_text_array_t name_array = { 20, (const simple_text_t[]){
@@ -1467,7 +1564,7 @@ struct mi_otaupdate_t : public mi_normal_t {
   bool enter(void) const override
   {
     // OTAを実施する際にオートプレイは無効にする
-    system_registry.runtime_info.setChordAutoplayState(def::play::auto_play_mode_t::auto_play_none);
+    system_registry.runtime_info.setAutoplayState(def::play::auto_play_mode_t::auto_play_none);
 
     system_registry.runtime_info.setWiFiOtaProgress(def::command::wifi_ota_state_t::ota_connecting);
     system_registry.wifi_control.setOperation(def::command::wifi_operation_t::wfop_ota_begin);
@@ -1983,28 +2080,35 @@ static constexpr menu_item_ptr menu_part[] = {
 };
 // const size_t menu_part_size = sizeof(menu_part) / sizeof(menu_part[0]) - 1;
 
-static constexpr menu_item_ptr menu_file[] = {
-  (const mi_tree_t        []){{ def::menu_category_t::menu_file,  0,0  , { "File"           , "ファイル"       }}},
-  (const mi_load_file_t   []){{ def::menu_category_t::menu_file,  1, 1 , { "Load"           , "読込"           }, def::app::data_type_t::data_song_users }},
-  (const mi_load_file_t   []){{ def::menu_category_t::menu_file,  2, 1 , { "Load Preset"    , "プリセット読込"  }, def::app::data_type_t::data_song_extra }},
-  (const mi_save_t        []){{ def::menu_category_t::menu_file,  3, 1 , { "Save"           , "保存"           }, def::app::data_type_t::data_song_users }},
-  // (const mi_save_new_t    []){{ def::menu_category_t::menu_file,  5,  2, { "New File"       , "新規作成"        }, def::app::data_type_t::data_song_users }},
-  // (const mi_filelist_t    []){{ def::menu_category_t::menu_file,  4, 1 , { "Save(Overwrite)", "保存"            }, def::app::data_type_t::data_song_users}},
+static constexpr menu_item_ptr menu_seqmode[] = {
+  (const mi_sequence_mode_t []){{ def::menu_category_t::menu_seqmode,  0,0  , { "Select Mode"       , "モード選択"        }}},
+  nullptr, // end of menu
+};
+
+static constexpr menu_item_ptr menu_seqedit[] = {
+  (const mi_tree_t          []){{ def::menu_category_t::menu_seqedit,  0,0  , { "Sequence"          , "シーケンス"        }}},
+  (const mi_clear_seq_t     []){{ def::menu_category_t::menu_seqedit,  1, 1 , { "Clear After Cursor", "カーソル後をクリア"}}},
   nullptr, // end of menu
 };
 
 void menu_control_t::openMenu(def::menu_category_t category)
 {
   system_registry.menu_status.reset();
-  system_registry.menu_status.setCurrentLevel(0);
-  system_registry.menu_status.setMenuCategory( category );
-  system_registry.menu_status.setSelectIndex(0, 1);
 
   _menu_array = getMenuArray(category);
+  bool hasSubMenu = (_menu_array[1] != nullptr);
+  system_registry.menu_status.setSelectIndex(0, hasSubMenu ? 1 : 0);
+  system_registry.menu_status.setCurrentLevel(0);
+  system_registry.menu_status.setCurrentMenuID(0);
+  system_registry.menu_status.setMenuCategory( category );
+
   _category = category;
 
   // system_registry.runtime_info.setPlayMode( def::playmode::playmode_t::menu_mode );
   system_registry.runtime_info.setMenuVisible( true );
+  if (!hasSubMenu) {
+    _menu_array[0]->enter();
+  }
 }
 
 bool menu_control_t::enter(void)
@@ -2012,6 +2116,7 @@ bool menu_control_t::enter(void)
   auto current_level = system_registry.menu_status.getCurrentLevel();
   auto select_index = system_registry.menu_status.getSelectIndex(current_level);
   auto current_menu_id = system_registry.menu_status.getCurrentMenuID();
+
   if (current_menu_id == select_index) {
     return _menu_array[select_index]->execute();
   }
@@ -2045,9 +2150,8 @@ int menu_control_t::getChildrenMenuIDList(std::vector<uint16_t>* index_list, uin
 #if defined ( M5UNIFIED_PC_BUILD )
 // メニューの定義部に間違いがないか確認する関数
 // PCビルド時のみ有効
-static bool menu_id_check(const menu_item_ptr_array &menu)
+static bool menu_id_check(const menu_item_ptr_array &menu, def::menu_category_t cat)
 {
-  auto cat = menu[0]->getCategory();
   for (size_t i = 0; menu[i] != nullptr; ++i) {
     if (menu[i]->getCategory() != cat) {
       return false;
@@ -2063,9 +2167,10 @@ static bool menu_id_check(const menu_item_ptr_array &menu)
 static menu_item_ptr_array getMenuArray(def::menu_category_t category)
 {
 #if defined ( M5UNIFIED_PC_BUILD )
-  assert(menu_id_check(menu_system) && "menu_system definition error");
-  assert(menu_id_check(menu_part) && "menu_part definition error");
-  assert(menu_id_check(menu_file) && "menu_file definition error");
+  assert(menu_id_check(menu_system , def::menu_category_t::menu_system  ) && "menu_system definition error");
+  assert(menu_id_check(menu_part   , def::menu_category_t::menu_part    ) && "menu_part definition error");
+  assert(menu_id_check(menu_seqmode, def::menu_category_t::menu_seqmode ) && "menu_seqmode definition error");
+  assert(menu_id_check(menu_seqedit, def::menu_category_t::menu_seqedit ) && "menu_seqedit definition error");
 #endif
 
   switch (category) {
@@ -2074,8 +2179,10 @@ static menu_item_ptr_array getMenuArray(def::menu_category_t category)
     return menu_system;
   case def::menu_category_t::menu_part:
     return menu_part;
-  case def::menu_category_t::menu_file:
-    return menu_file;
+  case def::menu_category_t::menu_seqmode:
+    return menu_seqmode;
+  case def::menu_category_t::menu_seqedit:
+    return menu_seqedit;
   }
   return nullptr;
 }

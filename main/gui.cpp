@@ -37,11 +37,28 @@ static constexpr const int32_t main_area_width = disp_width;
 static constexpr const int32_t main_area_height = disp_height - header_height - main_btns_height - sub_btns_height;
 
 static int smooth_move(int dst, int src, int step) {
-  if (dst != src)
-  {
-    src += ((dst - src) * step + (dst < src ? 0 : 64)) >> 6;
+  static constexpr const uint8_t mul_table[] = {
+    22, 31, 38, 44, 50, 54, 59, 63, 67, 71, 74, 77, 81, 84, 87, 90, 92, 95, 98, 100, 103, 105, 108, 110, 112, 114, 117, 119, 121, 123, 125, 127, 129, 131, 133, 135, 137, 138, 140, 142, 144, 146, 147, 149, 151, 152, 154, 156, 157, 159, 161, 162, 164, 165, 167, 168, 170, 171, 173, 174, 176, 177, 179, 180, 181, 183, 184, 186, 187, 188, 190, 191, 192, 194, 195, 196, 198, 199, 200, 201, 203, 204, 205, 206, 208, 209, 210, 211, 212, 214, 215, 216, 217, 218, 220, 221, 222, 223, 224, 225, 226, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255
+  };
+  if (dst != src) {
+    if (step >= (int)(sizeof(mul_table)/sizeof(mul_table[0]))) {
+      src = dst;
+    } else {
+      int diff = abs(dst - src);
+      int mul = mul_table[step];
+      diff = (255 + diff * mul) >> 8;
+      src += (dst < src) ? -(diff) : diff;
+    }
   }
   return src;
+/*/
+  if (dst != src && step > 0)
+  {
+    src += ((dst - src) * step + (dst < src ? 0 : 64)) >> 6;
+    // src += ((dst - src) * step + (dst < src ? 0 : 256)) >> 8;
+  }
+  return src;
+//*/
 }
 
 struct rect_t
@@ -230,6 +247,63 @@ static uint32_t add_color(uint32_t base_color, uint32_t table_color)
   return result;
 }
 
+void image_dark_shift(M5Canvas *canvas, int32_t x, int32_t y, int32_t w, int32_t h, uint8_t shift = 1)
+{
+  auto canvas_width = canvas->width();
+  auto canvas_height = canvas->height();
+  if (x < 0) { w += x; x = 0; }
+  if (y < 0) { h += y; y = 0; }
+  if (w > canvas_width - x) {  w = canvas_width - x; }
+  if (h > canvas_height - y) {  h = canvas_height - y; }
+  if (w <= 0 || h <= 0) return;
+
+  // RGB565 の各色ビットを指定ビット分シフトするためのマスク
+  static constexpr const uint16_t masks[] = {
+    0x7BEF, // shift 1
+    0x39E7, // shift 2
+    0x18E3, // shift 3
+    0x0861, // shift 4
+    0x0020, // shift 5
+  };
+  uint16_t mask = masks[shift - 1];
+
+  auto framebuffer = (m5gfx::swap565_t*)(canvas->getBuffer());
+  framebuffer += x + canvas_width * y;
+  for (int j = 0; j < h; ++j) {
+    auto buf = framebuffer;
+    framebuffer += canvas_width;
+    for (int i = 0; i < w; ++i) {
+      auto raw = __builtin_bswap16(buf[0].raw);
+      raw = ((raw >> shift) & mask);
+      buf[0].raw = __builtin_bswap16(raw);
+      ++buf;
+    }
+  }
+}
+
+void image_color_or(M5Canvas *canvas, int32_t x, int32_t y, int32_t w, int32_t h, uint16_t color)
+{
+  auto canvas_width = canvas->width();
+  auto canvas_height = canvas->height();
+  if (x < 0) { w += x; x = 0; }
+  if (y < 0) { h += y; y = 0; }
+  if (w > canvas_width - x) {  w = canvas_width - x; }
+  if (h > canvas_height - y) {  h = canvas_height - y; }
+  if (w <= 0 || h <= 0) return;
+
+  color = __builtin_bswap16(color);
+  auto framebuffer = (m5gfx::swap565_t*)(canvas->getBuffer());
+  framebuffer += x + canvas_width * y;
+  for (int j = 0; j < h; ++j) {
+    auto buf = framebuffer;
+    framebuffer += canvas_width;
+    for (int i = 0; i < w; ++i) {
+      buf[0].raw |= color;
+      ++buf;
+    }
+  }
+}
+
 struct ui_base_t
 {
   void draw(draw_param_t *param, M5Canvas *canvas, int32_t offset_x,
@@ -334,6 +408,7 @@ void ui_base_t::draw(draw_param_t* param, M5Canvas* canvas, int32_t offset_x,
 #if defined ( DEBUG_GUI )
   canvas->drawRect(rect.x, rect.y, rect.w, rect.h, rand());
 #endif
+  canvas->clearClipRect();
 }
 
 void ui_base_t::update(draw_param_t* param, int offset_x, int offset_y) {
@@ -919,7 +994,7 @@ protected:
   def::play::auto_play_mode_t _autoplay_style;
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
-    auto mode = system_registry.runtime_info.getChordAutoplayState();
+    auto mode = system_registry.runtime_info.getGuiAutoplayState();
     if (_autoplay_style != mode) {
       _autoplay_style = mode;
       if (mode == def::play::auto_play_mode_t::auto_play_none) {
@@ -947,14 +1022,13 @@ public:
     default:
       canvas->fillTriangle(x - 5, y - 5, x - 5, y + 5, x + 5, y, TFT_GREEN);
       break;
+    case def::play::auto_play_mode_t::auto_play_none:
     case def::play::auto_play_mode_t::auto_play_waiting:
       canvas->fillRect(x - 5, y - 5, 11, 11, TFT_DARKGRAY);
       break;
     case def::play::auto_play_mode_t::auto_play_paused:
       canvas->fillRect(x - 5, y - 5,  3, 11, TFT_DARKGRAY);
       canvas->fillRect(x + 5, y - 5, -3, 11, TFT_DARKGRAY);
-      break;
-    case def::play::auto_play_mode_t::auto_play_none:
       break;
     case def::play::auto_play_mode_t::auto_play_beatmode:
       canvas->drawFastHLine(x - 4, y,  2, TFT_YELLOW);
@@ -1242,6 +1316,7 @@ struct ui_main_buttons_t : public ui_base_t
             break;
           }
         }
+        // 単発コマンドの場合の表示
         if (pindex == 0) {
           switch (command) {
           default:
@@ -1291,50 +1366,53 @@ struct ui_main_buttons_t : public ui_base_t
 
           case def::command::chord_degree:
             {
-              // 各キーに対して画面の表示をフラットに統一するかシャープに統一するかの分岐テーブル (0=flat / 1=sharp)
-              static constexpr const uint8_t note_flat_sharp_tbl[12] =
-              { 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, };
+              auto degree_param = (degree_param_t)command_param.param;
+              int degree = degree_param.getDegree();
+              if (degree_param.raw == degree) {
+                // 各キーに対して画面の表示をフラットに統一するかシャープに統一するかの分岐テーブル (0=flat / 1=sharp)
+                static constexpr const uint8_t note_flat_sharp_tbl[12] =
+                { 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, };
+  
+                // 各演奏ボタンに対してマイナー符号を付与するか分岐 (0=メジャー / 1=マイナー)
+                static constexpr const uint8_t button_minor_tbl[7] =
+                { 0, 1, 1, 0, 0, 1, 1, };
 
-              // 各演奏ボタンに対してマイナー符号を付与するか分岐 (0=メジャー / 1=マイナー)
-              static constexpr const uint8_t button_minor_tbl[7] =
-              { 0, 1, 1, 0, 0, 1, 1, };
-
-              KANTANMusic_GetMidiNoteNumberOptions options;
-              KANTANMusic_GetMidiNoteNumber_SetDefaultOptions(&options);
-
-              options.minor_swap = _minor_swap;
-              options.semitone_shift = _semitone;
-
-              uint8_t note = KANTANMusic_GetMidiNoteNumber
-                ( 1
-                , command_param.param
-                , slot_key
-                , &options
-                );
-              note %= 12;
-              bool is_minor = false;
-              // 以下の3つの修飾子の場合はメジャー・マイナーの概念がないのでマイナー表示をしない
-              if (_modifier == KANTANMusic_Modifier_dim
-              || _modifier == KANTANMusic_Modifier_sus4
-              || _modifier == KANTANMusic_Modifier_aug) {
-                is_minor = false;
+                KANTANMusic_GetMidiNoteNumberOptions options;
+                KANTANMusic_GetMidiNoteNumber_SetDefaultOptions(&options);
+                options.minor_swap = _minor_swap | degree_param.getMinorSwap();
+                int ss = _semitone + degree_param.getSemitoneShift();
+                options.semitone_shift = ss < 0 ? -1 : (ss == 0 ? 0 : 1);
+                uint8_t note = KANTANMusic_GetMidiNoteNumber
+                  ( 1
+                  , degree
+                  , slot_key
+                  , &options
+                  );
+                note %= 12;
+                bool is_minor = false;
+                // 以下の3つの修飾子の場合はメジャー・マイナーの概念がないのでマイナー表示をしない
+                if (_modifier == KANTANMusic_Modifier_dim
+                || _modifier == KANTANMusic_Modifier_sus4
+                || _modifier == KANTANMusic_Modifier_aug) {
+                  is_minor = false;
+                }
+                else
+                if (_semitone == 0) {
+                  is_minor = button_minor_tbl[degree - 1];
+                  if (_minor_swap) { is_minor = !is_minor; }
+                }
+  
+                auto notename = def::app::note_name_table[note];
+                /// 12個の音階に対して半音部分を♭に置き換えるか判定処理
+                if (notename[1] != 0x00) {
+                  bool sharp = note_flat_sharp_tbl[_master_key];
+                  notename = def::app::note_name_table[note + (sharp ? -1 : 1)];
+                  _text_upper[i] = sharp ? "♯" : "♭";
+                }
+                _text_lower[i] = (is_minor) ? "m" : " ";
+                snprintf(_text[i], sizeof(_text[i]), "%d %s", degree, notename);
+                name = nullptr;
               }
-              else
-              if (_semitone == 0) {
-                is_minor = button_minor_tbl[command_param.param - 1];
-                if (_minor_swap) { is_minor = !is_minor; }
-              }
-
-              auto notename = def::app::note_name_table[note];
-              /// 12個の音階に対して半音部分を♭に置き換えるか判定処理
-              if (notename[1] != 0x00) {
-                bool sharp = note_flat_sharp_tbl[_master_key];
-                notename = def::app::note_name_table[note + (sharp ? -1 : 1)];
-                _text_upper[i] = sharp ? "♯" : "♭";
-              }
-              _text_lower[i] = (is_minor) ? "m" : " ";
-              snprintf(_text[i], sizeof(_text[i]), "%d %s", command_param.param, notename);
-              name = nullptr;
             }
             break;
           }
@@ -1699,21 +1777,30 @@ public:
     // auto color = param->color_set->arpeggio_note_fore;
     if (!isEnabled) { color = (color >> 1) & 0x7F7F7Fu; }
 
+    auto effect_remain = _effect_remain;
     if (_isDetailMode) {
-      _effect_remain = 0;
+      effect_remain = 0;
     } else {
       auto hit_effect_index = system_registry.runtime_info.getPartEffect(_part_index);
       if (_hit_effect_index != hit_effect_index) {
         _hit_effect_index = hit_effect_index;
-        _effect_remain = 127;
+        if (effect_remain == 0) {
+          flg_update = true;
+        }
+        effect_remain = 127;
       }
-      if (_effect_remain) {
-        _effect_remain -= param->smooth_step;
-        if (_effect_remain < 0) { _effect_remain = 0; }
-        color = add_color(color, (_effect_remain * 0x010100u) | (uint8_t)(-_effect_remain));
-        flg_update = true;
+      if (effect_remain) {
+        effect_remain -= param->smooth_step;
+        if (effect_remain <= 0) {
+          effect_remain = 0;
+          flg_update = true;
+        }
+      }
+      if (flg_update) {
+        color = add_color(color, (effect_remain * 0x010100u) | (uint8_t)(-effect_remain));
       }
     }
+    _effect_remain = effect_remain;
     _color_hit = color;
 
     if (flg_update) {
@@ -1723,7 +1810,7 @@ public:
 
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     _isDetailMode = system_registry.user_setting.getGuiDetailMode();
-    if (system_registry.runtime_info.getPlayMode() == def::playmode::chord_mode) {
+    if (system_registry.runtime_info.getPlayMode() != def::playmode::chord_edit_mode) {
       ui_base_t::update_impl(param, offset_x, offset_y);
       update_inner(param, offset_x, offset_y);
     }
@@ -2357,6 +2444,9 @@ protected:
       switch (mode) {
       case def::playmode::chord_mode:
       case def::playmode::chord_edit_mode:
+      case def::playmode::note_mode:
+      case def::playmode::drum_mode:
+      case def::playmode::seq_edit_mode:
         setTargetRect({0, header_height, main_area_width, main_area_height}); // TODO: 仮の値
         break;
 
@@ -2369,6 +2459,177 @@ protected:
   }
 };
 static ui_chord_part_container_t ui_chord_part_container;
+
+struct ui_sequence_timeline_t : public ui_base_t
+{
+protected:
+  static constexpr const int32_t max_visible_step = 5;
+  static constexpr const int32_t step_icon_width = main_area_width / max_visible_step;
+  int16_t _current_step_index = 0;
+  int32_t _x_scroll_current = 0;
+  int32_t _x_scroll_target = 0;
+  int32_t _x_scroll_offset = 0;
+  uint8_t _offset_step = 0;
+  uint8_t _highlight_index = 0;
+  def::seqmode::seqmode_t _prev_mode = def::seqmode::seq_free_play;
+
+  sequence_chord_desc_t _desc[max_visible_step + 2];
+  void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
+    auto mode = system_registry.runtime_info.getGuiSequenceMode();
+
+    bool visible = mode != def::seqmode::seq_free_play;
+    bool need_init = _prev_mode != mode;
+    if (need_init) {
+      _prev_mode = mode;
+      if (mode == def::seqmode::seq_song_edit) {
+        _offset_step = 2;
+      } else {
+        _offset_step = 0;
+      }
+
+      auto r = getTargetRect();
+      if (visible) {
+        // r.x = 0;
+        // r.w = disp_width;
+        r.y = disp_height - main_btns_height;
+        r.h = main_btns_height;
+      } else {
+        // r.x = disp_width;
+        // r.w = 0;
+        r.y = disp_height;
+        r.h = 0;
+      }
+      setTargetRect(r);
+    }
+
+    ui_base_t::update_impl(param, offset_x, offset_y);
+
+    if (_client_rect.empty()) { return; }
+
+    int32_t current_stepindex = (int32_t)system_registry.runtime_info.getSequenceStepIndex();
+    _x_scroll_target = current_stepindex * step_icon_width * 256;
+    if (need_init) {
+      _x_scroll_current = _x_scroll_target;
+    } else {
+      _x_scroll_current = smooth_move(_x_scroll_target, _x_scroll_current, (param->smooth_step + 2) >> 2);
+    }
+    int32_t visible_stepindex = _x_scroll_current / (step_icon_width * 256);
+    int32_t visible_scroll = visible_stepindex * step_icon_width * 256;
+    int32_t offset = (visible_scroll - _x_scroll_current + 128) >> 8;
+    visible_stepindex -= _offset_step;
+
+    _highlight_index = current_stepindex - visible_stepindex;
+    visible_stepindex -= 1;
+
+    if (_current_step_index != visible_stepindex || _x_scroll_offset != offset || need_init) {
+      _current_step_index = visible_stepindex;
+      _x_scroll_offset = offset;
+      param->addInvalidatedRect({offset_x, offset_y, _client_rect.w, _client_rect.h});
+      for (int32_t i = 0; i < max_visible_step+2; ++i) {
+        _desc[i] = system_registry.current_sequence->getStepDescriptor(visible_stepindex + i);
+      }
+    }
+  }
+
+  void draw_impl(draw_param_t *param, M5Canvas *canvas, int32_t offset_x,
+                          int32_t offset_y, const rect_t *clip_rect) override
+  {
+    image_dark_shift(canvas, offset_x, offset_y, _client_rect.w, _client_rect.h, 2);
+
+    canvas->setTextDatum(m5gfx::textdatum_t::middle_center);
+    canvas->setTextColor(TFT_WHITE);
+    int32_t y_degree = offset_y + (main_btns_height >> 1);
+    int32_t xe = offset_x + _x_scroll_offset;
+
+    // image_dark_shift(canvas, offset_x + _offset_step * step_icon_width, offset_y, step_icon_width, main_btns_height);
+    // image_color_or(canvas, offset_x + _offset_step * step_icon_width, offset_y, step_icon_width - 1, main_btns_height, 0x4200u);
+    // image_color_or(canvas, offset_x + _offset_step * step_icon_width, offset_y, 1, main_btns_height, 0x8410u);
+    // image_color_or(canvas, offset_x + (_offset_step+1) * step_icon_width-1, offset_y, 1, main_btns_height, 0x8410u);
+    for (int32_t i = 0; i <= max_visible_step; ++i) {
+      int32_t x = xe;
+      xe += step_icon_width;
+      if (xe < clip_rect->left() || clip_rect->right() < x) {
+        continue;
+      }
+      if (i == _highlight_index) {
+        int xtmp = x < clip_rect->left() ? clip_rect->left() : x;
+        int xetmp = xe > clip_rect->right() ? clip_rect->right() : xe;
+        image_dark_shift(canvas, xtmp, offset_y, xetmp - xtmp, main_btns_height);
+        image_color_or(canvas, xtmp, offset_y, xetmp - xtmp, main_btns_height, 0x4200);
+      }
+      if (xe > clip_rect->left()) {
+        image_color_or(canvas, xe - 1, offset_y, 1, main_btns_height, 0x8410);
+      }
+      // canvas->drawFastVLine(xe - 1, offset_y, main_btns_height, TFT_LIGHTGRAY);
+
+      const auto &prev_desc = _desc[i];
+      const auto &desc = _desc[i+1];
+      const auto degree = desc.getDegree();
+   // if (degree && prev_desc != desc)
+      if (degree)
+      {
+        int32_t x_center = x + (step_icon_width >> 1);
+        {
+          auto modifier = desc.getModifier();
+          auto name_tbl = def::command::command_name_table[def::command::command_t::chord_modifier];
+          int32_t y_mod = offset_y + main_btns_height - (main_btns_height / 6);
+          int32_t x_mod = x + (step_icon_width >> 1);
+          const char* mod_str = name_tbl[modifier];
+          canvas->setTextSize(1, 2);
+          canvas->drawString(mod_str, x_mod, y_mod);
+        }
+
+        auto x_degree = x_center;
+        auto semitone = desc.getSemitoneShift();
+        auto minor_swap = desc.getMinorSwap();
+        if (semitone || minor_swap) {
+          canvas->setTextSize(1, 1);
+          x_degree -= 8;
+          if (semitone) {
+            auto text = (semitone < 0) ? "♭" : "♯";
+            canvas->drawString(text, x_degree + 16, y_degree - 6);
+          }
+          if (minor_swap) {
+            canvas->drawString("〜", x_degree + 16, y_degree + 6);
+          }
+        }
+        canvas->setTextSize(2, 2);
+        canvas->drawNumber(degree, x_degree, y_degree);
+
+        if (prev_desc.getPartBits() != desc.getPartBits() || prev_desc.getSlotIndex() != desc.getSlotIndex())
+        {
+          uint32_t colors[] = {
+            system_registry.color_setting.getDisablePartColor(),
+            add_color(system_registry.color_setting.getEnablePartColor(), 0x404040u)
+          };
+          for (int part = 0; part < def::app::max_chord_part; ++part)
+          {
+            auto color = colors[desc.getPartEnable(part)];
+            int32_t y_part = 4 + offset_y + (part < 3 ? 0 : (main_btns_height / 10));
+            int32_t x_part = x + (part % 3) * (step_icon_width / 4) + (step_icon_width / 8);
+            canvas->fillRect( x_part, y_part, (step_icon_width / 4)-1, (main_btns_height / 10) - 1,
+                              color);
+          }
+
+          auto slotindex = desc.getSlotIndex();
+          for (int slot = 0; slot < def::app::max_slot; ++slot)
+          {
+            auto color = colors[(slot == slotindex)];
+            int32_t y_slot = 4 + (main_btns_height / 10)*2 + offset_y + (slot < 4 ? 0 : 5);
+            int32_t x_slot = x + (slot % 4) * (step_icon_width / 5) + (step_icon_width / 8);
+            canvas->fillRect( x_slot, y_slot, (step_icon_width / 5)-1, 5 - 1,
+                              color);
+          }
+        }
+      }
+    }
+    for (int i = 1; i < 3; ++i) {
+      image_color_or(canvas, offset_x, offset_y + (main_btns_height/3) * i, _client_rect.w, 1, 0x8410u);
+//      canvas->drawFastHLine(offset_x, offset_y + (main_btns_height/3) * i, _client_rect.w, TFT_DARKGRAY);
+    }
+  }
+};
+static ui_sequence_timeline_t ui_sequence_timeline;
 
 struct ui_menu_header_t : public ui_base_t
 {
@@ -3027,15 +3288,20 @@ public:
     auto visible = system_registry.user_setting.getGuiWaveView();
     visible &= system_registry.runtime_info.getCurrentMode() == def::playmode::playmode_t::chord_mode;
     if (_is_visible != visible) {
-      _is_visible = visible;
-      if (_is_visible) {
+      if (visible) {
         setTargetRect({ 0, disp_height - main_btns_height, disp_width, main_btns_height });
+        _is_visible = visible;
       } else {
         setTargetRect({ 0, disp_height - (main_btns_height >> 1), disp_width, 0 });
+        if (getClientRect().empty()) {
+          _is_visible = false;
+        }
       }
     }
 
     ui_base_t::update_impl(param, offset_x, offset_y);
+
+    if (!_is_visible) { return; }
 
     int start_pos = system_registry.raw_wave_pos - disp_width;
     if (start_pos < 0) {
@@ -3076,8 +3342,8 @@ public:
     const int ch = _client_rect.h;
     int y0 = min_y < _prev_min_y ? min_y : _prev_min_y;
     int y1 = max_y > _prev_max_y ? max_y : _prev_max_y;
-    y0 = (y0 * ch + 128) >> 8;
-    y1 = (y1 * ch + 128) >> 8;
+    y0 = (y0 * ch) >> 8;
+    y1 = (y1 * ch) >> 8;
 
     _prev_min_y = (++_prev_min_y < min_y) ? _prev_min_y : min_y;
     _prev_max_y = (--_prev_max_y > max_y) ? _prev_max_y : max_y;
@@ -3085,57 +3351,55 @@ public:
     if (y0 > 0) { --y0; }
     if (y1 < ch-1) { ++y1; }
 
-    param->addInvalidatedRect({offset_x, offset_y + y0, _client_rect.w, y1 - y0 + 1});
+    param->addInvalidatedRect({offset_x, offset_y + y0, _client_rect.w, y1 - y0});
   }
   void draw_impl(draw_param_t *param, M5Canvas *canvas, int32_t offset_x,
                           int32_t offset_y, const rect_t *clip_rect) override {
-    int y_end = clip_rect->bottom() - offset_y;
-    if (y_end < 0) { return; }
-    auto wave = system_registry.raw_wave;
-    int ch = _client_rect.h;
-    int xe = clip_rect->right() - offset_x;
-    int ye = clip_rect->bottom() - offset_y;
-    int ys = clip_rect->top() - offset_y;
-    if (ys < 0) { ys = 0; }
-    const auto wid = canvas->width();
-    const auto framebuffer = (m5gfx::swap565_t*)(canvas->getBuffer());
+    if (!_is_visible || _client_rect.empty()) { return; }
 
-    const int yp = ch >> 1;
-    const int ystep = ch >> 3;
-    const int min_y = (_prev_min_y * ch + 128) >> 8;
-    const int max_y = (_prev_max_y * ch + 128) >> 8;
+    image_dark_shift(canvas, offset_x, offset_y, _client_rect.w, _client_rect.h);
 
-    // 背景を準備する
-    for (int y = ys; y < ye; ++y) {
-      uint16_t color = 0;
-      if (y == min_y || y == max_y) {
-        color = 0xC618u;
-      } else
-      if (ystep != 0)
-      {
-        if (0 == ((y - yp) % ystep)) {
-          color = 0x03F0u;
-        }
-      }
-      auto buf = framebuffer + wid * (offset_y + y);
-      for (int x = clip_rect->left() - offset_x; x < xe; ++x) {
-        auto raw = __builtin_bswap16(buf->raw);
-        raw = ((raw >> 1) & 0x7BEF) | color;
-        buf->raw = __builtin_bswap16(raw);
-        ++buf;
-      }
+    const int ch = _client_rect.h;
+    const int min_y = (_prev_min_y * ch) >> 8;
+    const int max_y = (_prev_max_y * ch) >> 8;
+    for (int i = 1; i < 8; ++i) {
+      int yy = (i * ch) >> 3;
+      image_color_or( canvas
+                    , offset_x
+                    , offset_y + yy
+                    , _client_rect.w, 1
+                    , 0x03F0u);
     }
-    
+    image_color_or( canvas
+                  , offset_x
+                  , offset_y + min_y
+                  , _client_rect.w, 1
+                  , 0xC618u);
+    image_color_or( canvas
+                  , offset_x
+                  , offset_y + max_y
+                  , _client_rect.w, 1
+                  , 0xC618u);
     { // 波形を描画する
-      auto buf = framebuffer + offset_y * wid;
+      const int xe = clip_rect->right() - offset_x;
+      const int ye = clip_rect->bottom() - offset_y;
+      const auto wid = canvas->width();
+      auto wave = system_registry.raw_wave;
+      auto buf = (m5gfx::swap565_t*)(canvas->getBuffer());
+      const auto raw_wave_length = system_registry.raw_wave_length;
       for (int x = -offset_x; x < xe; ++x) {
         int i = _raw_wave_pos + x;
-        if (i >= system_registry.raw_wave_length) {
-          i -= system_registry.raw_wave_length;
+        while (i >= raw_wave_length) {
+          i -= raw_wave_length;
         }
-        int y0 = (wave[i].first  * ch + 128) >> 8;
-        int y1 = (wave[i].second * ch + 128) >> 8;
-        for (int y = y0; y <= y1 && y < y_end; ++y) { buf[y * wid].raw |= __builtin_bswap16(0xC600); }
+        while (i < 0) {
+          i += raw_wave_length;
+        }
+        int y0 = ((wave[i].first  * ch) >> 8) + offset_y;
+        int y1 = ((wave[i].second * ch) >> 8) + offset_y;
+        if (y0 < 0) { y0 = 0; }
+        if (y1 > ch) { y1 = ch; }
+        for (int y = y0; y < y1 && y < ye; ++y) { buf[y * wid].raw |= __builtin_bswap16(0xC600); }
         ++buf;
       }
     }
@@ -3178,6 +3442,10 @@ void gui_t::init(void)
   const int32_t battery_icon_width = 14;
   ui_main_buttons.setTargetRect({ 0, disp_height - main_btns_height, disp_width, main_btns_height });
   ui_main_buttons.setClientRect({ 0, disp_height, disp_width, 0 });
+
+  // ui_sequence_timeline.setTargetRect({ disp_width, disp_height - main_btns_height, 0, main_btns_height });
+  ui_sequence_timeline.setTargetRect({ 0, disp_height, disp_width, 0 });
+  ui_sequence_timeline.setClientRect(ui_sequence_timeline.getTargetRect());
 
   ui_raw_wave.setTargetRect({ 0, disp_height - (main_btns_height >> 1), disp_width, 0 });
 
@@ -3262,6 +3530,7 @@ void gui_t::init(void)
   ui_background.addChild(&ui_chord_part_container);
   ui_background.addChild(&ui_main_buttons);
   ui_background.addChild(&ui_sub_buttons);
+  ui_background.addChild(&ui_sequence_timeline);
   ui_background.addChild(&ui_raw_wave);
   ui_background.addChild(&ui_left_icon_container);
   ui_background.addChild(&ui_right_icon_container);
@@ -3326,7 +3595,7 @@ bool gui_t::update(void)
   // }
 
 #if defined (M5UNIFIED_PC_BUILD)
-  M5.delay(13);
+  M5.delay(8);
 #else
 
 #if defined ( DEBUG_GUI )
@@ -3350,7 +3619,7 @@ bool gui_t::update(void)
   uint32_t msec = M5.millis();
   uint32_t prev_msec = param->current_msec;
   int diff = msec - prev_msec;
-  if (diff > 64) { diff = 64; }
+  if (diff > 255) { diff = 255; }
   param->prev_msec = prev_msec;
   param->current_msec = msec;
   param->smooth_step = diff;

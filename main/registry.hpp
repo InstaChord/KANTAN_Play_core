@@ -36,9 +36,9 @@ public:
 
   virtual void init(bool psram = false);
 
-  virtual void set8(uint16_t index, uint8_t value, bool force_notify = false);
-  virtual void set16(uint16_t index, uint16_t value, bool force_notify = false);
-  virtual void set32(uint16_t index, uint32_t value, bool force_notify = false);
+  virtual bool set8(uint16_t index, uint8_t value, bool force_notify = false);
+  virtual bool set16(uint16_t index, uint16_t value, bool force_notify = false);
+  virtual bool set32(uint16_t index, uint32_t value, bool force_notify = false);
 
   const history_t* getHistory(history_code_t &code);
   history_code_t getHistoryCode(void) const { return _history_code; }
@@ -67,9 +67,9 @@ public:
 
   void init(bool psram = false) override;
 
-  void set8(uint16_t index, uint8_t value, bool force_notify = false) override;
-  void set16(uint16_t index, uint16_t value, bool force_notify = false) override;
-  void set32(uint16_t index, uint32_t value, bool force_notify = false) override;
+  bool set8(uint16_t index, uint8_t value, bool force_notify = false) override;
+  bool set16(uint16_t index, uint16_t value, bool force_notify = false) override;
+  bool set32(uint16_t index, uint32_t value, bool force_notify = false) override;
   uint8_t get8(uint16_t index) const;
   uint16_t get16(uint16_t index) const;
   uint32_t get32(uint16_t index) const;
@@ -102,21 +102,22 @@ public:
   // constexpr registry_map_t<T>(void)
   // : registry_base_t { 0 } {};
 
-  void set(uint16_t index, T value, bool force_notify = false)
+  bool set(uint16_t index, T value, bool notify = false)
   {
     auto current = get(index);
     if (current != value) {
-      force_notify = true;
+      notify = true;
       if (value == _default_value) {
         _data.erase(index);
       } else {
         _data[index] = value;
       }
     }
-    if (force_notify) {
+    if (notify) {
       _addHistory(index, 0, data_size_t::DATA_SIZE_8);
       _execNotify();
     }
+    return notify;
   }
   const T& get(uint16_t index) const
   {
@@ -151,7 +152,7 @@ public:
   : registry_base_t { history_count }
   , _default_value { default_value } {};
 
-  void set8(uint16_t index, uint8_t value, bool force_notify = false);
+  bool set8(uint16_t index, uint8_t value, bool force_notify = false);
   uint8_t get8(uint16_t index) const;
   void assign(const registry_map8_t &src);
 
@@ -170,7 +171,7 @@ public:
   : registry_base_t { history_count }
   , _default_value { default_value } {};
 
-  void set32(uint16_t index, uint32_t value, bool force_notify = false);
+  bool set32(uint16_t index, uint32_t value, bool notify = false);
   uint32_t get32(uint16_t index) const;
   void assign(const registry_map32_t &src);
 

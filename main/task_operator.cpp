@@ -160,7 +160,7 @@ void task_operator_t::start(void)
   // Modifierを押した順序の記録を初期化
   memset(_modifier_press_order, 0, sizeof(_modifier_press_order));
   // オンコードボタンを押した順序の記録を初期化
-  memset(_base_degree_press_order, 0, sizeof(_base_degree_press_order));
+  memset(_bass_degree_press_order, 0, sizeof(_bass_degree_press_order));
 
 #if defined (M5UNIFIED_PC_BUILD)
   auto thread = SDL_CreateThread((SDL_ThreadFunction)task_func, "operator", this);
@@ -345,7 +345,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
   switch (command) {
   default: break;
   case def::command::chord_beat:
-    system_registry.runtime_info.setChordAutoplayState(def::play::auto_play_mode_t::auto_play_beatmode);
+    system_registry.runtime_info.setAutoplayState(def::play::auto_play_mode_t::auto_play_beatmode);
     [[fallthrough]]; // chord_beatは外部ビートでの演奏の開始と併せて以下の処理も実行する
   case def::command::set_velocity:
   case def::command::chord_degree:
@@ -561,17 +561,21 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
       // パートオンまたは編集の場合は当該パートを有効化する
       bool en = def::command::part_off != command;
       system_registry.current_slot->chord_part[part_index].part_info.setEnabled(en);
-      if (def::command::part_edit == command)
-      { // 編集に入る前にバックアップする
-        system_registry.backup_song_data.assign(system_registry.song_data);
-        system_registry.chord_play.setEditTargetPart(part_index);
-        system_registry.operator_command.addQueue( { def::command::play_mode_set, def::playmode::playmode_t::chord_edit_mode } );
 
-        // 編集に入る際にオートプレイは無効にする
-        system_registry.runtime_info.setChordAutoplayState(def::play::auto_play_mode_t::auto_play_none);
+      auto seqmode = system_registry.runtime_info.getGuiSequenceMode();
+      if (seqmode == def::seqmode::seq_free_play) {
+        if (def::command::part_edit == command)
+        { // 編集に入る前にバックアップする
+          system_registry.backup_song_data.assign(system_registry.song_data);
+          system_registry.chord_play.setEditTargetPart(part_index);
+          system_registry.operator_command.addQueue( { def::command::play_mode_set, def::playmode::playmode_t::chord_edit_mode } );
 
-        // 編集に入る際に、カーソル位置を左下原点に移動させる
-        system_registry.operator_command.addQueue( { def::command::edit_function, def::command::edit_function_t::backhome } );
+          // 編集に入る際にオートプレイは無効にする
+          system_registry.runtime_info.setAutoplayState(def::play::auto_play_mode_t::auto_play_none);
+
+          // 編集に入る際に、カーソル位置を左下原点に移動させる
+          system_registry.operator_command.addQueue( { def::command::edit_function, def::command::edit_function_t::backhome } );
+        }
       }
     }
     break;
@@ -595,6 +599,38 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
     }
     break;
 
+  case def::command::sequence_mode_set:
+    if (is_pressed) {
+      auto seq_mode = (def::seqmode::seqmode_t)param;
+      system_registry.runtime_info.setSequenceStepIndex(0);
+      system_registry.runtime_info.setSequenceMode(seq_mode);
+    }
+    break;
+
+  case def::command::sequence_step_ud:
+    if (is_pressed) {
+      int current_step = system_registry.runtime_info.getSequenceStepIndex();
+
+      if (param > 0) {
+        auto desc = system_registry.current_sequence->getStepDescriptor(current_step);
+        if (!desc.empty()) {
+          // スロットを反映
+          auto slot_index = desc.getSlotIndex();
+          if (slot_index != system_registry.runtime_info.getPlaySlot()) {
+            setSlotIndex(slot_index);
+          }
+
+          // パート有効/無効を反映
+          for (int part = 0; part < def::app::max_chord_part; ++part) {
+            bool en = desc.getPartEnable(part);
+            system_registry.current_slot->chord_part[part].part_info.setEnabled(en);
+          }
+        }
+      }
+      system_registry.player_command.addQueue( { def::command::sequence_step_ud, param } );
+    }
+    break;
+
   case def::command::system_control:
     if (is_pressed) {
       switch (param) {
@@ -609,12 +645,8 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
         system_registry.runtime_info.setPowerOff(def::command::system_control_t::sc_reset);
         break;
 
-      case def::command::system_control_t::sc_save_settings:
-        system_registry.saveSetting();
-        break;
-
-      case def::command::system_control_t::sc_save_resume:
-        system_registry.saveResume();
+      case def::command::system_control_t::sc_save:
+        system_registry.save();
         break;
 
       case def::command::system_control_t::sc_boot:
@@ -640,6 +672,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
             }
           }
           system_registry.syncParams();
+          system_registry.clearUpdateSettingFlag();
 
           // 演奏の強制停止処理を入れておく
           system_registry.player_command.addQueue( { def::command::play_control, def::command::play_control_t::pc_panic_stop } );
@@ -784,11 +817,12 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
       default:
       case def::command::edit_exit_t::save:
         { // 確定操作は特になにもしなくてよい。
+          system_registry.setUpdateResumeFlag();
         }
         break;
       }
       // 編集の終了時にレジューム情報も更新しておく
-      system_registry.operator_command.addQueue( { def::command::system_control, def::command::sc_save_resume } );
+      system_registry.operator_command.addQueue( { def::command::system_control, def::command::sc_save } );
 
       // コード演奏モードに戻す
       system_registry.operator_command.addQueue( { def::command::play_mode_set, def::playmode::playmode_t::chord_mode } );
@@ -852,11 +886,10 @@ void task_operator_t::afterMenuClose(void)
   changeCommandMapping();
 
  // メニューから抜ける時はオートプレイは無効にする
-  system_registry.runtime_info.setChordAutoplayState(def::play::auto_play_mode_t::auto_play_none);
+  system_registry.runtime_info.setAutoplayState(def::play::auto_play_mode_t::auto_play_none);
 
   // 設定を保存しておく
-  system_registry.operator_command.addQueue( { def::command::system_control, def::command::sc_save_settings } );
-  system_registry.operator_command.addQueue( { def::command::system_control, def::command::sc_save_resume } );
+  system_registry.operator_command.addQueue( { def::command::system_control, def::command::sc_save } );
 }
 
 void task_operator_t::procEditFunction(const def::command::command_param_t& command_param)
@@ -1065,7 +1098,8 @@ void task_operator_t::procChordModifier(const def::command::command_param_t& com
 
 void task_operator_t::procChordMinorSwap(const def::command::command_param_t& command_param, const bool is_pressed)
 {
-  system_registry.chord_play.setChordMinorSwap(is_pressed);
+  system_registry.chord_play.setChordMinorSwap(system_registry.working_command.check( { def::command::chord_minor_swap, 1 } ));
+  // system_registry.chord_play.setChordMinorSwap(is_pressed);
   // メジャー・マイナースワップボタンを押したタイミングでコード演奏のアルペジオパターン先頭にステップを戻す
   // system_registry.player_command.addQueue( { def::command::chord_step_reset_request, 1 } );
 }
@@ -1086,20 +1120,20 @@ void task_operator_t::procChordBassDegree(const def::command::command_param_t& c
   // TODO: 暫定実装。
   // Modifierボタンと同じように、同時押しされた場合には最後に押されたボタンの値を優先し、
   // 離された時点でも別のボタンが押されていればそちらに変更するなどの処理が必要になる。
-  auto base_degree = command_param.getParam();
-  for (int i = 0; i < sizeof(_base_degree_press_order)-1; ++i) {
-    if (_base_degree_press_order[i] == base_degree) {
-      memmove(&_base_degree_press_order[i], &_base_degree_press_order[i + 1], sizeof(_base_degree_press_order) - i);
-      _base_degree_press_order[sizeof(_base_degree_press_order) - 1] = 0;
+  auto bass_degree = command_param.getParam();
+  for (int i = 0; i < sizeof(_bass_degree_press_order)-1; ++i) {
+    if (_bass_degree_press_order[i] == bass_degree) {
+      memmove(&_bass_degree_press_order[i], &_bass_degree_press_order[i + 1], sizeof(_bass_degree_press_order) - i);
+      _bass_degree_press_order[sizeof(_bass_degree_press_order) - 1] = 0;
     }
   }
   if (is_pressed) {
-    memmove(&_base_degree_press_order[1], _base_degree_press_order, sizeof(_base_degree_press_order) - 1);
-    _base_degree_press_order[0] = base_degree;
+    memmove(&_bass_degree_press_order[1], _bass_degree_press_order, sizeof(_bass_degree_press_order) - 1);
+    _bass_degree_press_order[0] = bass_degree;
   }
-  base_degree = _base_degree_press_order[0];
+  bass_degree = _bass_degree_press_order[0];
 
-  system_registry.chord_play.setChordBassDegree(base_degree);
+  system_registry.chord_play.setChordBassDegree(bass_degree);
 }
 
 void task_operator_t::procChordBassSemitone(const def::command::command_param_t& command_param, const bool is_pressed)
@@ -1190,7 +1224,21 @@ void task_operator_t::changeCommandMapping(void)
     sub_map = def::command::command_mapping_sub_button_edit_table;
     break;
 
+  case def::playmode::playmode_t::seq_edit_mode:
+    {
+      static constexpr const def::command::command_param_array_t* tbl[] = {
+        def::command::command_mapping_sequence_edit_table,
+        def::command::command_mapping_chord_alt1_table,
+        def::command::command_mapping_chord_alt2_table,
+        def::command::command_mapping_chord_alt3_table,
+      };
+      main_map = tbl[map_index];
+      custom_map = (map_index == 0);
+    }
+    break;
+
   case def::playmode::playmode_t::menu_mode:
+    {
       static constexpr const def::command::command_param_array_t* tbl[] = {
         def::command::command_mapping_menu_table,
         def::command::command_mapping_menu_alt1_table,
@@ -1199,6 +1247,7 @@ void task_operator_t::changeCommandMapping(void)
       };
       main_map = tbl[map_index];
       sub_map = def::command::command_mapping_sub_button_normal_table;
+    }
     break;
   }
 

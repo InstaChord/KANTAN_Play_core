@@ -110,7 +110,7 @@ public:
         }
         if (me->_flg_instachord_link && me->_flg_instachord_pad)
         { // インスタコードリンクでパッド演奏が有効な場合は、自動演奏ビートモードにする
-          system_registry.runtime_info.setChordAutoplayState(def::play::auto_play_mode_t::auto_play_beatmode);
+          system_registry.runtime_info.setAutoplayState(def::play::auto_play_mode_t::auto_play_beatmode);
         }
         midi_driver::MIDI_Message message;
         while (midi->receiveMessage(&message)) {
@@ -232,7 +232,7 @@ public:
           const registry_t::history_t* history;
           while (nullptr != (history = system_registry.midi_out_control.getHistory(history_code_midi_out))) {
             uint8_t status = history->index & 0xFF;
-            uint8_t midi_ch = status & 0x0F;
+//          uint8_t midi_ch = status & 0x0F;
             uint8_t data1 = history->value & 0xFF;
             uint8_t data2 = (history->value >> 8) & 0xFF;
             midi->sendMessage(status, data1, data2);

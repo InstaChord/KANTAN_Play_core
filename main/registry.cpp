@@ -104,10 +104,18 @@ const registry_base_t::history_t* registry_base_t::getHistory(history_code_t &co
     return nullptr;
   }
   uint8_t uid = code >> 16;
-  if (uid != _history[index].uid) {
-    M5_LOGW("history uid looping : request:%08x  uid:%d  data uid:%d", code, uid, _history[index].uid);
-  }
   auto res = &_history[index];
+  if (uid != res->uid) {
+    M5_LOGW("history uid looping : request:%08x  uid:%d  data uid:%d", code, uid, _history[index].uid);
+    do
+    {
+      if (++index >= _history_count) {
+        index = 0;
+        ++uid;
+      }
+      res = &_history[index];
+    } while (uid != res->uid);
+  }
   if (++index >= _history_count) {
     index = 0;
     ++uid;
@@ -154,25 +162,28 @@ void registry_t::init(bool psram)
   }
 }
 
-void registry_base_t::set8(uint16_t index, uint8_t value, bool force_notify)
+bool registry_base_t::set8(uint16_t index, uint8_t value, bool force_notify)
 {
   _addHistory(index, value, data_size_t::DATA_SIZE_8);
-  _execNotify();
+  if (force_notify) { _execNotify(); }
+  return force_notify;
 }
 
-void registry_base_t::set16(uint16_t index, uint16_t value, bool force_notify)
+bool registry_base_t::set16(uint16_t index, uint16_t value, bool force_notify)
 {
   _addHistory(index, value, data_size_t::DATA_SIZE_16);
-  _execNotify();
+  if (force_notify) { _execNotify(); }
+  return force_notify;
 }
 
-void registry_base_t::set32(uint16_t index, uint32_t value, bool force_notify)
+bool registry_base_t::set32(uint16_t index, uint32_t value, bool force_notify)
 {
   _addHistory(index, value, data_size_t::DATA_SIZE_32);
-  _execNotify();
+  if (force_notify) { _execNotify(); }
+  return force_notify;
 }
 
-void registry_t::set8(uint16_t index, uint8_t value, bool force_notify)
+bool registry_t::set8(uint16_t index, uint8_t value, bool force_notify)
 {
   if (index + 1 > _registry_size) {
     M5_LOGE("set8: index out of range : %d", index);
@@ -182,7 +193,7 @@ void registry_t::set8(uint16_t index, uint8_t value, bool force_notify)
   if (*dst != value || force_notify) {
     *dst = value;
     switch (_data_size) {
-    default: return;
+    default: return false;
     case data_size_t::DATA_SIZE_8:
       _addHistory(index, value, data_size_t::DATA_SIZE_8);
       break;
@@ -202,24 +213,26 @@ void registry_t::set8(uint16_t index, uint8_t value, bool force_notify)
       break;
     }
     _execNotify();
+    return true;
   }
+  return false;
 }
 
-void registry_t::set16(uint16_t index, uint16_t value, bool force_notify)
+bool registry_t::set16(uint16_t index, uint16_t value, bool force_notify)
 {
     if (index + 2 > _registry_size) {
         M5_LOGE("set16: index out of range : %d", index);
-        return;
+        return false;
     }
     if (index & 1) {
         M5_LOGE("set16: alignment error : %d", index);
-        return;
+        return false;
     }
     auto dst = &_reg_data_16[index >> 1];
     if (*dst != value || force_notify) {
         *dst = value;
         switch (_data_size) {
-        default: return;
+        default: return false;
         case data_size_t::DATA_SIZE_16:
             _addHistory(index, value, data_size_t::DATA_SIZE_16);
             break;
@@ -239,24 +252,26 @@ void registry_t::set16(uint16_t index, uint16_t value, bool force_notify)
             }
         }
         _execNotify();
+        return true;
     }
+    return false;
 }
 
-void registry_t::set32(uint16_t index, uint32_t value, bool force_notify)
+bool registry_t::set32(uint16_t index, uint32_t value, bool force_notify)
 {
     if (index + 4 > _registry_size) {
         M5_LOGE("set32: index out of range : %d", index);
-        return;
+        return false;
     }
     if (index & 3) {
         M5_LOGE("set32: alignment error : %d", index);
-        return;
+        return false;
     }
     auto dst = &_reg_data_32[index >> 2];
     if (*dst != value || force_notify) {
         *dst = value;
         switch (_data_size) {
-        default: return;
+        default: return false;
         case data_size_t::DATA_SIZE_32:
             _addHistory(index, value, data_size_t::DATA_SIZE_32);
             break;
@@ -283,7 +298,9 @@ void registry_t::set32(uint16_t index, uint32_t value, bool force_notify)
             break;
         }
         _execNotify();
+        return true;
     }
+    return false;
 }
 
 uint8_t registry_t::get8(uint16_t index) const
@@ -328,8 +345,37 @@ bool registry_t::operator==(const registry_t &rhs) const
 
 //-------------------------------------------------------------------------
 
-void registry_map8_t::set8(uint16_t index, uint8_t value, bool force_notify)
+bool registry_map8_t::set8(uint16_t index, uint8_t value, bool force_notify)
 {
+  bool no_change = false;
+  // 既存の値を探す
+  auto it = _data.find(index);
+  if (it != _data.end()) {
+    if (it->second == value) {
+      no_change = true;
+    } else {
+      // 値が異なる場合は更新
+      if (value == _default_value) {
+        _data.erase(it);
+      } else {
+        it->second = value;
+      }
+    }
+  } else {
+    if (value == _default_value) {
+      no_change = true;
+    } else {
+      _data[index] = value;
+    }
+  }
+
+  if (no_change && !force_notify) {
+    return false;
+  }
+  _addHistory(index, value, data_size_t::DATA_SIZE_8);
+  _execNotify();
+  return true;
+/*
   if (value == _default_value) {
     _data.erase(index);
   } else {
@@ -337,6 +383,7 @@ void registry_map8_t::set8(uint16_t index, uint8_t value, bool force_notify)
   }
   _addHistory(index, value, data_size_t::DATA_SIZE_8);
   _execNotify();
+*/
 }
 
 uint8_t registry_map8_t::get8(uint16_t index) const
@@ -359,15 +406,45 @@ void registry_map8_t::assign(const registry_map8_t &src)
 
 //-------------------------------------------------------------------------
 
-void registry_map32_t::set32(uint16_t index, uint32_t value, bool force_notify)
+bool registry_map32_t::set32(uint16_t index, uint32_t value, bool force_notify)
 {
+  bool no_change = false;
+  // 既存の値を探す
+  auto it = _data.find(index);
+  if (it != _data.end()) {
+    if (it->second == value) {
+      no_change = true;
+    } else {
+      // 値が異なる場合は更新
+      if (value == _default_value) {
+        _data.erase(it);
+      } else {
+        it->second = value;
+      }
+    }
+  } else {
+    if (value == _default_value) {
+      no_change = true;
+    } else {
+      _data[index] = value;
+    }
+  }
+
+  if (no_change && !force_notify) {
+    return false;
+  }
+  _addHistory(index, value, data_size_t::DATA_SIZE_32);
+  _execNotify();
+  return true;
+/*
   if (value == _default_value) {
     _data.erase(index);
   } else {
     _data[index] = value;
   }
-  _addHistory(index, value, data_size_t::DATA_SIZE_8);
+  _addHistory(index, value, data_size_t::DATA_SIZE_32);
   _execNotify();
+*/
 }
 
 uint32_t registry_map32_t::get32(uint16_t index) const

@@ -341,7 +341,7 @@ int storage_sd_t::getFileList(const char* path, std::vector<file_info_t>& list)
       info.filename = filename;
       info.filesize = file.fileSize();
       list.push_back( info );
-M5_LOGV("file %s %d", filename, info.filesize);
+//M5_LOGV("file %s %d", filename, info.filesize);
     }
     dir.close();
   } else {

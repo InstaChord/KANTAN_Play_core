@@ -73,8 +73,8 @@ Degree操作コマンド {
 */
   struct chord_option_t
   {
-    uint8_t degree;
-    uint8_t bass_degree;
+    degree_param_t degree;
+    degree_param_t bass_degree;
     // int8_t semitone_shift;
     // int8_t bass_semitone_shift;
     // bool minor_swap;
@@ -157,11 +157,15 @@ Degree操作コマンド {
   void sustainProc(void);
   void setSustain(bool sustain_on);
 
+  void addSequence(void);
+
   void chordStepReset(void);
   void chordNoteOff(int part);
   void resetStepAndMute(void);
   void resetStep(void);
   void allPartsNoteOff(void);
+  void procSequenceStepUd(const def::command::command_param_t& command_param, const bool is_pressed);
+//  void procSequencePlay(const def::command::command_param_t& command_param, const bool is_pressed);
   void procSoundEffect(const def::command::command_param_t& command_param, const bool is_pressed);
   void procNoteButton(const def::command::command_param_t& command_param, const bool is_pressed);
   void procDrumButton(const def::command::command_param_t& command_param, const bool is_pressed);
