@@ -20,8 +20,8 @@ void task_wifi_t::task_func(task_wifi_t* me)
   for (;;) {
     ++counter;
     M5.delay(256);
-    auto mode = system_registry.wifi_control.getWifiMode();
-    auto op = system_registry.wifi_control.getOperation();
+    auto mode = system_registry->wifi_control.getWifiMode();
+    auto op = system_registry->wifi_control.getOperation();
 
     auto sta_info = def::command::wifi_sta_info_t::wsi_off;
     auto ap_info = def::command::wifi_ap_info_t::wai_off;
@@ -36,22 +36,22 @@ void task_wifi_t::task_func(task_wifi_t* me)
       ap_info = (counter & 0x10) 
               ? def::command::wifi_ap_info_t::wai_enabled
               : def::command::wifi_ap_info_t::wai_waiting;
-      system_registry.runtime_info.setWiFiStationCount((counter & 0x10) ? 1 : 0);
+      system_registry->runtime_info.setWiFiStationCount((counter & 0x10) ? 1 : 0);
     }
     if (op == def::command::wifi_operation_t::wfop_setup_wps) {
       sta_info = def::command::wifi_sta_info_t::wsi_waiting;
     }
     if (op == def::command::wifi_operation_t::wfop_ota_begin) {
-      system_registry.wifi_control.setOperation(def::command::wifi_operation_t::wfop_ota_progress);
+      system_registry->wifi_control.setOperation(def::command::wifi_operation_t::wfop_ota_progress);
     }
     if (op == def::command::wifi_operation_t::wfop_ota_progress) {
       sta_info = (def::command::wifi_sta_info_t)((3 & (counter >> 3))+1);
       int progress = counter & 0x7f;
       if (progress > 101) { progress = 101; }
-      system_registry.runtime_info.setWiFiOtaProgress(progress);
+      system_registry->runtime_info.setWiFiOtaProgress(progress);
     }
-    system_registry.runtime_info.setWiFiSTAInfo(sta_info);
-    system_registry.runtime_info.setWiFiAPInfo(ap_info);
+    system_registry->runtime_info.setWiFiSTAInfo(sta_info);
+    system_registry->runtime_info.setWiFiAPInfo(ap_info);
   }
 }
 
@@ -264,7 +264,7 @@ static void response_ctrl(AsyncWebServerRequest *request) {
     "</head><body>\n";
 
 
-  auto current_slot = system_registry.current_slot;
+  auto current_slot = system_registry->current_slot;
   for (int part = 0; part < def::app::max_chord_part; ++part) {
     snprintf(linebuf, linebuf_len, "<h3>Part %d</h3><table style='border:1px solid black;'>", part + 1);
     res += linebuf;
@@ -291,7 +291,7 @@ static void response_ctrl(AsyncWebServerRequest *request) {
 
 static void response_wifi(AsyncWebServerRequest *request) {
   // APモードでなければ wifi設定を使用できないようにする
-   auto operation = system_registry.wifi_control.getOperation();
+   auto operation = system_registry->wifi_control.getOperation();
   if (operation != def::command::wifi_operation_t::wfop_setup_ap) {
     request->redirect("/");
     return;
@@ -311,8 +311,8 @@ static void response_wifi(AsyncWebServerRequest *request) {
     }
     if (ssid.length()) {
       WiFi.begin(ssid.c_str(), password.c_str());
-      system_registry.wifi_control.setMode(def::command::wifi_mode_t::wifi_enable_sta);
-      system_registry.wifi_control.setOperation(def::command::wifi_operation_t::wfop_disable);
+      system_registry->wifi_control.setMode(def::command::wifi_mode_t::wifi_enable_sta);
+      system_registry->wifi_control.setOperation(def::command::wifi_operation_t::wfop_disable);
       // M5_LOGD("ssid : %s  password : %s", ssid.c_str(), password.c_str());
       request->redirect("/");
     }
@@ -392,7 +392,7 @@ static void response_main(AsyncWebServerRequest *request) {
   res += HTML_style;
   res += html_2;
 
-  auto operation = system_registry.wifi_control.getOperation();
+  auto operation = system_registry->wifi_control.getOperation();
   if (operation == def::command::wifi_operation_t::wfop_setup_ap) {
       res += "<a href=\"/wifi\">WiFi setting</a>\n";
   }
@@ -405,7 +405,7 @@ static void response_main(AsyncWebServerRequest *request) {
 }
 
 static void response_top(AsyncWebServerRequest *request) {
-  auto operation = system_registry.wifi_control.getOperation();
+  auto operation = system_registry->wifi_control.getOperation();
   request->redirect(
     (operation == def::command::wifi_operation_t::wfop_setup_ap)
     ? "/wifi"
@@ -435,7 +435,7 @@ static void webSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
         def::command::command_param_t cmd;
         data[len] = 0;
         cmd.raw = atoi((const char*)&data[5]);
-        system_registry.operator_command.addQueue(cmd, press);
+        system_registry->operator_command.addQueue(cmd, press);
       }
     }
 
@@ -455,7 +455,7 @@ static esp_err_t response_redirect(httpd_req_t *req, const char *location)
 
 static esp_err_t response_top_handler(httpd_req_t *req)
 {
-  auto operation = system_registry.wifi_control.getOperation();
+  auto operation = system_registry->wifi_control.getOperation();
   if (operation == def::command::wifi_operation_t::wfop_setup_ap) {
     return response_redirect(req, "/wifi");
   }
@@ -590,8 +590,8 @@ static esp_err_t response_post_wifi_handler(httpd_req_t *req) {
 
   if (res == ESP_OK) {
     WiFi.begin(ssid.c_str(), password.c_str());
-    system_registry.wifi_control.setWifiMode(def::command::wifi_mode_t::wifi_enable_sta);
-    system_registry.wifi_control.setOperation(def::command::wifi_operation_t::wfop_disable);
+    system_registry->wifi_control.setWifiMode(def::command::wifi_mode_t::wifi_enable_sta);
+    system_registry->wifi_control.setOperation(def::command::wifi_operation_t::wfop_disable);
     return response_redirect(req, "/");
   }
   return ESP_OK;
@@ -682,7 +682,7 @@ static esp_err_t response_ws_handler(httpd_req_t *req)
       def::command::command_param_t cmd;
       // buf[ws_pkt.len] = 0;
       cmd.raw = atoi((const char*)&buf[5]);
-      system_registry.operator_command.addQueue(cmd, press);
+      system_registry->operator_command.addQueue(cmd, press);
     }
   }
 /*
@@ -838,7 +838,7 @@ static void task_wifi_info(void*) {
         if (!ntp_sync) {
           if (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
             ntp_sync = true;
-            system_registry.runtime_info.setSntpSync(true);
+            system_registry->runtime_info.setSntpSync(true);
           }
           // printf("sntp: run\n");
         }
@@ -862,7 +862,7 @@ static void task_wifi_info(void*) {
           break;
         }
       }
-      system_registry.runtime_info.setWiFiSTAInfo(wifi_sta_info);
+      system_registry->runtime_info.setWiFiSTAInfo(wifi_sta_info);
     }
     {
       def::command::wifi_ap_info_t wifi_ap_info = def::command::wifi_ap_info_t::wai_off;
@@ -872,9 +872,9 @@ static void task_wifi_info(void*) {
         } else {
           wifi_ap_info = def::command::wifi_ap_info_t::wai_waiting;
         }
-        system_registry.runtime_info.setWiFiStationCount(WiFi.AP.stationCount());
+        system_registry->runtime_info.setWiFiStationCount(WiFi.AP.stationCount());
       }
-      system_registry.runtime_info.setWiFiAPInfo(wifi_ap_info);
+      system_registry->runtime_info.setWiFiAPInfo(wifi_ap_info);
     }
   }
 }
@@ -889,7 +889,7 @@ static void wifiEvent(WiFiEvent_t event) {
   //   M5_LOGV("Got IP: %s", WiFi.localIP().toString().c_str());
   //   break;
   case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-    // if (system_registry.wifi_control.getMode() == def::command::wifi_mode_t::wifi_enable_sta) {
+    // if (system_registry->wifi_control.getMode() == def::command::wifi_mode_t::wifi_enable_sta) {
     //   M5_LOGV("Disconnected from station, attempting reconnection");
     //   WiFi.reconnect();
     // }
@@ -897,13 +897,13 @@ static void wifiEvent(WiFiEvent_t event) {
   case ARDUINO_EVENT_WPS_ER_SUCCESS:
     M5_LOGV("WPS Successful, stopping WPS and connecting to: %s", WiFi.SSID().c_str());
     wpsStop();
-    system_registry.wifi_control.setOperation(def::command::wifi_operation_t::wfop_disable);
-    system_registry.wifi_control.setWifiMode(def::command::wifi_mode_t::wifi_enable_sta);
+    system_registry->wifi_control.setOperation(def::command::wifi_operation_t::wfop_disable);
+    system_registry->wifi_control.setWifiMode(def::command::wifi_mode_t::wifi_enable_sta);
     break;
   case ARDUINO_EVENT_WPS_ER_FAILED:
   case ARDUINO_EVENT_WPS_ER_TIMEOUT:
     wpsStop();
-    if (system_registry.wifi_control.getOperation() == def::command::wifi_operation_t::wfop_setup_wps) {
+    if (system_registry->wifi_control.getOperation() == def::command::wifi_operation_t::wfop_setup_wps) {
       wpsStart();
     }
     break;
@@ -927,7 +927,7 @@ void task_wifi_t::start(void)
   xTaskCreatePinnedToCore(task_wifi_info, "wi", 2048, this, 0, &_wifi_info_task_handle, def::system::task_cpu_wifi);
 
   xTaskCreatePinnedToCore((TaskFunction_t)task_func, "wifi", 4096, this, def::system::task_priority_wifi, &_wifi_task_handle, def::system::task_cpu_wifi);
-  system_registry.wifi_control.setNotifyTaskHandle(_wifi_task_handle);
+  system_registry->wifi_control.setNotifyTaskHandle(_wifi_task_handle);
   WiFi.onEvent(wifiEvent);
 
 #if 0 // __has_include (<ESPAsyncWebServer.h>)
@@ -1026,9 +1026,9 @@ void task_wifi_t::task_func(task_wifi_t* me)
     taskYIELD();
     ulTaskNotifyTake(pdTRUE, wait);
 
-    auto mode = system_registry.wifi_control.getWifiMode();
-    auto op = system_registry.wifi_control.getOperation();
-    auto webserver_mode = system_registry.wifi_control.getWebServerMode();
+    auto mode = system_registry->wifi_control.getWifiMode();
+    auto op = system_registry->wifi_control.getOperation();
+    auto webserver_mode = system_registry->wifi_control.getWebServerMode();
     control_flg_t prev;
     prev.raw = ctrl_flg.raw;
     ctrl_flg.set(mode, op, webserver_mode);
@@ -1064,9 +1064,9 @@ void task_wifi_t::task_func(task_wifi_t* me)
 // esp_netif_deinit();
           WiFi.disconnect(true);
           WiFi.mode(WIFI_MODE_NAN);
-          system_registry.task_status.setSuspend(system_registry_t::reg_task_status_t::bitindex_t::TASK_WIFI);
+          system_registry->task_status.setSuspend(system_registry_t::reg_task_status_t::bitindex_t::TASK_WIFI);
         } else {
-          system_registry.task_status.setWorking(system_registry_t::reg_task_status_t::bitindex_t::TASK_WIFI);
+          system_registry->task_status.setWorking(system_registry_t::reg_task_status_t::bitindex_t::TASK_WIFI);
 
 // esp_netif_init();
 // wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -1108,10 +1108,10 @@ void task_wifi_t::task_func(task_wifi_t* me)
       }
     }
     if (op == def::command::wifi_operation_t::wfop_ota_begin) {
-      system_registry.runtime_info.setWiFiOtaProgress(def::command::wifi_ota_state_t::ota_connecting);
+      system_registry->runtime_info.setWiFiOtaProgress(def::command::wifi_ota_state_t::ota_connecting);
 
       if (WiFi.status() == WL_CONNECTED) {
-        system_registry.wifi_control.setOperation(def::command::wifi_operation_t::wfop_ota_progress);
+        system_registry->wifi_control.setOperation(def::command::wifi_operation_t::wfop_ota_progress);
         task_http_client.exec_ota(def::app::url_ota_info);
       }
     }

@@ -514,7 +514,7 @@ protected:
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     bool updated = false;
-    if (system_registry.popup_notify.getPopupHistory(_history_code, _notify_type, _category))
+    if (system_registry->popup_notify.getPopupHistory(_history_code, _notify_type, _category))
     {
       auto text = def::notify_name_array.at(_notify_type);
       const char* t = text->get();
@@ -577,7 +577,7 @@ public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     bool updated = _client_rect != _target_rect;
     ui_base_t::update_impl(param, offset_x, offset_y);
-    def::qrcode_type_t qr_type = system_registry.popup_qr.getQRCodeType();
+    def::qrcode_type_t qr_type = system_registry->popup_qr.getQRCodeType();
     if (_qr_type != qr_type) {
       if (!_target_rect.empty()) {
         int x = disp_width >> 1;
@@ -647,7 +647,7 @@ protected:
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     ui_base_t::update_impl(param, offset_x, offset_y);
-    auto volume = system_registry.user_setting.getMasterVolume();
+    auto volume = system_registry->user_setting.getMasterVolume();
     if (_volume != volume) {
       _volume = volume;
       param->addInvalidatedRect({offset_x, offset_y, _client_rect.w, _client_rect.h});
@@ -679,8 +679,8 @@ protected:
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     ui_base_t::update_impl(param, offset_x, offset_y);
-    auto battery = system_registry.runtime_info.getBatteryLevel();
-    auto is_charging = system_registry.runtime_info.getBatteryCharging();
+    auto battery = system_registry->runtime_info.getBatteryLevel();
+    auto is_charging = system_registry->runtime_info.getBatteryCharging();
 
     if (_is_charging != is_charging || _battery != battery) {
       _is_charging = is_charging;
@@ -715,7 +715,7 @@ protected:
     def::command::wifi_sta_info_t _wifi_status = (def::command::wifi_sta_info_t)0xFF;
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
-    auto wifi_status = system_registry.runtime_info.getWiFiSTAInfo();
+    auto wifi_status = system_registry->runtime_info.getWiFiSTAInfo();
 
     if (_wifi_status != wifi_status) {
       _wifi_status = wifi_status;
@@ -792,7 +792,7 @@ protected:
     def::command::wifi_ap_info_t _wifi_status = (def::command::wifi_ap_info_t)0xFF;
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
-    auto wifi_status = system_registry.runtime_info.getWiFiAPInfo();
+    auto wifi_status = system_registry->runtime_info.getWiFiAPInfo();
     if (_wifi_status != wifi_status) {
       _wifi_status = wifi_status;
       int w = (wifi_status == def::command::wifi_ap_info_t::wai_off)
@@ -887,9 +887,9 @@ public:
     bool updated = false;
 
     def::command::midiport_info_t info[3];
-    info[0] = system_registry.runtime_info.getMidiPortStatePC();
-    info[1] = system_registry.runtime_info.getMidiPortStateBLE();
-    info[2] = system_registry.runtime_info.getMidiPortStateUSB();
+    info[0] = system_registry->runtime_info.getMidiPortStatePC();
+    info[1] = system_registry->runtime_info.getMidiPortStateBLE();
+    info[2] = system_registry->runtime_info.getMidiPortStateUSB();
 
     bool visible = false;
     for (int i = 0; i < 3; ++i) {
@@ -921,14 +921,14 @@ public:
       }
     }
     uint8_t tx_couunt[3] = {
-      system_registry.runtime_info.getMidiTxCountPC(),
-      system_registry.runtime_info.getMidiTxCountBLE(),
-      system_registry.runtime_info.getMidiTxCountUSB(),
+      system_registry->runtime_info.getMidiTxCountPC(),
+      system_registry->runtime_info.getMidiTxCountBLE(),
+      system_registry->runtime_info.getMidiTxCountUSB(),
     };
     uint8_t rx_couunt[3] = {
-      system_registry.runtime_info.getMidiRxCountPC(),
-      system_registry.runtime_info.getMidiRxCountBLE(),
-      system_registry.runtime_info.getMidiRxCountUSB(),
+      system_registry->runtime_info.getMidiRxCountPC(),
+      system_registry->runtime_info.getMidiRxCountBLE(),
+      system_registry->runtime_info.getMidiRxCountUSB(),
     };
 
     // 通信カウンタのドット移動増分を求める
@@ -991,13 +991,13 @@ static ui_midiport_info_t ui_midiport_info;
 struct ui_icon_auto_play_t : public ui_base_t
 {
 protected:
-  def::play::auto_play_mode_t _autoplay_style;
+  def::play::auto_play_state_t _autoplay_style;
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
-    auto mode = system_registry.runtime_info.getGuiAutoplayState();
+    auto mode = system_registry->runtime_info.getGuiAutoplayState();
     if (_autoplay_style != mode) {
       _autoplay_style = mode;
-      if (mode == def::play::auto_play_mode_t::auto_play_none) {
+      if (mode == def::play::auto_play_state_t::auto_play_none) {
         _target_rect.w = 0;
       } else {
         _target_rect.w = 11;
@@ -1022,15 +1022,15 @@ public:
     default:
       canvas->fillTriangle(x - 5, y - 5, x - 5, y + 5, x + 5, y, TFT_GREEN);
       break;
-    case def::play::auto_play_mode_t::auto_play_none:
-    case def::play::auto_play_mode_t::auto_play_waiting:
+    case def::play::auto_play_state_t::auto_play_none:
+    case def::play::auto_play_state_t::auto_play_waiting:
       canvas->fillRect(x - 5, y - 5, 11, 11, TFT_DARKGRAY);
       break;
-    case def::play::auto_play_mode_t::auto_play_paused:
+    case def::play::auto_play_state_t::auto_play_paused:
       canvas->fillRect(x - 5, y - 5,  3, 11, TFT_DARKGRAY);
       canvas->fillRect(x + 5, y - 5, -3, 11, TFT_DARKGRAY);
       break;
-    case def::play::auto_play_mode_t::auto_play_beatmode:
+    case def::play::auto_play_state_t::auto_play_beatmode:
       canvas->drawFastHLine(x - 4, y,  2, TFT_YELLOW);
       canvas->drawFastHLine(x + 3, y,  2, TFT_YELLOW);
       canvas->drawLine(x - 3, y    , x - 1, y - 6, TFT_YELLOW);
@@ -1048,7 +1048,7 @@ protected:
   bool _modified = false;
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
-    auto modified = system_registry.runtime_info.getSongModified();
+    auto modified = system_registry->runtime_info.getSongModified();
     if (_modified != modified) {
       _modified = modified;
       if (!modified) {
@@ -1091,8 +1091,8 @@ protected:
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     ui_base_t::update_impl(param, offset_x, offset_y);
-    auto master_key = system_registry.runtime_info.getMasterKey();
-    int slot_key = system_registry.current_slot->slot_info.getKeyOffset();
+    auto master_key = system_registry->runtime_info.getMasterKey();
+    int slot_key = system_registry->current_slot->slot_info.getKeyOffset();
     if (_master_key != master_key || _slot_key != slot_key) {
       _master_key = master_key;
       _slot_key = slot_key;
@@ -1129,10 +1129,10 @@ public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     bool updated = false;
 
-    if (system_registry.runtime_info.getCurrentMode() == def::playmode::menu_mode) {
+    if (system_registry->runtime_info.getCurrentMode() == def::playmode::menu_mode) {
       close();
     } else {
-      auto master_key = system_registry.runtime_info.getMasterKey();
+      auto master_key = system_registry->runtime_info.getMasterKey();
       if (_master_key != master_key) {
         updated = true;
         _master_key = master_key;
@@ -1224,16 +1224,16 @@ struct ui_main_buttons_t : public ui_base_t
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     ui_base_t::update_impl(param, offset_x, offset_y);
     bool flg_update = false;
-    uint8_t play_mode = system_registry.runtime_info.getCurrentMode();
-    uint8_t master_key = system_registry.runtime_info.getMasterKey();
-    uint8_t minor_swap = system_registry.chord_play.getChordMinorSwap();
-    int8_t semitone = system_registry.chord_play.getChordSemitoneShift();
-    uint8_t modifier = system_registry.chord_play.getChordModifier();
-    int8_t offset_key = system_registry.current_slot->slot_info.getKeyOffset();
+    uint8_t play_mode = system_registry->runtime_info.getCurrentMode();
+    uint8_t master_key = system_registry->runtime_info.getMasterKey();
+    uint8_t minor_swap = system_registry->chord_play.getChordMinorSwap();
+    int8_t semitone = system_registry->chord_play.getChordSemitoneShift();
+    uint8_t modifier = system_registry->chord_play.getChordModifier();
+    int8_t offset_key = system_registry->current_slot->slot_info.getKeyOffset();
 
-    uint8_t note_scale = system_registry.current_slot->slot_info.getNoteScale();
-    auto mapping_history_code = system_registry.command_mapping_current.getHistoryCode();
-    auto working_command_change_count = system_registry.working_command.getChangeCounter();
+    uint8_t note_scale = system_registry->current_slot->slot_info.getNoteScale();
+    auto mapping_history_code = system_registry->command_mapping_current.getHistoryCode();
+    auto working_command_change_count = system_registry->working_command.getChangeCounter();
     if (_play_mode != play_mode
      || _master_key != master_key
      || _minor_swap != minor_swap
@@ -1255,14 +1255,14 @@ struct ui_main_buttons_t : public ui_base_t
       param->addInvalidatedRect({offset_x, offset_y, _client_rect.w, _client_rect.h});
     }
     uint32_t prev_bitmask = _btn_bitmask;
-    _btn_bitmask = 0x7FFF & system_registry.internal_input.getButtonBitmask();
+    _btn_bitmask = 0x7FFF & system_registry->internal_input.getButtonBitmask();
     uint32_t xor_bitmask = prev_bitmask ^ _btn_bitmask;
     if (xor_bitmask) {
       flg_update = true;
     }
     _gfx->setTextSize(1, 2);
     for (int i = 0; i < def::hw::max_main_button; ++i) {
-      uint32_t color = system_registry.rgbled_control.getColor(i);
+      uint32_t color = system_registry->rgbled_control.getColor(i);
       if (_btns_color[i] != color || xor_bitmask & (1 << i)) {
         _btns_color[i] = color;
         param->addInvalidatedRect(getButtonRect(i, offset_x, offset_y));
@@ -1279,22 +1279,22 @@ struct ui_main_buttons_t : public ui_base_t
         _text_upper[i] = "";
         _text_lower[i] = "";
 
-        auto cp_pair = system_registry.command_mapping_current.getCommandParamArray(i);
+        auto cp_pair = system_registry->command_mapping_current.getCommandParamArray(i);
         def::command::command_param_t command_param;
         int pindex = 0;
         bool hit = true;
         for (int j = 0; cp_pair.array[j].command != def::command::none; ++j) {
           pindex = j;
           command_param = cp_pair.array[j];
-          hit &= system_registry.working_command.check(command_param);
+          hit &= system_registry->working_command.check(command_param);
         }
         auto command = command_param.command;
-        uint32_t text_color = system_registry.color_setting.getButtonPressedTextColor();
+        uint32_t text_color = system_registry->color_setting.getButtonPressedTextColor();
         if ((_btn_bitmask & (1 << i)) == 0) {
           if (hit) {
-            text_color = system_registry.color_setting.getButtonWorkingTextColor();
+            text_color = system_registry->color_setting.getButtonWorkingTextColor();
           } else {
-            text_color = system_registry.color_setting.getButtonDefaultTextColor();
+            text_color = system_registry->color_setting.getButtonDefaultTextColor();
           }
         }
         _text_color[i] = text_color;
@@ -1325,7 +1325,7 @@ struct ui_main_buttons_t : public ui_base_t
           case def::command::drum_button:
             { // ドラムモードボタンの場合の表示名処理
               uint8_t drum_index = command_param.param - 1;
-              uint8_t note = system_registry.drum_mapping.get8(drum_index);
+              uint8_t note = system_registry->drum_mapping.get8(drum_index);
               name = def::midi::drum_name_tbl[note];
             }
             break;
@@ -1351,12 +1351,12 @@ struct ui_main_buttons_t : public ui_base_t
               // 7とM7の同時押し時に6に表示を変換する
               auto table = def::command::command_name_table[command];
               if (command_param.param == KANTANMusic_Modifier_7) {
-                if (system_registry.working_command.check( { def::command::chord_modifier, KANTANMusic_Modifier_M7 } )) {
+                if (system_registry->working_command.check( { def::command::chord_modifier, KANTANMusic_Modifier_M7 } )) {
                   name = table[KANTANMusic_Modifier_6];
                 }
               }
               if (command_param.param == KANTANMusic_Modifier_M7) {
-                if (system_registry.working_command.check( { def::command::chord_modifier, KANTANMusic_Modifier_7 } )) {
+                if (system_registry->working_command.check( { def::command::chord_modifier, KANTANMusic_Modifier_7 } )) {
                   name = table[KANTANMusic_Modifier_6];
                 }
               }
@@ -1557,27 +1557,27 @@ struct ui_sub_buttons_t : public ui_base_t
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     ui_base_t::update_impl(param, offset_x, offset_y);
     bool flg_update = false;
-    auto history_code = system_registry.sub_button.getHistoryCode();
+    auto history_code = system_registry->sub_button.getHistoryCode();
     if (_sub_button_history_code != history_code
      ) {
       _sub_button_history_code = history_code;
       flg_update = true;
     }
-    // uint32_t working_command_counter = system_registry.working_command.getChangeCounter();
+    // uint32_t working_command_counter = system_registry->working_command.getChangeCounter();
     // if (_working_command_change_count != working_command_counter) {
     //   _working_command_change_count = working_command_counter;
     //   flg_update = true;
     // }
 
     uint32_t prev_bitmask = _btn_bitmask;
-    _btn_bitmask = system_registry.internal_input.getButtonBitmask() >> def::hw::max_main_button;
+    _btn_bitmask = system_registry->internal_input.getButtonBitmask() >> def::hw::max_main_button;
     uint32_t xor_bitmask = prev_bitmask ^ _btn_bitmask;
     if (xor_bitmask) {
       flg_update = true;
     }
     for (int i = 0; i < max_button; ++i) {
-      // uint32_t color = system_registry.rgbled_control.getColor(i + def::hw::max_main_button);
-      uint32_t color = system_registry.sub_button.getSubButtonColor(i);
+      // uint32_t color = system_registry->rgbled_control.getColor(i + def::hw::max_main_button);
+      uint32_t color = system_registry->sub_button.getSubButtonColor(i);
       if (_btns_color[i] != color || xor_bitmask & (1 << i)) {
         _btns_color[i] = color;
         param->addInvalidatedRect(getButtonRect(i, offset_x, offset_y));
@@ -1586,23 +1586,23 @@ struct ui_sub_buttons_t : public ui_base_t
     if (flg_update) {
       param->addInvalidatedRect({offset_x, offset_y, _client_rect.w, _client_rect.h});
       for (int i = 0; i < max_button; ++i) {
-        _text_color[i] = system_registry.color_setting.getButtonPressedTextColor();
+        _text_color[i] = system_registry->color_setting.getButtonPressedTextColor();
         _text[i][0] = 0;
 
-        auto pair = system_registry.sub_button.getCommandParamArray(i);
+        auto pair = system_registry->sub_button.getCommandParamArray(i);
         auto command_param = pair.array[0];
 
-        bool sub_button_swap = system_registry.runtime_info.getSubButtonSwap();
+        bool sub_button_swap = system_registry->runtime_info.getSubButtonSwap();
         bool is_pressed = _btn_bitmask & (1 << (i % def::hw::max_sub_button));
         if (!is_pressed) {
-          uint32_t color = system_registry.color_setting.getButtonDefaultTextColor();
+          uint32_t color = system_registry->color_setting.getButtonDefaultTextColor();
 
           if (sub_button_swap == (bool)(i < def::hw::max_sub_button)) {
             color = (color >> 1) & 0x7F7F7F;
           }
 
-          if (system_registry.working_command.check(command_param)) {
-            color = system_registry.color_setting.getButtonWorkingTextColor();
+          if (system_registry->working_command.check(command_param)) {
+            color = system_registry->color_setting.getButtonWorkingTextColor();
           }
           _text_color[i] = color;
         }
@@ -1614,7 +1614,7 @@ struct ui_sub_buttons_t : public ui_base_t
         case def::command::command_t::sub_button:
           {
             uint8_t sub_button_index = param - 1;
-            command_raw = (def::command::command_t)system_registry.sub_button.getCommandParamArray(sub_button_index);
+            command_raw = (def::command::command_t)system_registry->sub_button.getCommandParamArray(sub_button_index);
             command = def::command::trimFlag(command_raw);
             param = def::command::getParam(command_raw);
             break;
@@ -1716,14 +1716,14 @@ public:
   static constexpr const uint8_t icon_height = 64;
 
   void update_inner(draw_param_t *param, int offset_x, int offset_y) {
-    auto part = &system_registry.current_slot->chord_part[_part_index];
+    auto part = &system_registry->current_slot->chord_part[_part_index];
     auto partinfo = &part->part_info;
     // auto partinfo = &param->multipart->channel_info_list[part_index];
 
     // partinfoに変更があれば再描画対象とする
     auto partinfo_history_code = partinfo->getHistoryCode();
     auto arpeggio_history_code = part->arpeggio.getHistoryCode();
-    auto slot_index = system_registry.runtime_info.getPlaySlot();
+    auto slot_index = system_registry->runtime_info.getPlaySlot();
     bool flg_update = (_partinfo_history_code != partinfo_history_code
                     || _arpeggio_history_code != arpeggio_history_code
                    || _slot_index != slot_index);
@@ -1731,10 +1731,10 @@ public:
       _partinfo_history_code = partinfo_history_code;
       _arpeggio_history_code = arpeggio_history_code;
       _slot_index = slot_index;
-      _isEmpty = system_registry.current_slot->chord_part[_part_index].arpeggio.isEmpty();
+      _isEmpty = system_registry->current_slot->chord_part[_part_index].arpeggio.isEmpty();
     }
 
-    int highlight_target = system_registry.chord_play.getPartStep(_part_index);
+    int highlight_target = system_registry->chord_play.getPartStep(_part_index);
     if (highlight_target < 0) { highlight_target = 0; }
     highlight_target <<= 8;
     if (x_highlight_256 != highlight_target) {
@@ -1771,9 +1771,9 @@ public:
       flg_update = true;
     }
     _backcolor = (isEnabled)
-                ? system_registry.color_setting.getEnablePartColor()
-                : system_registry.color_setting.getDisablePartColor();
-    auto color = system_registry.color_setting.getArpeggioNoteForeColor();
+                ? system_registry->color_setting.getEnablePartColor()
+                : system_registry->color_setting.getDisablePartColor();
+    auto color = system_registry->color_setting.getArpeggioNoteForeColor();
     // auto color = param->color_set->arpeggio_note_fore;
     if (!isEnabled) { color = (color >> 1) & 0x7F7F7Fu; }
 
@@ -1781,7 +1781,7 @@ public:
     if (_isDetailMode) {
       effect_remain = 0;
     } else {
-      auto hit_effect_index = system_registry.runtime_info.getPartEffect(_part_index);
+      auto hit_effect_index = system_registry->runtime_info.getPartEffect(_part_index);
       if (_hit_effect_index != hit_effect_index) {
         _hit_effect_index = hit_effect_index;
         if (effect_remain == 0) {
@@ -1809,8 +1809,8 @@ public:
   }
 
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
-    _isDetailMode = system_registry.user_setting.getGuiDetailMode();
-    if (system_registry.runtime_info.getPlayMode() != def::playmode::chord_edit_mode) {
+    _isDetailMode = system_registry->user_setting.getGuiDetailMode();
+    if (system_registry->runtime_info.getPlayMode() != def::playmode::chord_edit_mode) {
       ui_base_t::update_impl(param, offset_x, offset_y);
       update_inner(param, offset_x, offset_y);
     }
@@ -1819,7 +1819,7 @@ public:
   void fill_background(draw_param_t *param, M5Canvas *canvas, int32_t offset_x,
                           int32_t offset_y, const rect_t *clip_rect)
   {
-    auto partinfo = &system_registry.current_slot->chord_part[_part_index].part_info;
+    auto partinfo = &system_registry->current_slot->chord_part[_part_index].part_info;
     // auto partinfo = &param->multipart->channel_info_list[part_index];
     bool isEnabled = _isEnabled;
     canvas->setColor(_backcolor);
@@ -1852,7 +1852,7 @@ public:
   void draw_easymode(draw_param_t *param, M5Canvas *canvas, int32_t offset_x,
                           int32_t offset_y, const rect_t *clip_rect)
   {
-    auto partinfo = &system_registry.current_slot->chord_part[_part_index].part_info;
+    auto partinfo = &system_registry->current_slot->chord_part[_part_index].part_info;
     // auto partinfo = &param->multipart->channel_info_list[part_index];
     int x = offset_x + ((_client_rect.w - 64) >> 1);
     int y = offset_y + ((_client_rect.h - 64) >> 1) - getY(128);
@@ -1887,16 +1887,16 @@ public:
   void draw_normalmode(draw_param_t *param, M5Canvas *canvas, int32_t offset_x,
                           int32_t offset_y, const rect_t *clip_rect)
   {
-    auto partinfo = &system_registry.current_slot->chord_part[_part_index].part_info;
+    auto partinfo = &system_registry->current_slot->chord_part[_part_index].part_info;
     // auto partinfo = &param->multipart->channel_info_list[part_index];
 
-    bool clear_confirm = system_registry.chord_play.getConfirm_AllClear();
+    bool clear_confirm = system_registry->chord_play.getConfirm_AllClear();
 
     bool isEnabled = partinfo->getEnabled();
 
     int r = (std::min(_client_rect.w , _client_rect.h) + 12) / 24;
     { // 背景ドット描画
-      canvas->setColor(system_registry.color_setting.getArpeggioNoteBackColor());
+      canvas->setColor(system_registry->color_setting.getArpeggioNoteBackColor());
       // canvas->setColor(param->color_set->arpeggio_note_back);
       for (int j = 0; j < def::app::max_arpeggio_step; j += 2)
       // for (int j = 0; j < arpeggio_step_number_max; j += 2)
@@ -1913,7 +1913,7 @@ public:
     }
 
     {
-      auto color = system_registry.color_setting.getArpeggioStepColor();
+      auto color = system_registry->color_setting.getArpeggioStepColor();
       if (!isEnabled) { color = (color >> 1) & 0x7F7F7Fu; }
       auto rect = getHighlightRect(offset_x, offset_y);
       canvas->fillRect(rect.x, rect.y, rect.w, rect.h, color);
@@ -1957,14 +1957,14 @@ public:
         // canvas->drawNumber(j+1, x+4, y+1);
       }
 
-      bool highlight = (j == system_registry.chord_play.getPartStep(_part_index));
+      bool highlight = (j == system_registry->chord_play.getPartStep(_part_index));
       // bool highlight = (j == partinfo->current_step);
       int lighting = (isEnabled ? 1 : 0) + (highlight ? 0 : -1);
 
       if (!partinfo->isDrumPart())
       {
         int y = offset_y + getY(7 << 8);
-        auto style = system_registry.current_slot->chord_part[_part_index].arpeggio.getStyle(j);
+        auto style = system_registry->current_slot->chord_part[_part_index].arpeggio.getStyle(j);
         // auto style = partinfo->arpeggio_pattern.step[j].arpeggio_style;
         static constexpr const uint32_t style_color_tbl[] = {
           0x339933u,  // arpeggio_pattern_t::arpeggio_style_t::same_time
@@ -2003,8 +2003,8 @@ public:
         default: break;
         }
       }
-      uint32_t fore_color = system_registry.color_setting.getArpeggioNoteForeColor();
-      uint32_t back_color = system_registry.color_setting.getArpeggioNoteBackColor();
+      uint32_t fore_color = system_registry->color_setting.getArpeggioNoteForeColor();
+      uint32_t back_color = system_registry->color_setting.getArpeggioNoteBackColor();
       // uint32_t fore_color = param->color_set->arpeggio_note_fore;
       // uint32_t back_color = param->color_set->arpeggio_note_back;
       if (lighting) {
@@ -2015,7 +2015,7 @@ public:
       // auto step = &(partinfo->arpeggio_pattern.step[j]);
       canvas->setColor(fore_color);
       for (int i = 5 + partinfo->isDrumPart(); i >= 0; --i) {
-        auto v = system_registry.current_slot->chord_part[_part_index].arpeggio.getVelocity(j, i);
+        auto v = system_registry->current_slot->chord_part[_part_index].arpeggio.getVelocity(j, i);
         // auto v = step->velocity[i];
         if (v) {
           int y = offset_y + getY((i + 1) << 8);
@@ -2120,8 +2120,8 @@ public:
     ui_base_t::update_impl(param, offset_x, offset_y);
     update_inner(param, offset_x, offset_y);
     bool flg_update = false;
-    auto mode = system_registry.runtime_info.getPlayMode();
-    auto target_index = system_registry.chord_play.getEditTargetPart();
+    auto mode = system_registry->runtime_info.getPlayMode();
+    auto target_index = system_registry->chord_play.getEditTargetPart();
 
     if (!moving) {
       if (!visible && mode == def::playmode::chord_edit_mode) {
@@ -2152,21 +2152,21 @@ public:
   }
 
   
-    auto part = &system_registry.current_slot->chord_part[_part_index];
+    auto part = &system_registry->current_slot->chord_part[_part_index];
     auto part_info = &part->part_info;
 
     if (!_target_rect.empty()) {
       // サブボタン群の表示更新があるか確認
       bool subbutton_update = false;
-      auto enc2_target = (def::command::edit_enc2_target_t)(system_registry.chord_play.getEditEnc2Target());
+      auto enc2_target = (def::command::edit_enc2_target_t)(system_registry->chord_play.getEditEnc2Target());
       if (_enc2_target != enc2_target) {
         _enc2_target = enc2_target;
         subbutton_update = true;
       }
       for (int i = 0; i < def::hw::max_sub_button; ++i) {
         auto sub_button_index = i;
-        auto pair0 = system_registry.sub_button.getCommandParamArray(sub_button_index);
-        auto pair1 = system_registry.sub_button.getCommandParamArray(sub_button_index + def::hw::max_sub_button);
+        auto pair0 = system_registry->sub_button.getCommandParamArray(sub_button_index);
+        auto pair1 = system_registry->sub_button.getCommandParamArray(sub_button_index + def::hw::max_sub_button);
         auto command_param_0 = pair0.array[0].getParam();
         auto command_param_1 = pair1.array[0].getParam();
 
@@ -2177,12 +2177,12 @@ public:
           sub_button_index = i + def::hw::max_sub_button;
         } else {
           // サブボタンのスワップを考慮
-          bool sub_button_swap = system_registry.runtime_info.getSubButtonSwap();
+          bool sub_button_swap = system_registry->runtime_info.getSubButtonSwap();
           if (sub_button_swap) {
             sub_button_index = i + def::hw::max_sub_button;
           }
         }
-        auto pair = system_registry.sub_button.getCommandParamArray(sub_button_index);
+        auto pair = system_registry->sub_button.getCommandParamArray(sub_button_index);
         auto command_param = pair.array[0];
         if (_command_param[i] != command_param) {
           _command_param[i] = command_param;
@@ -2210,7 +2210,7 @@ public:
         _voicing_name = def::play::GetVoicingName(voicing);
         subbutton_update = true;
       }
-      int velo = system_registry.runtime_info.getEditVelocity();
+      int velo = system_registry->runtime_info.getEditVelocity();
       if (_edit_velocity != velo) {
         _edit_velocity = velo;
         subbutton_update = true;
@@ -2245,9 +2245,9 @@ public:
         param->addInvalidatedRect({offset_x, offset_y, _client_rect.w, _client_rect.h});
       }
 
-      int cx = system_registry.chord_play.getPartStep(_part_index);
+      int cx = system_registry->chord_play.getPartStep(_part_index);
       if (cx < 0) { cx = 0; }
-      auto cy = system_registry.chord_play.getCursorY() + 1;
+      auto cy = system_registry->chord_play.getCursorY() + 1;
       changePage(cx >> 3);
       if (_cursor_x != cx || _cursor_y != cy || (getClientRect() != getTargetRect())) {
         _cursor_x = cx;
@@ -2307,12 +2307,12 @@ public:
       canvas->drawCircle(x, y, r + 7, invert ? TFT_RED : TFT_YELLOW);
     }
 
-    if (system_registry.chord_play.getConfirm_Paste())
+    if (system_registry->chord_play.getConfirm_Paste())
     { // コピー/ペースト(クリップボード)のパターンを描画
-      auto part = &system_registry.current_slot->chord_part[_part_index];
+      auto part = &system_registry->current_slot->chord_part[_part_index];
       auto part_info = &part->part_info;
 
-      int range_w = system_registry.chord_play.getRangeWidth();
+      int range_w = system_registry->chord_play.getRangeWidth();
       for (int j = 0; j < range_w; ++j) {
         int step = _cursor_x + j;
         int x = getX(step << 8) + offset_x;
@@ -2321,7 +2321,7 @@ public:
 
         canvas->setColor(TFT_YELLOW);
         for (int i = 5 + part_info->isDrumPart(); i >= 0; --i) {
-          auto v = system_registry.clipboard_arpeggio.getVelocity(j, i);
+          auto v = system_registry->clipboard_arpeggio.getVelocity(j, i);
           if (v) {
             int y = offset_y + getY((i + 1) << 8);
             if (v < 0) {
@@ -2438,7 +2438,7 @@ protected:
 
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override
   {
-    auto mode = system_registry.runtime_info.getCurrentMode();
+    auto mode = system_registry->runtime_info.getCurrentMode();
     if (_prev_mode != mode) {
       _prev_mode = mode;
       switch (mode) {
@@ -2476,7 +2476,7 @@ protected:
 
   sequence_chord_desc_t _desc[max_visible_step + 2];
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
-    auto mode = system_registry.runtime_info.getGuiSequenceMode();
+    auto mode = system_registry->runtime_info.getGuiSequenceMode();
 
     bool visible = mode != def::seqmode::seq_free_play;
     bool need_init = _prev_mode != mode;
@@ -2507,7 +2507,7 @@ protected:
 
     if (_client_rect.empty()) { return; }
 
-    int32_t current_stepindex = (int32_t)system_registry.runtime_info.getSequenceStepIndex();
+    int32_t current_stepindex = (int32_t)system_registry->runtime_info.getSequenceStepIndex();
     _x_scroll_target = current_stepindex * step_icon_width * 256;
     if (need_init) {
       _x_scroll_current = _x_scroll_target;
@@ -2527,7 +2527,7 @@ protected:
       _x_scroll_offset = offset;
       param->addInvalidatedRect({offset_x, offset_y, _client_rect.w, _client_rect.h});
       for (int32_t i = 0; i < max_visible_step+2; ++i) {
-        _desc[i] = system_registry.current_sequence->getStepDescriptor(visible_stepindex + i);
+        _desc[i] = system_registry->current_sequence->getStepDescriptor(visible_stepindex + i);
       }
     }
   }
@@ -2600,8 +2600,8 @@ protected:
         if (prev_desc.getPartBits() != desc.getPartBits() || prev_desc.getSlotIndex() != desc.getSlotIndex())
         {
           uint32_t colors[] = {
-            system_registry.color_setting.getDisablePartColor(),
-            add_color(system_registry.color_setting.getEnablePartColor(), 0x404040u)
+            system_registry->color_setting.getDisablePartColor(),
+            add_color(system_registry->color_setting.getEnablePartColor(), 0x404040u)
           };
           for (int part = 0; part < def::app::max_chord_part; ++part)
           {
@@ -2650,8 +2650,8 @@ protected:
 
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override
   {
-    auto show = system_registry.runtime_info.getCurrentMode() == def::playmode::menu_mode;
-    auto category = static_cast<def::menu_category_t>(system_registry.menu_status.getMenuCategory());
+    auto show = system_registry->runtime_info.getCurrentMode() == def::playmode::menu_mode;
+    auto category = static_cast<def::menu_category_t>(system_registry->menu_status.getMenuCategory());
 
     if (_is_visible && !_is_closing && (!show || _category != category)) {
       _is_closing = true;
@@ -2671,10 +2671,10 @@ protected:
     // メニュー表示状態から非表示状態への遷移
     bool invalidated = false;
     if (show) {
-      auto code = system_registry.menu_status.getHistoryCode();
+      auto code = system_registry->menu_status.getHistoryCode();
       if (_history_code != code) {
         _history_code = code;
-        size_t level = system_registry.menu_status.getCurrentLevel();
+        size_t level = system_registry->menu_status.getCurrentLevel();
         if (_level != level) {
           _level = level;
           invalidated = true;
@@ -2733,7 +2733,7 @@ protected:
     int y = offset_y + menu_header_height - 1;
     int x = 0;
 
-    auto current_level = system_registry.menu_status.getCurrentLevel();
+    auto current_level = system_registry->menu_status.getCurrentLevel();
     canvas->setTextSize(1, 2);
     canvas->setTextDatum(m5gfx::textdatum_t::bottom_left);
     int lv = 0;
@@ -2940,11 +2940,11 @@ public:
 
   void update(ui_base_t* ui, draw_param_t *param, int offset_x, int offset_y) override
   {
-    auto code = system_registry.menu_status.getHistoryCode();
+    auto code = system_registry->menu_status.getHistoryCode();
     if (_history_code != code) {
       _history_code = code;
 
-      auto focus_index = system_registry.menu_status.getSelectIndex(_level);
+      auto focus_index = system_registry->menu_status.getSelectIndex(_level);
       auto focus_item = menu_control.getItemByMenuID(focus_index);
 
       for (int i = 0; i < _childrens_count; ++i) {
@@ -3104,9 +3104,9 @@ protected:
   {
     ui_base_t::update_impl(param, offset_x, offset_y);
 
-    auto show = system_registry.runtime_info.getCurrentMode() == def::playmode::menu_mode;
-    auto category = static_cast<def::menu_category_t>(system_registry.menu_status.getMenuCategory());
-    int current_level = system_registry.menu_status.getCurrentLevel();
+    auto show = system_registry->runtime_info.getCurrentMode() == def::playmode::menu_mode;
+    auto category = static_cast<def::menu_category_t>(system_registry->menu_status.getMenuCategory());
+    int current_level = system_registry->menu_status.getCurrentLevel();
 
     if ((current_level & 1) == _odd_even) {
       _level = current_level;
@@ -3129,7 +3129,7 @@ protected:
                       ?  main_area_width
                       : -main_area_width;
 
-      auto current_index = _level ? system_registry.menu_status.getSelectIndex(_level - 1) : 0;
+      auto current_index = _level ? system_registry->menu_status.getSelectIndex(_level - 1) : 0;
       auto menu_item = menu_control.getItemByMenuID(current_index);
       if (menu_item) {
         switch (menu_item->getType()) {
@@ -3286,8 +3286,8 @@ protected:
   bool _is_visible = false;
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
-    auto visible = system_registry.user_setting.getGuiWaveView();
-    visible &= system_registry.runtime_info.getCurrentMode() == def::playmode::playmode_t::chord_mode;
+    auto visible = system_registry->user_setting.getGuiWaveView();
+    visible &= system_registry->runtime_info.getCurrentMode() == def::playmode::playmode_t::chord_mode;
     if (_is_visible != visible) {
       if (visible) {
         setTargetRect({ 0, disp_height - main_btns_height, disp_width, main_btns_height });
@@ -3304,9 +3304,9 @@ public:
 
     if (!_is_visible) { return; }
 
-    int start_pos = system_registry.raw_wave_pos - disp_width;
+    int start_pos = system_registry->raw_wave_pos - disp_width;
     if (start_pos < 0) {
-      start_pos += system_registry.raw_wave_length;
+      start_pos += system_registry->raw_wave_length;
     }
     _raw_wave_pos = start_pos;
 
@@ -3314,8 +3314,8 @@ public:
     uint8_t max_y = 0;
     int min_x = 0;
     int max_x = 0;
-    auto wave = system_registry.raw_wave;
-    const int loopend = system_registry.raw_wave_length;
+    auto wave = system_registry->raw_wave;
+    const int loopend = system_registry->raw_wave_length;
     for (int x = 0; x < loopend; ++x) {
       if (min_y > wave[x].first) {
         min_y = wave[x].first;
@@ -3329,14 +3329,14 @@ public:
     min_x -= start_pos;
     if (min_x < 0)
     {
-      min_x += system_registry.raw_wave_length;
+      min_x += system_registry->raw_wave_length;
     }
     _min_x = min_x;
 
     max_x -= start_pos;
     if (max_x < 0)
     {
-      max_x += system_registry.raw_wave_length;
+      max_x += system_registry->raw_wave_length;
     }
     _max_x = max_x;
 
@@ -3385,9 +3385,9 @@ public:
       const int xe = clip_rect->right() - offset_x;
       const int ye = clip_rect->bottom() - offset_y;
       const auto wid = canvas->width();
-      auto wave = system_registry.raw_wave;
+      auto wave = system_registry->raw_wave;
       auto buf = (m5gfx::swap565_t*)(canvas->getBuffer());
-      const auto raw_wave_length = system_registry.raw_wave_length;
+      const auto raw_wave_length = system_registry->raw_wave_length;
       for (int x = -offset_x; x < xe; ++x) {
         int i = _raw_wave_pos + x;
         while (i >= raw_wave_length) {
@@ -3629,7 +3629,7 @@ bool gui_t::update(void)
   if (!param->hasInvalidated) {
   // if (!param->flg_update) {
 // static uint32_t prev_btnbitmask;
-// uint32_t btnbitmask = system_registry.internal_input.getButtonBitmask();
+// uint32_t btnbitmask = system_registry->internal_input.getButtonBitmask();
 // if (prev_btnbitmask != btnbitmask) {
 //   prev_btnbitmask = btnbitmask;
 //   _gfx->setCursor(0, 0);
@@ -3652,7 +3652,7 @@ bool gui_t::update(void)
     auto canvas = &disp_buf[disp_buf_idx];
     if (!update_rect.empty()) {
       if (suspended) {
-        system_registry.task_status.setWorking(system_registry_t::reg_task_status_t::bitindex_t::TASK_SPI);
+        system_registry->task_status.setWorking(system_registry_t::reg_task_status_t::bitindex_t::TASK_SPI);
         suspended = false;
       }
       // clip_rect.x -= x;
@@ -3684,7 +3684,7 @@ bool gui_t::update(void)
 // canvas->fillScreen(rand());
     }
     if (!suspended) {
-      system_registry.task_status.setSuspend(system_registry_t::reg_task_status_t::bitindex_t::TASK_SPI);
+      system_registry->task_status.setSuspend(system_registry_t::reg_task_status_t::bitindex_t::TASK_SPI);
       suspended = true;
     }
 
@@ -3708,7 +3708,7 @@ bool gui_t::update(void)
     }
   }
   if (suspended) {
-    system_registry.task_status.setWorking(system_registry_t::reg_task_status_t::bitindex_t::TASK_SPI);
+    system_registry->task_status.setWorking(system_registry_t::reg_task_status_t::bitindex_t::TASK_SPI);
   }
   return true;
 }
@@ -3743,10 +3743,10 @@ void gui_t::procTouchControl(const m5::touch_detail_t& td)
 
       if (td.wasHold())
       { // 長押しで編集モードに移行
-        system_registry.operator_command.addQueue( { def::command::part_edit, i+1 } );
+        system_registry->operator_command.addQueue( { def::command::part_edit, i+1 } );
       } else
       {
-        auto partinfo = &(system_registry.current_slot->chord_part[i].part_info);
+        auto partinfo = &(system_registry->current_slot->chord_part[i].part_info);
         bool next_enabled = partinfo->getEnabled();
         if (td.wasClicked()
           || td.isFlicking()

@@ -119,7 +119,7 @@ struct menu_control_t {
   bool inputNumber(uint8_t number);
   bool inputUpDown(int updown);
 
-  menu_item_ptr getItemByLevel(uint8_t level) { return _menu_array[level ? system_registry.menu_status.getSelectIndex(level-1):0]; }
+  menu_item_ptr getItemByLevel(uint8_t level) { return _menu_array[level ? system_registry->menu_status.getSelectIndex(level-1):0]; }
 
   int getChildrenMenuIDList(std::vector<uint16_t>* index_list, uint16_t parent_index);
 

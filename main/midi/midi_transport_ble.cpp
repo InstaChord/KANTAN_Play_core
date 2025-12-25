@@ -353,7 +353,7 @@ void MIDI_Transport_BLE::updateState(void)
   } else if (_use_tx || _use_rx) {
     midiport_info = kanplay_ns::def::command::midiport_info_t::mp_enabled;
   }
-  kanplay_ns::system_registry.runtime_info.setMidiPortStateBLE(midiport_info);
+  kanplay_ns::system_registry->runtime_info.setMidiPortStateBLE(midiport_info);
 }
 
 void MIDI_Transport_BLE::setCentralConnected(bool connected)

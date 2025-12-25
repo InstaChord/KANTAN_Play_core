@@ -24,7 +24,7 @@ void task_spi_t::start(void)
 #else
   TaskHandle_t handle = nullptr;
   xTaskCreatePinnedToCore((TaskFunction_t)task_func, "spi", 1024*3, this, def::system::task_priority_spi, &handle, def::system::task_cpu_spi);
-  system_registry.file_command.setNotifyTaskHandle(handle);
+  system_registry->file_command.setNotifyTaskHandle(handle);
 #endif
 }
 
@@ -33,7 +33,7 @@ void task_spi_t::procFile(void)
   // int proc_remain = 4;
   const registry_t::history_t* history;
   def::app::file_command_info_t file_command_info;
-  while (nullptr != (history = system_registry.file_command.getHistory(_history_code))) {
+  while (nullptr != (history = system_registry->file_command.getHistory(_history_code))) {
     file_command_info.raw = history->value;
     if (file_command_info.raw == 0) { continue; }
 
@@ -46,21 +46,21 @@ M5_LOGV("file_command_info index:%d type:%d file:%d mem:%d ", history->index, fi
     case system_registry_t::reg_file_command_t::index_t::UPDATE_LIST:
       {
         file_manage.updateFileList(file_command_info.dir_type);
-        system_registry.file_command.clearUpdateList();
+        system_registry->file_command.clearUpdateList();
       }
       break;
 
     case system_registry_t::reg_file_command_t::index_t::FILE_LOAD:
       {
         auto mem = file_manage.loadFile(file_command_info.dir_type, file_command_info.file_index);
-        system_registry.file_command.clearFileLoadRequest();
+        system_registry->file_command.clearFileLoadRequest();
         if (mem != nullptr) {
-          system_registry.operator_command.addQueue( { def::command::file_load_notify, mem->index } );
+          system_registry->operator_command.addQueue( { def::command::file_load_notify, mem->index } );
         } else {
           //TODO:読込に失敗した通知を何らかの形で行う
         }
         if (mem == nullptr || mem->dir_type != def::app::data_type_t::data_setting) {
-          system_registry.popup_notify.setPopup(mem != nullptr, def::notify_type_t::NOTIFY_FILE_LOAD);
+          system_registry->popup_notify.setPopup(mem != nullptr, def::notify_type_t::NOTIFY_FILE_LOAD);
         }
       }
       break;
@@ -68,14 +68,14 @@ M5_LOGV("file_command_info index:%d type:%d file:%d mem:%d ", history->index, fi
     case system_registry_t::reg_file_command_t::index_t::FILE_SAVE:
       {
         bool result = file_manage.saveFile(file_command_info.dir_type, file_command_info.mem_index);
-        system_registry.file_command.clearFileSaveRequest();
+        system_registry->file_command.clearFileSaveRequest();
         if (file_command_info.dir_type != def::app::data_type_t::data_setting) {
-          system_registry.popup_notify.setPopup(result, def::notify_type_t::NOTIFY_FILE_SAVE);
+          system_registry->popup_notify.setPopup(result, def::notify_type_t::NOTIFY_FILE_SAVE);
         }
-        system_registry.operator_command.addQueue( { def::command::file_save_notify, file_command_info.mem_index } );
+        system_registry->operator_command.addQueue( { def::command::file_save_notify, file_command_info.mem_index } );
 
         // 未保存の編集の警告表示を更新する
-        system_registry.checkSongModified();
+        system_registry->checkSongModified();
       }
       break;
     }
@@ -99,9 +99,9 @@ void task_spi_t::task_func(task_spi_t* me)
     M5.delay(wait);
     flg_notify = true;
 #else
-    system_registry.task_status.setSuspend(system_registry_t::reg_task_status_t::bitindex_t::TASK_SPI);
+    system_registry->task_status.setSuspend(system_registry_t::reg_task_status_t::bitindex_t::TASK_SPI);
     flg_notify = ulTaskNotifyTake(pdTRUE, wait);
-    system_registry.task_status.setWorking(system_registry_t::reg_task_status_t::bitindex_t::TASK_SPI);
+    system_registry->task_status.setWorking(system_registry_t::reg_task_status_t::bitindex_t::TASK_SPI);
 #endif
   }
 }

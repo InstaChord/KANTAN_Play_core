@@ -38,7 +38,7 @@ static uint8_t pin_debug[6] = { 0, 0, 0, 0, 0, 0 };
 namespace kanplay_ns {
 //-------------------------------------------------------------------------
 // extern instance
-system_registry_t system_registry;
+system_registry_t* system_registry;
 
 static std::set<def::command::command_param_t> working_command_param;
 // static std::map<def::command::command_param_t, uint16_t> working_command_counter;
@@ -99,12 +99,8 @@ void system_registry_t::init(void)
 {
   user_setting.init();
   midi_port_setting.init();
-
   runtime_info.init();
-  popup_notify.init();
-  popup_qr.init();
   wifi_control.init();
-  menu_status.init();
   task_status.init();
   sub_button.init();
   internal_input.init();
@@ -123,17 +119,22 @@ void system_registry_t::init(void)
   command_mapping_midicc15.init();
   command_mapping_midicc16.init();
   drum_mapping.init();
-  file_command.init();
 
   // 以下のデータはPSRAM配置として初期化する
+  control_mapping[0].init(true);
+  control_mapping[1].init(true);
+  menu_status.init(true);
+  popup_notify.init(true);
+  popup_qr.init(true);
   song_data.init(true);
+  file_command.init(true);
   backup_song_data.init(true);
   unchanged_song_data.init(true);
   clipboard_slot.init(true);
   clipboard_arpeggio.init(true);
   command_mapping_custom_main.init(true);
-  // sequence_play.init(true);
-  // current_sequence_timeline.init(true);
+//sequence_play.init(true);
+//current_sequence_timeline.init(true);
 
   // 設定値を読み込む
   load();
@@ -329,7 +330,7 @@ void system_registry_t::reset(void)
   // コード演奏時のメインボタンのカスタマイズ用マッピングを準備
   for (int i = 0; i < def::hw::max_button_mask; ++i) {
     auto pair = def::command::command_mapping_chord_play_table[i];
-    system_registry.command_mapping_custom_main.setCommandParamArray(i, pair);
+    system_registry->command_mapping_custom_main.setCommandParamArray(i, pair);
   }
 
   // ドラム演奏モードのボタンマッピング設定
@@ -582,7 +583,7 @@ void system_registry_t::reg_task_status_t::setSuspend(bitindex_t index)
 
 void system_registry_t::reg_user_setting_t::setTimeZone15min(int8_t offset)
 {
-  if (set8(TIMEZONE, offset)) { system_registry.setUpdateSettingFlag(); }
+  if (set8(TIMEZONE, offset)) { system_registry->setUpdateSettingFlag(); }
 #if !defined (M5UNIFIED_PC_BUILD)
   configTime(offset * 15 * 60, 0, def::ntp::server1, def::ntp::server2, def::ntp::server3);
 #endif
@@ -620,7 +621,7 @@ namespace def::ctrl_assign {
 }
 
 const char* localize_text_t::get(void) const
-{ auto i = (uint8_t)system_registry.user_setting.getLanguage(); return text[i] ? text[i] : text[0]; }
+{ auto i = (uint8_t)system_registry->user_setting.getLanguage(); return text[i] ? text[i] : text[0]; }
 
 //-------------------------------------------------------------------------
 bool system_registry_t::saveSettingInternal(JsonVariant& json_root)
@@ -1392,7 +1393,7 @@ static bool saveSongInternal(system_registry_t::song_data_t* song, JsonVariant &
   json["version"] = 2;
   json["tempo"] = song->song_info.getTempo();
   json["swing"] = song->song_info.getSwing();
-  json["base_key"] = system_registry.runtime_info.getMasterKey();
+  json["base_key"] = system_registry->runtime_info.getMasterKey();
 
   {
     auto json_sequence = json["sequence"].to<JsonVariant>();
@@ -1512,11 +1513,11 @@ static bool loadSongInternal(system_registry_t::song_data_t* song, const JsonVar
   song->song_info.setSwing(json["swing"].as<int>());
   song->song_info.setBaseKey(json["base_key"].as<int>());
 
-  system_registry.runtime_info.setMasterKey(json["base_key"].as<int>());
+  system_registry->runtime_info.setMasterKey(json["base_key"].as<int>());
 
   {
     loadSequenceInternal(&(song->sequence), json["sequence"].as<JsonVariant>());
-    system_registry.runtime_info.setSequenceStepIndex(0);
+    system_registry->runtime_info.setSequenceStepIndex(0);
   }
 
   auto drum_note = json["drum_note"].as<JsonArray>();

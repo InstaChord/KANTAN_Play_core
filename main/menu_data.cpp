@@ -58,8 +58,8 @@ bool menu_item_t::exit(void) const
 
   auto parent_index = getParentIndex(array, _menu_id);
   auto level = array[parent_index]->getLevel();
-  system_registry.menu_status.setCurrentLevel(level);
-  system_registry.menu_status.setCurrentMenuID(parent_index);
+  system_registry->menu_status.setCurrentLevel(level);
+  system_registry->menu_status.setCurrentMenuID(parent_index);
   return true;
 }
 
@@ -68,14 +68,14 @@ bool menu_item_t::enter(void) const
   _input_number_result = 0;
   auto array = getMenuArray(_category);
 
-  system_registry.menu_status.setSelectIndex(_level - 1, _menu_id);
-  system_registry.menu_status.setCurrentLevel(_level);
-  system_registry.menu_status.setCurrentMenuID(_menu_id);
+  system_registry->menu_status.setSelectIndex(_level - 1, _menu_id);
+  system_registry->menu_status.setCurrentLevel(_level);
+  system_registry->menu_status.setCurrentMenuID(_menu_id);
   if (array[_menu_id + 1] != nullptr && _level + 1 == array[_menu_id + 1]->getLevel()) {
-    system_registry.menu_status.setSelectIndex(_level, _menu_id + 1);
+    system_registry->menu_status.setSelectIndex(_level, _menu_id + 1);
     return true;
   }
-  system_registry.menu_status.setSelectIndex(_level, _menu_id);
+  system_registry->menu_status.setSelectIndex(_level, _menu_id);
   return false;
 }
 
@@ -118,7 +118,7 @@ struct mi_tree_t : public menu_item_t {
       int enter_index = child_list[cursor_pos];
       auto item = array[enter_index];
       auto level = item->getLevel();
-      system_registry.menu_status.setSelectIndex(level - 1, enter_index);
+      system_registry->menu_status.setSelectIndex(level - 1, enter_index);
 
       // 数字を押した時点ではサブメニューに入らない
       return true;
@@ -138,8 +138,8 @@ struct mi_tree_t : public menu_item_t {
 
     if (!child_count) { return false; }
 
-    int level = system_registry.menu_status.getCurrentLevel();
-    int focus_index = system_registry.menu_status.getSelectIndex(level);
+    int level = system_registry->menu_status.getCurrentLevel();
+    int focus_index = system_registry->menu_status.getSelectIndex(level);
 
     auto list_position = 0;
     for (int i = 0; i < child_count; ++i) {
@@ -157,7 +157,7 @@ struct mi_tree_t : public menu_item_t {
       list_position = 0;
     }
     focus_index = child_list[list_position];
-    system_registry.menu_status.setSelectIndex(level, focus_index);
+    system_registry->menu_status.setSelectIndex(level, focus_index);
 
     return true;
   }
@@ -265,13 +265,13 @@ public:
 
   int getValue(void) const override
   {
-    return getMinValue() + static_cast<uint8_t>(system_registry.user_setting.getLanguage());
+    return getMinValue() + static_cast<uint8_t>(system_registry->user_setting.getLanguage());
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
     auto lang = static_cast<def::lang::language_t>(value - getMinValue());
-    system_registry.user_setting.setLanguage(lang);
+    system_registry->user_setting.setLanguage(lang);
     return true;
   }
 };
@@ -291,13 +291,13 @@ public:
 
   int getValue(void) const override
   {
-    return getMinValue() + system_registry.user_setting.getImuVelocityLevel();
+    return getMinValue() + system_registry->user_setting.getImuVelocityLevel();
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    system_registry.user_setting.setImuVelocityLevel(value);
+    system_registry->user_setting.setImuVelocityLevel(value);
     return true;
   }
 };
@@ -323,13 +323,13 @@ public:
   : mi_brightness_t { cate, menu_id, level, title } {}
   int getValue(void) const override
   {
-    return getMinValue() + system_registry.user_setting.getDisplayBrightness();
+    return getMinValue() + system_registry->user_setting.getDisplayBrightness();
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    system_registry.user_setting.setDisplayBrightness(value);
+    system_registry->user_setting.setDisplayBrightness(value);
     return true;
   }
 };
@@ -340,14 +340,14 @@ public:
   : mi_brightness_t { cate, menu_id, level, title } {}
   int getValue(void) const override
   {
-    return getMinValue() + system_registry.user_setting.getLedBrightness();
+    return getMinValue() + system_registry->user_setting.getLedBrightness();
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    system_registry.user_setting.setLedBrightness(value);
-    system_registry.rgbled_control.refresh();
+    system_registry->user_setting.setLedBrightness(value);
+    system_registry->rgbled_control.refresh();
     return true;
   }
 };
@@ -362,12 +362,12 @@ protected:
 
   int getValue(void) const override
   {
-    return system_registry.user_setting.getMIDIMasterVolume();
+    return system_registry->user_setting.getMIDIMasterVolume();
   }
   bool setValue(int value) const override
   {
     if (mi_normal_t::setValue(value) == false) { return false; }
-    system_registry.user_setting.setMIDIMasterVolume(value);
+    system_registry->user_setting.setMIDIMasterVolume(value);
     return true;
   }
   const char* getSelectorText(size_t index) const override {
@@ -396,12 +396,12 @@ protected:
 
   int getValue(void) const override
   {
-    return system_registry.user_setting.getADCMicAmp();
+    return system_registry->user_setting.getADCMicAmp();
   }
   bool setValue(int value) const override
   {
     if (mi_normal_t::setValue(value) == false) { return false; }
-    system_registry.user_setting.setADCMicAmp(value);
+    system_registry->user_setting.setADCMicAmp(value);
     return true;
   }
   const char* getSelectorText(size_t index) const override {
@@ -433,13 +433,13 @@ public:
 
   int getValue(void) const override
   {
-    return getMinValue() + system_registry.user_setting.getGuiDetailMode();
+    return getMinValue() + system_registry->user_setting.getGuiDetailMode();
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    system_registry.user_setting.setGuiDetailMode(value);
+    system_registry->user_setting.setGuiDetailMode(value);
     return true;
   }
 };
@@ -463,13 +463,13 @@ public:
 
   int getValue(void) const override
   {
-    return getMinValue() + static_cast<uint8_t>(system_registry.user_setting.getGuiWaveView());
+    return getMinValue() + static_cast<uint8_t>(system_registry->user_setting.getGuiWaveView());
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    system_registry.user_setting.setGuiWaveView(value);
+    system_registry->user_setting.setGuiWaveView(value);
     return true;
   }
 };
@@ -482,13 +482,13 @@ public:
 
   int getValue(void) const override
   {
-    return getMinValue() + static_cast<uint8_t>(system_registry.wifi_control.getWebServerMode());
+    return getMinValue() + static_cast<uint8_t>(system_registry->wifi_control.getWebServerMode());
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    system_registry.wifi_control.setWebServerMode(static_cast<def::command::webserver_mode_t>(value));
+    system_registry->wifi_control.setWebServerMode(static_cast<def::command::webserver_mode_t>(value));
     return true;
   }
 };
@@ -501,13 +501,13 @@ public:
 
   int getValue(void) const override
   {
-    return getMinValue() + static_cast<uint8_t>(system_registry.wifi_control.getMode());
+    return getMinValue() + static_cast<uint8_t>(system_registry->wifi_control.getMode());
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    system_registry.wifi_control.setMode(static_cast<def::command::wifi_mode_t>(value));
+    system_registry->wifi_control.setMode(static_cast<def::command::wifi_mode_t>(value));
     return true;
   }
 };
@@ -535,9 +535,9 @@ public:
     if (mi_selector_t::setValue(value) == false) { return false; }
     value -= getMinValue();
     if (value == 1) {
-      system_registry.reset();
-      system_registry.save();
-      system_registry.popup_notify.setPopup(true, def::notify_type_t::NOTIFY_ALL_RESET);
+      system_registry->reset();
+      system_registry->save();
+      system_registry->popup_notify.setPopup(true, def::notify_type_t::NOTIFY_ALL_RESET);
     }
     return true;
   }
@@ -591,15 +591,15 @@ struct mi_program_t : public mi_selector_t {
 protected:
   int getValue(void) const override
   {
-    auto part_index = system_registry.chord_play.getEditTargetPart();
-    return system_registry.current_slot->chord_part[part_index].part_info.getTone() + getMinValue();
+    auto part_index = system_registry->chord_play.getEditTargetPart();
+    return system_registry->current_slot->chord_part[part_index].part_info.getTone() + getMinValue();
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    auto part_index = system_registry.chord_play.getEditTargetPart();
-    system_registry.current_slot->chord_part[part_index].part_info.setTone(value);
+    auto part_index = system_registry->chord_play.getEditTargetPart();
+    system_registry->current_slot->chord_part[part_index].part_info.setTone(value);
     return true;
   }
 };
@@ -621,15 +621,15 @@ protected:
 
   int getValue(void) const override
   {
-    auto part_index = system_registry.chord_play.getEditTargetPart();
-    return (system_registry.current_slot->chord_part[part_index].part_info.getPosition() >> 2) + 10;
+    auto part_index = system_registry->chord_play.getEditTargetPart();
+    return (system_registry->current_slot->chord_part[part_index].part_info.getPosition() >> 2) + 10;
   }
   bool setValue(int value) const override
   {
     if (mi_normal_t::setValue(value) == false) { return false; }
     int v = (value - 10) << 2;
-    auto part_index = system_registry.chord_play.getEditTargetPart();
-    system_registry.current_slot->chord_part[part_index].part_info.setPosition(v);
+    auto part_index = system_registry->chord_play.getEditTargetPart();
+    system_registry->current_slot->chord_part[part_index].part_info.setPosition(v);
     return true;
   }
 };
@@ -651,15 +651,15 @@ protected:
 
   int getValue(void) const override
   {
-    auto part_index = system_registry.chord_play.getEditTargetPart();
-    return system_registry.current_slot->chord_part[part_index].part_info.getVoicing() + getMinValue();
+    auto part_index = system_registry->chord_play.getEditTargetPart();
+    return system_registry->current_slot->chord_part[part_index].part_info.getVoicing() + getMinValue();
   }
   bool setValue(int value) const override
   {
     if (mi_normal_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    auto part_index = system_registry.chord_play.getEditTargetPart();
-    system_registry.current_slot->chord_part[part_index].part_info.setVoicing(value);
+    auto part_index = system_registry->chord_play.getEditTargetPart();
+    system_registry->current_slot->chord_part[part_index].part_info.setVoicing(value);
     return true;
   }
 };
@@ -674,9 +674,9 @@ protected:
 
   bool execute(void) const override
   {
-    auto part_index = system_registry.chord_play.getEditTargetPart();
-    system_registry.current_slot->chord_part[part_index].arpeggio.reset();
-    system_registry.popup_notify.setPopup(true, def::notify_type_t::NOTIFY_CLEAR_ALL_NOTES);
+    auto part_index = system_registry->chord_play.getEditTargetPart();
+    system_registry->current_slot->chord_part[part_index].arpeggio.reset();
+    system_registry->popup_notify.setPopup(true, def::notify_type_t::NOTIFY_CLEAR_ALL_NOTES);
     return mi_normal_t::execute();
   }
 
@@ -700,7 +700,7 @@ struct mi_sequence_mode_t : public mi_selector_t {
 
   int getValue(void) const override
   {
-    uint32_t res = system_registry.runtime_info.getSequenceMode();
+    uint32_t res = system_registry->runtime_info.getSequenceMode();
     if (res >= def::seqmode::seqmode_max) {
       res = 0;
     }
@@ -725,7 +725,7 @@ struct mi_sequence_mode_t : public mi_selector_t {
     };
     auto mode = modes[value];
 
-    system_registry.operator_command.addQueue({ def::command::sequence_mode_set, mode });
+    system_registry->operator_command.addQueue({ def::command::sequence_mode_set, mode });
     return true;
   }
 };
@@ -740,7 +740,7 @@ protected:
 
   bool execute(void) const override
   {
-    system_registry.current_sequence->deleteAfter(system_registry.runtime_info.getSequenceStepIndex());
+    system_registry->current_sequence->deleteAfter(system_registry->runtime_info.getSequenceStepIndex());
     return mi_normal_t::execute();
   }
 
@@ -772,8 +772,8 @@ public:
     if (mi_selector_t::setValue(value) == false) { return false; }
     value -= getMinValue();
     if (value == 1) {
-      system_registry.current_sequence->deleteAfter(system_registry.runtime_info.getSequenceStepIndex());
-      system_registry.popup_notify.setPopup(true, def::notify_type_t::NOTIFY_CLEAR_AFTER_CURSOR);
+      system_registry->current_sequence->deleteAfter(system_registry->runtime_info.getSequenceStepIndex());
+      system_registry->popup_notify.setPopup(true, def::notify_type_t::NOTIFY_CLEAR_AFTER_CURSOR);
     }
     return true;
   }
@@ -810,14 +810,14 @@ struct mi_partvolume_t : public mi_percent_t {
 protected:
   int getValue(void) const override
   {
-    auto part_index = system_registry.chord_play.getEditTargetPart();
-    return system_registry.current_slot->chord_part[part_index].part_info.getVolume() / 5;
+    auto part_index = system_registry->chord_play.getEditTargetPart();
+    return system_registry->current_slot->chord_part[part_index].part_info.getVolume() / 5;
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
-    auto part_index = system_registry.chord_play.getEditTargetPart();
-    system_registry.current_slot->chord_part[part_index].part_info.setVolume(value * 5);
+    auto part_index = system_registry->chord_play.getEditTargetPart();
+    system_registry->current_slot->chord_part[part_index].part_info.setVolume(value * 5);
     return true;
   }
 };
@@ -839,7 +839,7 @@ struct mi_velocity_t : public mi_selector_t {
 protected:
   int getValue(void) const override
   {
-    int velo = system_registry.runtime_info.getEditVelocity();
+    int velo = system_registry->runtime_info.getEditVelocity();
     if (velo < 0) return 1;
     return 1 + (velo / 5);
   }
@@ -847,7 +847,7 @@ protected:
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
     int velo = (value == 1) ? -5 : (value - 1) * 5;
-    system_registry.runtime_info.setEditVelocity(velo);
+    system_registry->runtime_info.setEditVelocity(velo);
     return true;
   }
 };
@@ -872,14 +872,14 @@ struct mi_loop_length_t : public mi_arpeggio_step_t {
 protected:
   int getValue(void) const override
   {
-    auto part_index = system_registry.chord_play.getEditTargetPart();
-    return system_registry.current_slot->chord_part[part_index].part_info.getLoopStep() / 2 + 1;
+    auto part_index = system_registry->chord_play.getEditTargetPart();
+    return system_registry->current_slot->chord_part[part_index].part_info.getLoopStep() / 2 + 1;
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
-    auto part_index = system_registry.chord_play.getEditTargetPart();
-    system_registry.current_slot->chord_part[part_index].part_info.setLoopStep(value * 2 - 1);
+    auto part_index = system_registry->chord_play.getEditTargetPart();
+    system_registry->current_slot->chord_part[part_index].part_info.setLoopStep(value * 2 - 1);
     return true;
   }
 };
@@ -891,14 +891,14 @@ struct mi_anchor_step_t : public mi_arpeggio_step_t {
 protected:
   int getValue(void) const override
   {
-    auto part_index = system_registry.chord_play.getEditTargetPart();
-    return system_registry.current_slot->chord_part[part_index].part_info.getAnchorStep() / 2 + 1;
+    auto part_index = system_registry->chord_play.getEditTargetPart();
+    return system_registry->current_slot->chord_part[part_index].part_info.getAnchorStep() / 2 + 1;
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
-    auto part_index = system_registry.chord_play.getEditTargetPart();
-    system_registry.current_slot->chord_part[part_index].part_info.setAnchorStep(value * 2 - 2);
+    auto part_index = system_registry->chord_play.getEditTargetPart();
+    system_registry->current_slot->chord_part[part_index].part_info.setAnchorStep(value * 2 - 2);
     return true;
   }
 };
@@ -916,14 +916,14 @@ struct mi_stroke_speed_t : public mi_selector_t {
 protected:
   int getValue(void) const override
   {
-    auto part_index = system_registry.chord_play.getEditTargetPart();
-    return system_registry.current_slot->chord_part[part_index].part_info.getStrokeSpeed() / 5;
+    auto part_index = system_registry->chord_play.getEditTargetPart();
+    return system_registry->current_slot->chord_part[part_index].part_info.getStrokeSpeed() / 5;
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
-    auto part_index = system_registry.chord_play.getEditTargetPart();
-    system_registry.current_slot->chord_part[part_index].part_info.setStrokeSpeed(value * 5);
+    auto part_index = system_registry->chord_play.getEditTargetPart();
+    system_registry->current_slot->chord_part[part_index].part_info.setStrokeSpeed(value * 5);
     return true;
   }
 };
@@ -940,7 +940,7 @@ struct mi_offbeat_style_t : public mi_selector_t {
 
   int getValue(void) const override
   {
-    return system_registry.user_setting.getOffbeatStyle();
+    return system_registry->user_setting.getOffbeatStyle();
   }
   bool setValue(int value) const override
   {
@@ -950,7 +950,7 @@ struct mi_offbeat_style_t : public mi_selector_t {
     default: break; 
     case 2: style = def::play::offbeat_style_t::offbeat_self; break;
     }
-    system_registry.user_setting.setOffbeatStyle(style);
+    system_registry->user_setting.setOffbeatStyle(style);
     return true;
   }
 };
@@ -968,7 +968,7 @@ struct mi_slot_playmode_t : public mi_selector_t {
 
   int getValue(void) const override
   {
-    return system_registry.current_slot->slot_info.getPlayMode();
+    return system_registry->current_slot->slot_info.getPlayMode();
   }
   bool setValue(int value) const override
   {
@@ -980,8 +980,8 @@ struct mi_slot_playmode_t : public mi_selector_t {
     case 2: mode = def::playmode::playmode_t::note_mode; break;
     case 3: mode = def::playmode::playmode_t::drum_mode; break;
     }
-    system_registry.operator_command.addQueue({ def::command::play_mode_set, mode });
-    // system_registry.current_slot->slot_info.setPlayMode(mode);
+    system_registry->operator_command.addQueue({ def::command::play_mode_set, mode });
+    // system_registry->current_slot->slot_info.setPlayMode(mode);
     return true;
   }
 };
@@ -1002,14 +1002,14 @@ struct mi_slot_key_t : public mi_selector_t {
 
   int getValue(void) const override
   {
-    auto key_offset = system_registry.current_slot->slot_info.getKeyOffset();
+    auto key_offset = system_registry->current_slot->slot_info.getKeyOffset();
     return key_offset + 12;
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
     auto key_offset = value - 12;
-    system_registry.current_slot->slot_info.setKeyOffset(key_offset);
+    system_registry->current_slot->slot_info.setKeyOffset(key_offset);
     return true;
   }
 };
@@ -1026,12 +1026,12 @@ struct mi_slot_step_beat_t : public mi_selector_t {
 
   int getValue(void) const override
   {
-    return system_registry.current_slot->slot_info.getStepPerBeat();
+    return system_registry->current_slot->slot_info.getStepPerBeat();
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
-    system_registry.current_slot->slot_info.setStepPerBeat(value);
+    system_registry->current_slot->slot_info.setStepPerBeat(value);
     return true;
   }
 };
@@ -1048,9 +1048,9 @@ struct mi_song_step_beat_t : public mi_selector_t {
 
   int getValue(void) const override
   {
-    auto step_per_beat = system_registry.current_slot->slot_info.getStepPerBeat();
+    auto step_per_beat = system_registry->current_slot->slot_info.getStepPerBeat();
     for (size_t i = 0; i < def::app::max_slot; ++i) {
-      if (system_registry.song_data.slot[i].slot_info.getStepPerBeat() != step_per_beat) {
+      if (system_registry->song_data.slot[i].slot_info.getStepPerBeat() != step_per_beat) {
         return 5; // "Each"
       }
     }
@@ -1064,14 +1064,14 @@ struct mi_song_step_beat_t : public mi_selector_t {
     }
     auto prev_value = getValue();
     for (size_t i = 0; i < def::app::max_slot; ++i) {
-      system_registry.song_data.slot[i].slot_info.setStepPerBeat(value);
+      system_registry->song_data.slot[i].slot_info.setStepPerBeat(value);
     }
     if ((prev_value != value) && (prev_value <= 4)) {
-      auto tempo = system_registry.song_data.song_info.getTempo();
+      auto tempo = system_registry->song_data.song_info.getTempo();
 
       // ステップ/ビートが変更された場合、テンポを調整する
       uint16_t new_tempo = (tempo * prev_value) / value;
-      system_registry.song_data.song_info.setTempo(new_tempo);
+      system_registry->song_data.song_info.setTempo(new_tempo);
     }
 
     return true;
@@ -1092,24 +1092,24 @@ struct mi_slot_clipboard_t : public mi_selector_t {
 
   bool execute(void) const override
   {
-    // auto part_index = system_registry.chord_play.getEditTargetPart();
-    // auto slot_index = system_registry.runtime_info.getPlaySlot();
-    // auto slot = &system_registry.song_data.slot[slot_index];
+    // auto part_index = system_registry->chord_play.getEditTargetPart();
+    // auto slot_index = system_registry->runtime_info.getPlaySlot();
+    // auto slot = &system_registry->song_data.slot[slot_index];
     switch (getSelectingValue()) {
     case 1:
-      system_registry.clipboard_slot.assign(*system_registry.current_slot);
-      system_registry.popup_notify.setPopup(true, def::notify_type_t::NOTIFY_COPY_SLOT_SETTING);
-      system_registry.clipboard_content = system_registry_t::clipboard_contetn_t::CLIPBOARD_CONTENT_SLOT;
+      system_registry->clipboard_slot.assign(*system_registry->current_slot);
+      system_registry->popup_notify.setPopup(true, def::notify_type_t::NOTIFY_COPY_SLOT_SETTING);
+      system_registry->clipboard_content = system_registry_t::clipboard_contetn_t::CLIPBOARD_CONTENT_SLOT;
       // M5_LOGV("mi_slot_clipboard_t: Copy Setting");
       break;
 
     case 2:
       {
-        bool flg = (system_registry.clipboard_content == system_registry_t::clipboard_contetn_t::CLIPBOARD_CONTENT_SLOT);
+        bool flg = (system_registry->clipboard_content == system_registry_t::clipboard_contetn_t::CLIPBOARD_CONTENT_SLOT);
         if (flg) {
-          system_registry.current_slot->assign(system_registry.clipboard_slot);
+          system_registry->current_slot->assign(system_registry->clipboard_slot);
         }
-        system_registry.popup_notify.setPopup(flg, def::notify_type_t::NOTIFY_PASTE_SLOT_SETTING);
+        system_registry->popup_notify.setPopup(flg, def::notify_type_t::NOTIFY_PASTE_SLOT_SETTING);
       }
       break;
 
@@ -1135,21 +1135,21 @@ struct mi_part_clipboard_t : public mi_selector_t {
 
   bool execute(void) const override
   {
-    auto part_index = system_registry.chord_play.getEditTargetPart();
+    auto part_index = system_registry->chord_play.getEditTargetPart();
     switch (getSelectingValue()) {
     case 1:
-      system_registry.clipboard_slot.chord_part[0].assign(system_registry.current_slot->chord_part[part_index]);
-      system_registry.popup_notify.setPopup(true, def::notify_type_t::NOTIFY_COPY_PART_SETTING);
-      system_registry.clipboard_content = system_registry_t::clipboard_contetn_t::CLIPBOARD_CONTENT_PART;
+      system_registry->clipboard_slot.chord_part[0].assign(system_registry->current_slot->chord_part[part_index]);
+      system_registry->popup_notify.setPopup(true, def::notify_type_t::NOTIFY_COPY_PART_SETTING);
+      system_registry->clipboard_content = system_registry_t::clipboard_contetn_t::CLIPBOARD_CONTENT_PART;
       break;
 
     case 2:
       {
-        bool flg = (system_registry.clipboard_content == system_registry_t::clipboard_contetn_t::CLIPBOARD_CONTENT_PART);
+        bool flg = (system_registry->clipboard_content == system_registry_t::clipboard_contetn_t::CLIPBOARD_CONTENT_PART);
         if (flg) {
-          system_registry.current_slot->chord_part[part_index].assign(system_registry.clipboard_slot.chord_part[0]);
+          system_registry->current_slot->chord_part[part_index].assign(system_registry->clipboard_slot.chord_part[0]);
         }
-        system_registry.popup_notify.setPopup(flg, def::notify_type_t::NOTIFY_PASTE_PART_SETTING);
+        system_registry->popup_notify.setPopup(flg, def::notify_type_t::NOTIFY_PASTE_PART_SETTING);
       }
       break;
 
@@ -1172,17 +1172,17 @@ protected:
 
   int getValue(void) const override
   {
-    return system_registry.song_data.song_info.getTempo();
-    // return system_registry.current_slot->slot_info.getTempo();
+    return system_registry->song_data.song_info.getTempo();
+    // return system_registry->current_slot->slot_info.getTempo();
   }
   bool setValue(int value) const override
   {
     if (mi_normal_t::setValue(value) == false) { return false; }
-    system_registry.song_data.song_info.setTempo(value);
+    system_registry->song_data.song_info.setTempo(value);
 /*
-    system_registry.current_slot->slot_info.setTempo(value);
+    system_registry->current_slot->slot_info.setTempo(value);
     for (int i = 0; i < def::app::max_slot; ++i) {
-      system_registry.song_data.slot[i].slot_info.setTempo(value);
+      system_registry->song_data.slot[i].slot_info.setTempo(value);
     }
 */
     return true;
@@ -1213,17 +1213,17 @@ protected:
 
   int getValue(void) const override
   {
-    return system_registry.song_data.song_info.getSwing() / 10;
-    // return system_registry.current_slot->slot_info.getSwing();
+    return system_registry->song_data.song_info.getSwing() / 10;
+    // return system_registry->current_slot->slot_info.getSwing();
   }
   bool setValue(int value) const override
   {
     if (mi_normal_t::setValue(value) == false) { return false; }
-    system_registry.song_data.song_info.setSwing(value * 10);
+    system_registry->song_data.song_info.setSwing(value * 10);
 /*
-    system_registry.current_slot->slot_info.setSwing(value);
+    system_registry->current_slot->slot_info.setSwing(value);
     for (int i = 0; i < def::app::max_slot; ++i) {
-      system_registry.song_data.slot[i].slot_info.setSwing(value);
+      system_registry->song_data.slot[i].slot_info.setSwing(value);
     }
 */
     return true;
@@ -1257,14 +1257,14 @@ protected:
 
   int getValue(void) const override
   {
-    int part_index = system_registry.chord_play.getEditTargetPart();
-    return system_registry.song_data.chord_part_drum[part_index].getDrumNoteNumber(_pitch_number);
+    int part_index = system_registry->chord_play.getEditTargetPart();
+    return system_registry->song_data.chord_part_drum[part_index].getDrumNoteNumber(_pitch_number);
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
-    int part_index = system_registry.chord_play.getEditTargetPart();
-    system_registry.song_data.chord_part_drum[part_index].setDrumNoteNumber(_pitch_number, value);
+    int part_index = system_registry->chord_play.getEditTargetPart();
+    system_registry->song_data.chord_part_drum[part_index].setDrumNoteNumber(_pitch_number, value);
     return true;
   }
 };
@@ -1275,7 +1275,7 @@ enum class ctrl_map_target_t : uint8_t {
 };
 
 struct mi_ctrl_assign_t : public mi_normal_t {
-  constexpr mi_ctrl_assign_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, const def::ctrl_assign::control_assignment_t table[], uint16_t size, ctrl_map_target_t map_target)
+  constexpr mi_ctrl_assign_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, const def::ctrl_assign::control_assignment_t table[], uint16_t size, def::mapping::target_t map_target)
   : mi_normal_t { cate, menu_id, level, title }
   , _table { table }
   , _size { size }
@@ -1293,19 +1293,19 @@ struct mi_ctrl_assign_t : public mi_normal_t {
 protected:
   const def::ctrl_assign::control_assignment_t* _table;
   const uint16_t _size;
-  const ctrl_map_target_t _map_target;
+  const def::mapping::target_t _map_target;
 };
 
 // control assignment for internal
 struct mi_ca_internal_t : public mi_ctrl_assign_t {
 public:
-  constexpr mi_ca_internal_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, uint8_t button_index, ctrl_map_target_t map_target)
+  constexpr mi_ca_internal_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, uint8_t button_index, def::mapping::target_t map_target)
   : mi_ctrl_assign_t { cate, menu_id, level, title, def::ctrl_assign::playbutton_table, sizeof(def::ctrl_assign::playbutton_table) / sizeof(def::ctrl_assign::playbutton_table[0])-1, map_target }
   , _button_index { button_index } {}
 
   int getValue(void) const override
   {
-    auto cmd = system_registry.command_mapping_custom_main.getCommandParamArray(_button_index);
+    auto cmd = system_registry->command_mapping_custom_main.getCommandParamArray(_button_index);
     int index = def::ctrl_assign::get_index_from_command(_table, cmd);
     if (index < 0) {
       index = 0;
@@ -1316,7 +1316,7 @@ public:
   {
     if (mi_ctrl_assign_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    system_registry.command_mapping_custom_main.setCommandParamArray(_button_index, _table[value].command);
+    system_registry->command_mapping_custom_main.setCommandParamArray(_button_index, _table[value].command);
     return true;
   }
 
@@ -1327,13 +1327,13 @@ protected:
 // control assignment for internal
 struct mi_ca_external_t : public mi_ctrl_assign_t {
 public:
-  constexpr mi_ca_external_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, uint8_t button_index, ctrl_map_target_t map_target)
+  constexpr mi_ca_external_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, uint8_t button_index, def::mapping::target_t map_target)
   : mi_ctrl_assign_t { cate, menu_id, level, title, def::ctrl_assign::external_table, sizeof(def::ctrl_assign::external_table) / sizeof(def::ctrl_assign::external_table[0])-1, map_target }
   , _button_index { button_index } {}
 
   int getValue(void) const override
   {
-    auto cmd = system_registry.command_mapping_external.getCommandParamArray(_button_index);
+    auto cmd = system_registry->command_mapping_external.getCommandParamArray(_button_index);
     int index = def::ctrl_assign::get_index_from_command(_table, cmd);
     if (index < 0) {
       index = 0;
@@ -1344,7 +1344,7 @@ public:
   {
     if (mi_ctrl_assign_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    system_registry.command_mapping_external.setCommandParamArray(_button_index, _table[value].command);
+    system_registry->command_mapping_external.setCommandParamArray(_button_index, _table[value].command);
     return true;
   }
 
@@ -1354,13 +1354,13 @@ protected:
 
 struct mi_ca_midinote_t : public mi_ctrl_assign_t {
 public:
-  constexpr mi_ca_midinote_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, uint8_t button_index, ctrl_map_target_t map_target)
+  constexpr mi_ca_midinote_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, uint8_t button_index, def::mapping::target_t map_target)
   : mi_ctrl_assign_t { cate, menu_id, level, title, def::ctrl_assign::external_table, sizeof(def::ctrl_assign::external_table) / sizeof(def::ctrl_assign::external_table[0])-1, map_target }
   , _button_index { button_index } {}
 
   int getValue(void) const override
   {
-    auto cmd = system_registry.command_mapping_midinote.getCommandParamArray(_button_index);
+    auto cmd = system_registry->command_mapping_midinote.getCommandParamArray(_button_index);
     int index = def::ctrl_assign::get_index_from_command(_table, cmd);
     if (index < 0) {
       index = 0;
@@ -1371,7 +1371,7 @@ public:
   {
     if (mi_ctrl_assign_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    system_registry.command_mapping_midinote.setCommandParamArray(_button_index, _table[value].command);
+    system_registry->command_mapping_midinote.setCommandParamArray(_button_index, _table[value].command);
     return true;
   }
 
@@ -1398,13 +1398,13 @@ struct mi_portc_midi_t : public mi_midi_selector_t {
   : mi_midi_selector_t { cate, menu_id, level, title } {}
   int getValue(void) const override
   {
-    return getMinValue() + system_registry.midi_port_setting.getPortCMIDI();
+    return getMinValue() + system_registry->midi_port_setting.getPortCMIDI();
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    system_registry.midi_port_setting.setPortCMIDI( static_cast<def::command::ex_midi_mode_t>(value));
+    system_registry->midi_port_setting.setPortCMIDI( static_cast<def::command::ex_midi_mode_t>(value));
     return true;
   }
 };
@@ -1414,13 +1414,13 @@ struct mi_ble_midi_t : public mi_midi_selector_t {
   : mi_midi_selector_t { cate, menu_id, level, title } {}
   int getValue(void) const override
   {
-    return getMinValue() + system_registry.midi_port_setting.getBLEMIDI();
+    return getMinValue() + system_registry->midi_port_setting.getBLEMIDI();
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    system_registry.midi_port_setting.setBLEMIDI( static_cast<def::command::ex_midi_mode_t>(value));
+    system_registry->midi_port_setting.setBLEMIDI( static_cast<def::command::ex_midi_mode_t>(value));
     return true;
   }
 };
@@ -1430,13 +1430,13 @@ struct mi_usb_midi_t : public mi_midi_selector_t {
   : mi_midi_selector_t { cate, menu_id, level, title } {}
   int getValue(void) const override
   {
-    return getMinValue() + system_registry.midi_port_setting.getUSBMIDI();
+    return getMinValue() + system_registry->midi_port_setting.getUSBMIDI();
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    system_registry.midi_port_setting.setUSBMIDI( static_cast<def::command::ex_midi_mode_t>(value));
+    system_registry->midi_port_setting.setUSBMIDI( static_cast<def::command::ex_midi_mode_t>(value));
     return true;
   }
 };
@@ -1453,13 +1453,13 @@ public:
   : mi_selector_t { cate, menu_id, level, title, &name_array } {}
   int getValue(void) const override
   {
-    return getMinValue() + system_registry.midi_port_setting.getUSBMode();
+    return getMinValue() + system_registry->midi_port_setting.getUSBMode();
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    system_registry.midi_port_setting.setUSBMode( static_cast<def::command::usb_mode_t>(value));
+    system_registry->midi_port_setting.setUSBMode( static_cast<def::command::usb_mode_t>(value));
     return true;
   }
 };
@@ -1476,13 +1476,13 @@ public:
   : mi_selector_t { cate, menu_id, level, title, &name_array } {}
   int getValue(void) const override
   {
-    return getMinValue() + system_registry.midi_port_setting.getUSBPowerEnabled();
+    return getMinValue() + system_registry->midi_port_setting.getUSBPowerEnabled();
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    system_registry.midi_port_setting.setUSBPowerEnabled( static_cast<bool>(value));
+    system_registry->midi_port_setting.setUSBPowerEnabled( static_cast<bool>(value));
     return true;
   }
 };
@@ -1500,13 +1500,13 @@ public:
   : mi_selector_t { cate, menu_id, level, title, &name_array } {}
   int getValue(void) const override
   {
-    return getMinValue() + system_registry.midi_port_setting.getInstaChordLinkPort();
+    return getMinValue() + system_registry->midi_port_setting.getInstaChordLinkPort();
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    system_registry.midi_port_setting.setInstaChordLinkPort( static_cast<def::command::instachord_link_port_t>(value));
+    system_registry->midi_port_setting.setInstaChordLinkPort( static_cast<def::command::instachord_link_port_t>(value));
     return true;
   }
 };
@@ -1523,13 +1523,13 @@ public:
   : mi_selector_t { cate, menu_id, level, title, &name_array } {}
   int getValue(void) const override
   {
-    return getMinValue() + system_registry.midi_port_setting.getInstaChordLinkDev();
+    return getMinValue() + system_registry->midi_port_setting.getInstaChordLinkDev();
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    system_registry.midi_port_setting.setInstaChordLinkDev( static_cast<def::command::instachord_link_dev_t>(value));
+    system_registry->midi_port_setting.setInstaChordLinkDev( static_cast<def::command::instachord_link_dev_t>(value));
     return true;
   }
 };
@@ -1546,13 +1546,13 @@ public:
   : mi_selector_t { cate, menu_id, level, title, &name_array } {}
   int getValue(void) const override
   {
-    return getMinValue() + system_registry.midi_port_setting.getInstaChordLinkStyle();
+    return getMinValue() + system_registry->midi_port_setting.getInstaChordLinkStyle();
   }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    system_registry.midi_port_setting.setInstaChordLinkStyle( static_cast<def::command::instachord_link_style_t>(value));
+    system_registry->midi_port_setting.setInstaChordLinkStyle( static_cast<def::command::instachord_link_style_t>(value));
     return true;
   }
 };
@@ -1570,10 +1570,10 @@ struct mi_otaupdate_t : public mi_normal_t {
   bool enter(void) const override
   {
     // OTAを実施する際にオートプレイは無効にする
-    system_registry.runtime_info.setAutoplayState(def::play::auto_play_mode_t::auto_play_none);
+    system_registry->runtime_info.setAutoplayState(def::play::auto_play_state_t::auto_play_none);
 
-    system_registry.runtime_info.setWiFiOtaProgress(def::command::wifi_ota_state_t::ota_connecting);
-    system_registry.wifi_control.setOperation(def::command::wifi_operation_t::wfop_ota_begin);
+    system_registry->runtime_info.setWiFiOtaProgress(def::command::wifi_ota_state_t::ota_connecting);
+    system_registry->wifi_control.setOperation(def::command::wifi_operation_t::wfop_ota_begin);
     return mi_normal_t::enter();
   }
   bool exit(void) const override
@@ -1583,8 +1583,8 @@ struct mi_otaupdate_t : public mi_normal_t {
       // OTAの途中でメニューを閉じることはできない
       return true;
     }
-    system_registry.wifi_control.setOperation(def::command::wifi_operation_t::wfop_disable);
-    system_registry.runtime_info.setWiFiOtaProgress(0);
+    system_registry->wifi_control.setOperation(def::command::wifi_operation_t::wfop_disable);
+    system_registry->runtime_info.setWiFiOtaProgress(0);
     return mi_normal_t::exit();
   }
 
@@ -1608,7 +1608,7 @@ struct mi_otaupdate_t : public mi_normal_t {
 
   int getSelectingValue(void) const override
   {
-    return system_registry.runtime_info.getWiFiOtaProgress();
+    return system_registry->runtime_info.getWiFiOtaProgress();
   }
 };
 
@@ -1632,14 +1632,14 @@ public:
     auto result = mi_selector_t::getSelectingValue();
 
     if (result == 1) {
-      if (system_registry.wifi_control.getOperation() == def::command::wifi_operation_t::wfop_setup_ap) {
-        qrtype = system_registry.runtime_info.getWiFiStationCount()
+      if (system_registry->wifi_control.getOperation() == def::command::wifi_operation_t::wfop_setup_ap) {
+        qrtype = system_registry->runtime_info.getWiFiStationCount()
                     ? def::qrcode_type_t::QRCODE_URL_DEVICE
                     : def::qrcode_type_t::QRCODE_AP_SSID;
       }
     }
-    if (system_registry.popup_qr.getQRCodeType() != qrtype) {
-      system_registry.popup_qr.setQRCodeType(qrtype);
+    if (system_registry->popup_qr.getQRCodeType() != qrtype) {
+      system_registry->popup_qr.setQRCodeType(qrtype);
       if (result == 1 && qrtype == def::qrcode_type_t::QRCODE_NONE) {
         exit();
       }
@@ -1649,17 +1649,17 @@ public:
   bool execute(void) const override
   {
     if (getSelectingValue() == 1) {
-      system_registry.wifi_control.setOperation(def::command::wifi_operation_t::wfop_setup_ap);
+      system_registry->wifi_control.setOperation(def::command::wifi_operation_t::wfop_setup_ap);
     } else {
-      system_registry.wifi_control.setOperation(def::command::wifi_operation_t::wfop_setup_wps);
+      system_registry->wifi_control.setOperation(def::command::wifi_operation_t::wfop_setup_wps);
     }
     return false;
   }
 
   bool exit(void) const override
   {
-    system_registry.wifi_control.setOperation(def::command::wifi_operation_t::wfop_disable);
-    system_registry.popup_qr.setQRCodeType(def::qrcode_type_t::QRCODE_NONE);
+    system_registry->wifi_control.setOperation(def::command::wifi_operation_t::wfop_disable);
+    system_registry->popup_qr.setQRCodeType(def::qrcode_type_t::QRCODE_NONE);
     return mi_normal_t::exit();
   }
 };
@@ -1675,13 +1675,13 @@ struct mi_manual_qr_t : public mi_normal_t {
 
   bool execute(void) const override
   {
-    system_registry.popup_qr.setQRCodeType(def::qrcode_type_t::QRCODE_URL_MANUAL);
+    system_registry->popup_qr.setQRCodeType(def::qrcode_type_t::QRCODE_URL_MANUAL);
     return false;
   }
 
   bool exit(void) const override
   {
-    system_registry.popup_qr.setQRCodeType(def::qrcode_type_t::QRCODE_NONE);
+    system_registry->popup_qr.setQRCodeType(def::qrcode_type_t::QRCODE_NONE);
     return mi_normal_t::exit();
   }
 };
@@ -1719,7 +1719,7 @@ protected:
 
   int getValue(void) const override
   {
-    auto songinfo = system_registry.file_command.getCurrentSongInfo();
+    auto songinfo = system_registry->file_command.getCurrentSongInfo();
     if (songinfo.dir_type == _dir_type) {
       return songinfo.file_index + getMinValue();
     }
@@ -1739,25 +1739,25 @@ protected:
 
   bool enter(void) const override
   {
-    system_registry.backup_song_data.assign(system_registry.song_data);
-    system_registry.file_command.setUpdateList(_dir_type);
+    system_registry->backup_song_data.assign(system_registry->song_data);
+    system_registry->file_command.setUpdateList(_dir_type);
     M5.delay(64);
     return mi_filelist_t::enter();
   }
 /*
   bool exit(void) const override
   {
-    system_registry.song_data.assign(system_registry.backup_song_data);
+    system_registry->song_data.assign(system_registry->backup_song_data);
     return mi_filelist_t::exit();
   }
 //*/
   bool execute(void) const override
   {
-    auto songinfo = system_registry.file_command.getCurrentSongInfo();
+    auto songinfo = system_registry->file_command.getCurrentSongInfo();
     songinfo.file_index = _selecting_value - getMinValue();
     songinfo.dir_type = _dir_type;
-    system_registry.file_command.setFileLoadRequest(songinfo);
-    system_registry.file_command.setCurrentSongInfo(songinfo);
+    system_registry->file_command.setFileLoadRequest(songinfo);
+    system_registry->file_command.setCurrentSongInfo(songinfo);
     return mi_filelist_t::execute();
   }
 };
@@ -1812,11 +1812,11 @@ protected:
     mem->filename = _filenames[index];
     mem->dir_type = _dir_type;
 
-    system_registry.unchanged_song_data.assign(system_registry.song_data);
-    auto len = system_registry.unchanged_song_data.saveSongJSON(mem->data, def::app::max_file_len);
+    system_registry->unchanged_song_data.assign(system_registry->song_data);
+    auto len = system_registry->unchanged_song_data.saveSongJSON(mem->data, def::app::max_file_len);
     mem->size = len;
     if (len == 0 || mem->data[0] != '{') {
-      system_registry.popup_notify.setPopup(false, def::notify_type_t::NOTIFY_FILE_SAVE);
+      system_registry->popup_notify.setPopup(false, def::notify_type_t::NOTIFY_FILE_SAVE);
       M5_LOGE("mi_save_t: saveSongJSON failed");
       return false;
     }
@@ -1824,7 +1824,7 @@ protected:
     info.mem_index = mem->index;
     info.dir_type = _dir_type;
     info.file_index = -1;
-    system_registry.file_command.setFileSaveRequest(info);
+    system_registry->file_command.setFileSaveRequest(info);
     return mi_normal_t::execute();
   }
 protected:
@@ -1863,360 +1863,360 @@ static constexpr menu_item_ptr menu_system[] = {
   MENU_BUILDER(mi_tree_t          ,  2   , { "Control Mapping", "操作マッピング" }),
   MENU_BUILDER(mi_tree_t          ,   3  , { "Mapping 1(Device)", "マッピング1 (本体)" }),
   MENU_BUILDER(mi_tree_t          ,    4 , { "Play Button"   , "プレイボタン" }),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 1"      , "ボタン 1"     },  1 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 2"      , "ボタン 2"     },  2 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 3"      , "ボタン 3"     },  3 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 4"      , "ボタン 4"     },  4 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 5"      , "ボタン 5"     },  5 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 6"      , "ボタン 6"     },  6 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 7"      , "ボタン 7"     },  7 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 8"      , "ボタン 8"     },  8 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 9"      , "ボタン 9"     },  9 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 10"     , "ボタン 10"    }, 10 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 11"     , "ボタン 11"    }, 11 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 12"     , "ボタン 12"    }, 12 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 13"     , "ボタン 13"    }, 13 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 14"     , "ボタン 14"    }, 14 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 15"     , "ボタン 15"    }, 15 - 1, ctrl_map_target_t::ctrl_map_device),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 1"      , "ボタン 1"     },  1 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 2"      , "ボタン 2"     },  2 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 3"      , "ボタン 3"     },  3 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 4"      , "ボタン 4"     },  4 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 5"      , "ボタン 5"     },  5 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 6"      , "ボタン 6"     },  6 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 7"      , "ボタン 7"     },  7 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 8"      , "ボタン 8"     },  8 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 9"      , "ボタン 9"     },  9 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 10"     , "ボタン 10"    }, 10 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 11"     , "ボタン 11"    }, 11 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 12"     , "ボタン 12"    }, 12 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 13"     , "ボタン 13"    }, 13 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 14"     , "ボタン 14"    }, 14 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 15"     , "ボタン 15"    }, 15 - 1, def::mapping::target_t::device),
   MENU_BUILDER(mi_tree_t          ,    4 , { "Ext Input"     , "拡張入力"     }),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 1"        , "拡張 1"       },   1 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 2"        , "拡張 2"       },   2 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 3"        , "拡張 3"       },   3 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 4"        , "拡張 4"       },   4 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 5"        , "拡張 5"       },   5 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 6"        , "拡張 6"       },   6 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 7"        , "拡張 7"       },   7 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 8"        , "拡張 8"       },   8 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 9"        , "拡張 9"       },   9 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 10"       , "拡張 10"      },  10 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 11"       , "拡張 11"      },  11 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 12"       , "拡張 12"      },  12 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 13"       , "拡張 13"      },  13 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 14"       , "拡張 14"      },  14 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 15"       , "拡張 15"      },  15 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 16"       , "拡張 16"      },  16 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 17"       , "拡張 17"      },  17 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 18"       , "拡張 18"      },  18 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 19"       , "拡張 19"      },  19 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 20"       , "拡張 20"      },  20 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 21"       , "拡張 21"      },  21 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 22"       , "拡張 22"      },  22 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 23"       , "拡張 23"      },  23 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 24"       , "拡張 24"      },  24 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 25"       , "拡張 25"      },  25 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 26"       , "拡張 26"      },  26 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 27"       , "拡張 27"      },  27 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 28"       , "拡張 28"      },  28 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 29"       , "拡張 29"      },  29 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 30"       , "拡張 30"      },  30 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 31"       , "拡張 31"      },  31 - 1, ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 32"       , "拡張 32"      },  32 - 1, ctrl_map_target_t::ctrl_map_device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 1"        , "拡張 1"       },   1 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 2"        , "拡張 2"       },   2 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 3"        , "拡張 3"       },   3 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 4"        , "拡張 4"       },   4 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 5"        , "拡張 5"       },   5 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 6"        , "拡張 6"       },   6 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 7"        , "拡張 7"       },   7 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 8"        , "拡張 8"       },   8 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 9"        , "拡張 9"       },   9 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 10"       , "拡張 10"      },  10 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 11"       , "拡張 11"      },  11 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 12"       , "拡張 12"      },  12 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 13"       , "拡張 13"      },  13 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 14"       , "拡張 14"      },  14 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 15"       , "拡張 15"      },  15 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 16"       , "拡張 16"      },  16 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 17"       , "拡張 17"      },  17 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 18"       , "拡張 18"      },  18 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 19"       , "拡張 19"      },  19 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 20"       , "拡張 20"      },  20 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 21"       , "拡張 21"      },  21 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 22"       , "拡張 22"      },  22 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 23"       , "拡張 23"      },  23 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 24"       , "拡張 24"      },  24 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 25"       , "拡張 25"      },  25 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 26"       , "拡張 26"      },  26 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 27"       , "拡張 27"      },  27 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 28"       , "拡張 28"      },  28 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 29"       , "拡張 29"      },  29 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 30"       , "拡張 30"      },  30 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 31"       , "拡張 31"      },  31 - 1, def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 32"       , "拡張 32"      },  32 - 1, def::mapping::target_t::device),
   MENU_BUILDER(mi_tree_t          ,    4 , { "MIDI Note"     , "MIDI Note"    }),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C#-1" , nullptr },   1 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D -1" , nullptr },   2 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D#-1" , nullptr },   3 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E -1" , nullptr },   4 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F -1" , nullptr },   5 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F#-1" , nullptr },   6 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G -1" , nullptr },   7 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G#-1" , nullptr },   8 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A -1" , nullptr },   9 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A#-1" , nullptr },  10 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B -1" , nullptr },  11 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  0" , nullptr },  12 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 0" , nullptr },  13 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  0" , nullptr },  14 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 0" , nullptr },  15 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  0" , nullptr },  16 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  0" , nullptr },  17 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 0" , nullptr },  18 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  0" , nullptr },  19 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 0" , nullptr },  20 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  0" , nullptr },  21 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 0" , nullptr },  22 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  0" , nullptr },  23 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  1" , nullptr },  24 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 1" , nullptr },  25 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  1" , nullptr },  26 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 1" , nullptr },  27 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  1" , nullptr },  28 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  1" , nullptr },  29 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 1" , nullptr },  30 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  1" , nullptr },  31 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 1" , nullptr },  32 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  1" , nullptr },  33 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 1" , nullptr },  34 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  1" , nullptr },  35 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  2" , nullptr },  36 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 2" , nullptr },  37 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  2" , nullptr },  38 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 2" , nullptr },  39 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  2" , nullptr },  40 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  2" , nullptr },  41 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 2" , nullptr },  42 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  2" , nullptr },  43 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 2" , nullptr },  44 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  2" , nullptr },  45 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 2" , nullptr },  46 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  2" , nullptr },  47 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  3" , nullptr },  48 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 3" , nullptr },  49 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  3" , nullptr },  50 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 3" , nullptr },  51 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  3" , nullptr },  52 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  3" , nullptr },  53 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 3" , nullptr },  54 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  3" , nullptr },  55 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 3" , nullptr },  56 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  3" , nullptr },  57 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 3" , nullptr },  58 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  3" , nullptr },  59 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  4" , nullptr },  60 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 4" , nullptr },  61 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  4" , nullptr },  62 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 4" , nullptr },  63 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  4" , nullptr },  64 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  4" , nullptr },  65 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 4" , nullptr },  66 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  4" , nullptr },  67 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 4" , nullptr },  68 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  4" , nullptr },  69 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 4" , nullptr },  70 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  4" , nullptr },  71 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  5" , nullptr },  72 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 5" , nullptr },  73 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  5" , nullptr },  74 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 5" , nullptr },  75 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  5" , nullptr },  76 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  5" , nullptr },  77 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 5" , nullptr },  78 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  5" , nullptr },  79 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 5" , nullptr },  80 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  5" , nullptr },  81 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 5" , nullptr },  82 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  5" , nullptr },  83 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  6" , nullptr },  84 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 6" , nullptr },  85 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  6" , nullptr },  86 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 6" , nullptr },  87 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  6" , nullptr },  88 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  6" , nullptr },  89 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 6" , nullptr },  90 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  6" , nullptr },  91 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 6" , nullptr },  92 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  6" , nullptr },  93 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 6" , nullptr },  94 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  6" , nullptr },  95 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  7" , nullptr },  96 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 7" , nullptr },  97 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  7" , nullptr },  98 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 7" , nullptr },  99 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  7" , nullptr }, 100 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  7" , nullptr }, 101 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 7" , nullptr }, 102 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  7" , nullptr }, 103 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 7" , nullptr }, 104 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  7" , nullptr }, 105 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 7" , nullptr }, 106 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  7" , nullptr }, 107 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  8" , nullptr }, 108 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 8" , nullptr }, 109 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  8" , nullptr }, 110 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 8" , nullptr }, 111 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  8" , nullptr }, 112 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  8" , nullptr }, 113 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 8" , nullptr }, 114 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  8" , nullptr }, 115 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 8" , nullptr }, 116 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  8" , nullptr }, 117 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 8" , nullptr }, 118 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  8" , nullptr }, 119 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  9" , nullptr }, 120 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 9" , nullptr }, 121 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  9" , nullptr }, 122 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 9" , nullptr }, 123 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  9" , nullptr }, 124 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  9" , nullptr }, 125 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 9" , nullptr }, 126 , ctrl_map_target_t::ctrl_map_device),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  9" , nullptr }, 127 , ctrl_map_target_t::ctrl_map_device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C#-1" , nullptr },   1 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D -1" , nullptr },   2 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D#-1" , nullptr },   3 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E -1" , nullptr },   4 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F -1" , nullptr },   5 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F#-1" , nullptr },   6 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G -1" , nullptr },   7 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G#-1" , nullptr },   8 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A -1" , nullptr },   9 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A#-1" , nullptr },  10 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B -1" , nullptr },  11 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  0" , nullptr },  12 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 0" , nullptr },  13 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  0" , nullptr },  14 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 0" , nullptr },  15 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  0" , nullptr },  16 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  0" , nullptr },  17 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 0" , nullptr },  18 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  0" , nullptr },  19 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 0" , nullptr },  20 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  0" , nullptr },  21 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 0" , nullptr },  22 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  0" , nullptr },  23 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  1" , nullptr },  24 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 1" , nullptr },  25 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  1" , nullptr },  26 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 1" , nullptr },  27 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  1" , nullptr },  28 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  1" , nullptr },  29 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 1" , nullptr },  30 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  1" , nullptr },  31 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 1" , nullptr },  32 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  1" , nullptr },  33 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 1" , nullptr },  34 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  1" , nullptr },  35 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  2" , nullptr },  36 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 2" , nullptr },  37 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  2" , nullptr },  38 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 2" , nullptr },  39 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  2" , nullptr },  40 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  2" , nullptr },  41 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 2" , nullptr },  42 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  2" , nullptr },  43 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 2" , nullptr },  44 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  2" , nullptr },  45 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 2" , nullptr },  46 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  2" , nullptr },  47 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  3" , nullptr },  48 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 3" , nullptr },  49 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  3" , nullptr },  50 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 3" , nullptr },  51 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  3" , nullptr },  52 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  3" , nullptr },  53 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 3" , nullptr },  54 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  3" , nullptr },  55 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 3" , nullptr },  56 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  3" , nullptr },  57 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 3" , nullptr },  58 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  3" , nullptr },  59 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  4" , nullptr },  60 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 4" , nullptr },  61 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  4" , nullptr },  62 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 4" , nullptr },  63 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  4" , nullptr },  64 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  4" , nullptr },  65 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 4" , nullptr },  66 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  4" , nullptr },  67 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 4" , nullptr },  68 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  4" , nullptr },  69 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 4" , nullptr },  70 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  4" , nullptr },  71 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  5" , nullptr },  72 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 5" , nullptr },  73 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  5" , nullptr },  74 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 5" , nullptr },  75 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  5" , nullptr },  76 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  5" , nullptr },  77 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 5" , nullptr },  78 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  5" , nullptr },  79 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 5" , nullptr },  80 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  5" , nullptr },  81 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 5" , nullptr },  82 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  5" , nullptr },  83 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  6" , nullptr },  84 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 6" , nullptr },  85 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  6" , nullptr },  86 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 6" , nullptr },  87 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  6" , nullptr },  88 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  6" , nullptr },  89 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 6" , nullptr },  90 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  6" , nullptr },  91 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 6" , nullptr },  92 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  6" , nullptr },  93 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 6" , nullptr },  94 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  6" , nullptr },  95 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  7" , nullptr },  96 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 7" , nullptr },  97 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  7" , nullptr },  98 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 7" , nullptr },  99 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  7" , nullptr }, 100 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  7" , nullptr }, 101 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 7" , nullptr }, 102 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  7" , nullptr }, 103 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 7" , nullptr }, 104 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  7" , nullptr }, 105 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 7" , nullptr }, 106 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  7" , nullptr }, 107 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  8" , nullptr }, 108 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 8" , nullptr }, 109 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  8" , nullptr }, 110 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 8" , nullptr }, 111 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  8" , nullptr }, 112 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  8" , nullptr }, 113 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 8" , nullptr }, 114 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  8" , nullptr }, 115 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 8" , nullptr }, 116 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  8" , nullptr }, 117 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 8" , nullptr }, 118 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  8" , nullptr }, 119 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  9" , nullptr }, 120 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 9" , nullptr }, 121 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  9" , nullptr }, 122 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 9" , nullptr }, 123 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  9" , nullptr }, 124 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  9" , nullptr }, 125 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 9" , nullptr }, 126 , def::mapping::target_t::device),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  9" , nullptr }, 127 , def::mapping::target_t::device),
   MENU_BUILDER(mi_tree_t          ,   3  , { "Mapping 2(Song)", "マッピング1 (ソング)" }),
   MENU_BUILDER(mi_tree_t          ,    4 , { "Play Button"   , "プレイボタン" }),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 1"      , "ボタン 1"     },  1 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 2"      , "ボタン 2"     },  2 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 3"      , "ボタン 3"     },  3 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 4"      , "ボタン 4"     },  4 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 5"      , "ボタン 5"     },  5 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 6"      , "ボタン 6"     },  6 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 7"      , "ボタン 7"     },  7 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 8"      , "ボタン 8"     },  8 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 9"      , "ボタン 9"     },  9 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 10"     , "ボタン 10"    }, 10 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 11"     , "ボタン 11"    }, 11 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 12"     , "ボタン 12"    }, 12 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 13"     , "ボタン 13"    }, 13 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 14"     , "ボタン 14"    }, 14 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 15"     , "ボタン 15"    }, 15 - 1, ctrl_map_target_t::ctrl_map_song),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 1"      , "ボタン 1"     },  1 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 2"      , "ボタン 2"     },  2 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 3"      , "ボタン 3"     },  3 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 4"      , "ボタン 4"     },  4 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 5"      , "ボタン 5"     },  5 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 6"      , "ボタン 6"     },  6 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 7"      , "ボタン 7"     },  7 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 8"      , "ボタン 8"     },  8 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 9"      , "ボタン 9"     },  9 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 10"     , "ボタン 10"    }, 10 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 11"     , "ボタン 11"    }, 11 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 12"     , "ボタン 12"    }, 12 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 13"     , "ボタン 13"    }, 13 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 14"     , "ボタン 14"    }, 14 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 15"     , "ボタン 15"    }, 15 - 1, def::mapping::target_t::song),
   MENU_BUILDER(mi_tree_t          ,    4 , { "Ext Input"     , "拡張入力"     }),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 1"        , "拡張 1"       },   1 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 2"        , "拡張 2"       },   2 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 3"        , "拡張 3"       },   3 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 4"        , "拡張 4"       },   4 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 5"        , "拡張 5"       },   5 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 6"        , "拡張 6"       },   6 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 7"        , "拡張 7"       },   7 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 8"        , "拡張 8"       },   8 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 9"        , "拡張 9"       },   9 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 10"       , "拡張 10"      },  10 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 11"       , "拡張 11"      },  11 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 12"       , "拡張 12"      },  12 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 13"       , "拡張 13"      },  13 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 14"       , "拡張 14"      },  14 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 15"       , "拡張 15"      },  15 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 16"       , "拡張 16"      },  16 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 17"       , "拡張 17"      },  17 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 18"       , "拡張 18"      },  18 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 19"       , "拡張 19"      },  19 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 20"       , "拡張 20"      },  20 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 21"       , "拡張 21"      },  21 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 22"       , "拡張 22"      },  22 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 23"       , "拡張 23"      },  23 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 24"       , "拡張 24"      },  24 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 25"       , "拡張 25"      },  25 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 26"       , "拡張 26"      },  26 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 27"       , "拡張 27"      },  27 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 28"       , "拡張 28"      },  28 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 29"       , "拡張 29"      },  29 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 30"       , "拡張 30"      },  30 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 31"       , "拡張 31"      },  31 - 1, ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 32"       , "拡張 32"      },  32 - 1, ctrl_map_target_t::ctrl_map_song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 1"        , "拡張 1"       },   1 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 2"        , "拡張 2"       },   2 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 3"        , "拡張 3"       },   3 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 4"        , "拡張 4"       },   4 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 5"        , "拡張 5"       },   5 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 6"        , "拡張 6"       },   6 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 7"        , "拡張 7"       },   7 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 8"        , "拡張 8"       },   8 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 9"        , "拡張 9"       },   9 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 10"       , "拡張 10"      },  10 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 11"       , "拡張 11"      },  11 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 12"       , "拡張 12"      },  12 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 13"       , "拡張 13"      },  13 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 14"       , "拡張 14"      },  14 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 15"       , "拡張 15"      },  15 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 16"       , "拡張 16"      },  16 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 17"       , "拡張 17"      },  17 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 18"       , "拡張 18"      },  18 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 19"       , "拡張 19"      },  19 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 20"       , "拡張 20"      },  20 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 21"       , "拡張 21"      },  21 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 22"       , "拡張 22"      },  22 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 23"       , "拡張 23"      },  23 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 24"       , "拡張 24"      },  24 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 25"       , "拡張 25"      },  25 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 26"       , "拡張 26"      },  26 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 27"       , "拡張 27"      },  27 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 28"       , "拡張 28"      },  28 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 29"       , "拡張 29"      },  29 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 30"       , "拡張 30"      },  30 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 31"       , "拡張 31"      },  31 - 1, def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_external_t   ,     5, { " Ext 32"       , "拡張 32"      },  32 - 1, def::mapping::target_t::song),
   MENU_BUILDER(mi_tree_t          ,    4 , { "MIDI Note"     , "MIDI Note"    }),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C#-1" , nullptr },   1 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D -1" , nullptr },   2 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D#-1" , nullptr },   3 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E -1" , nullptr },   4 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F -1" , nullptr },   5 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F#-1" , nullptr },   6 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G -1" , nullptr },   7 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G#-1" , nullptr },   8 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A -1" , nullptr },   9 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A#-1" , nullptr },  10 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B -1" , nullptr },  11 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  0" , nullptr },  12 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 0" , nullptr },  13 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  0" , nullptr },  14 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 0" , nullptr },  15 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  0" , nullptr },  16 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  0" , nullptr },  17 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 0" , nullptr },  18 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  0" , nullptr },  19 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 0" , nullptr },  20 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  0" , nullptr },  21 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 0" , nullptr },  22 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  0" , nullptr },  23 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  1" , nullptr },  24 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 1" , nullptr },  25 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  1" , nullptr },  26 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 1" , nullptr },  27 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  1" , nullptr },  28 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  1" , nullptr },  29 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 1" , nullptr },  30 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  1" , nullptr },  31 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 1" , nullptr },  32 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  1" , nullptr },  33 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 1" , nullptr },  34 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  1" , nullptr },  35 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  2" , nullptr },  36 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 2" , nullptr },  37 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  2" , nullptr },  38 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 2" , nullptr },  39 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  2" , nullptr },  40 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  2" , nullptr },  41 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 2" , nullptr },  42 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  2" , nullptr },  43 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 2" , nullptr },  44 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  2" , nullptr },  45 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 2" , nullptr },  46 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  2" , nullptr },  47 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  3" , nullptr },  48 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 3" , nullptr },  49 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  3" , nullptr },  50 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 3" , nullptr },  51 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  3" , nullptr },  52 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  3" , nullptr },  53 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 3" , nullptr },  54 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  3" , nullptr },  55 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 3" , nullptr },  56 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  3" , nullptr },  57 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 3" , nullptr },  58 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  3" , nullptr },  59 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  4" , nullptr },  60 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 4" , nullptr },  61 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  4" , nullptr },  62 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 4" , nullptr },  63 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  4" , nullptr },  64 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  4" , nullptr },  65 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 4" , nullptr },  66 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  4" , nullptr },  67 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 4" , nullptr },  68 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  4" , nullptr },  69 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 4" , nullptr },  70 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  4" , nullptr },  71 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  5" , nullptr },  72 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 5" , nullptr },  73 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  5" , nullptr },  74 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 5" , nullptr },  75 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  5" , nullptr },  76 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  5" , nullptr },  77 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 5" , nullptr },  78 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  5" , nullptr },  79 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 5" , nullptr },  80 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  5" , nullptr },  81 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 5" , nullptr },  82 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  5" , nullptr },  83 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  6" , nullptr },  84 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 6" , nullptr },  85 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  6" , nullptr },  86 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 6" , nullptr },  87 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  6" , nullptr },  88 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  6" , nullptr },  89 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 6" , nullptr },  90 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  6" , nullptr },  91 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 6" , nullptr },  92 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  6" , nullptr },  93 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 6" , nullptr },  94 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  6" , nullptr },  95 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  7" , nullptr },  96 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 7" , nullptr },  97 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  7" , nullptr },  98 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 7" , nullptr },  99 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  7" , nullptr }, 100 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  7" , nullptr }, 101 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 7" , nullptr }, 102 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  7" , nullptr }, 103 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 7" , nullptr }, 104 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  7" , nullptr }, 105 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 7" , nullptr }, 106 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  7" , nullptr }, 107 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  8" , nullptr }, 108 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 8" , nullptr }, 109 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  8" , nullptr }, 110 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 8" , nullptr }, 111 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  8" , nullptr }, 112 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  8" , nullptr }, 113 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 8" , nullptr }, 114 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  8" , nullptr }, 115 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 8" , nullptr }, 116 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  8" , nullptr }, 117 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 8" , nullptr }, 118 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  8" , nullptr }, 119 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  9" , nullptr }, 120 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 9" , nullptr }, 121 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  9" , nullptr }, 122 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 9" , nullptr }, 123 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  9" , nullptr }, 124 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  9" , nullptr }, 125 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 9" , nullptr }, 126 , ctrl_map_target_t::ctrl_map_song),
-  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  9" , nullptr }, 127 , ctrl_map_target_t::ctrl_map_song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C#-1" , nullptr },   1 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D -1" , nullptr },   2 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D#-1" , nullptr },   3 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E -1" , nullptr },   4 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F -1" , nullptr },   5 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F#-1" , nullptr },   6 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G -1" , nullptr },   7 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G#-1" , nullptr },   8 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A -1" , nullptr },   9 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A#-1" , nullptr },  10 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B -1" , nullptr },  11 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  0" , nullptr },  12 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 0" , nullptr },  13 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  0" , nullptr },  14 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 0" , nullptr },  15 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  0" , nullptr },  16 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  0" , nullptr },  17 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 0" , nullptr },  18 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  0" , nullptr },  19 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 0" , nullptr },  20 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  0" , nullptr },  21 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 0" , nullptr },  22 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  0" , nullptr },  23 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  1" , nullptr },  24 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 1" , nullptr },  25 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  1" , nullptr },  26 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 1" , nullptr },  27 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  1" , nullptr },  28 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  1" , nullptr },  29 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 1" , nullptr },  30 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  1" , nullptr },  31 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 1" , nullptr },  32 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  1" , nullptr },  33 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 1" , nullptr },  34 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  1" , nullptr },  35 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  2" , nullptr },  36 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 2" , nullptr },  37 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  2" , nullptr },  38 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 2" , nullptr },  39 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  2" , nullptr },  40 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  2" , nullptr },  41 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 2" , nullptr },  42 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  2" , nullptr },  43 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 2" , nullptr },  44 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  2" , nullptr },  45 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 2" , nullptr },  46 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  2" , nullptr },  47 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  3" , nullptr },  48 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 3" , nullptr },  49 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  3" , nullptr },  50 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 3" , nullptr },  51 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  3" , nullptr },  52 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  3" , nullptr },  53 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 3" , nullptr },  54 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  3" , nullptr },  55 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 3" , nullptr },  56 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  3" , nullptr },  57 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 3" , nullptr },  58 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  3" , nullptr },  59 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  4" , nullptr },  60 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 4" , nullptr },  61 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  4" , nullptr },  62 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 4" , nullptr },  63 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  4" , nullptr },  64 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  4" , nullptr },  65 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 4" , nullptr },  66 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  4" , nullptr },  67 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 4" , nullptr },  68 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  4" , nullptr },  69 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 4" , nullptr },  70 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  4" , nullptr },  71 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  5" , nullptr },  72 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 5" , nullptr },  73 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  5" , nullptr },  74 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 5" , nullptr },  75 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  5" , nullptr },  76 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  5" , nullptr },  77 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 5" , nullptr },  78 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  5" , nullptr },  79 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 5" , nullptr },  80 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  5" , nullptr },  81 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 5" , nullptr },  82 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  5" , nullptr },  83 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  6" , nullptr },  84 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 6" , nullptr },  85 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  6" , nullptr },  86 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 6" , nullptr },  87 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  6" , nullptr },  88 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  6" , nullptr },  89 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 6" , nullptr },  90 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  6" , nullptr },  91 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 6" , nullptr },  92 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  6" , nullptr },  93 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 6" , nullptr },  94 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  6" , nullptr },  95 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  7" , nullptr },  96 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 7" , nullptr },  97 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  7" , nullptr },  98 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 7" , nullptr },  99 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  7" , nullptr }, 100 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  7" , nullptr }, 101 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 7" , nullptr }, 102 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  7" , nullptr }, 103 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 7" , nullptr }, 104 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  7" , nullptr }, 105 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 7" , nullptr }, 106 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  7" , nullptr }, 107 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  8" , nullptr }, 108 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 8" , nullptr }, 109 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  8" , nullptr }, 110 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 8" , nullptr }, 111 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  8" , nullptr }, 112 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  8" , nullptr }, 113 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 8" , nullptr }, 114 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  8" , nullptr }, 115 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G# 8" , nullptr }, 116 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A  8" , nullptr }, 117 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  A# 8" , nullptr }, 118 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  B  8" , nullptr }, 119 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C  9" , nullptr }, 120 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  C# 9" , nullptr }, 121 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D  9" , nullptr }, 122 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  D# 9" , nullptr }, 123 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  E  9" , nullptr }, 124 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  9" , nullptr }, 125 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 9" , nullptr }, 126 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  9" , nullptr }, 127 , def::mapping::target_t::song),
   MENU_BUILDER(mi_tree_t          ,  2   , { "External Device", "外部デバイス" }),
   MENU_BUILDER(mi_portc_midi_t    ,   3  , { "PortC MIDI"     , "ポートC MIDI" }),
   MENU_BUILDER(mi_ble_midi_t      ,   3  , { "BLE MIDI"       , nullptr     }),
@@ -2287,19 +2287,19 @@ static constexpr menu_item_ptr menu_seqedit[] = {
 
 void menu_control_t::openMenu(def::menu_category_t category)
 {
-  system_registry.menu_status.reset();
+  system_registry->menu_status.reset();
 
   _menu_array = getMenuArray(category);
   bool hasSubMenu = (_menu_array[1] != nullptr);
-  system_registry.menu_status.setSelectIndex(0, hasSubMenu ? 1 : 0);
-  system_registry.menu_status.setCurrentLevel(0);
-  system_registry.menu_status.setCurrentMenuID(0);
-  system_registry.menu_status.setMenuCategory( category );
+  system_registry->menu_status.setSelectIndex(0, hasSubMenu ? 1 : 0);
+  system_registry->menu_status.setCurrentLevel(0);
+  system_registry->menu_status.setCurrentMenuID(0);
+  system_registry->menu_status.setMenuCategory( category );
 
   _category = category;
 
-  // system_registry.runtime_info.setPlayMode( def::playmode::playmode_t::menu_mode );
-  system_registry.runtime_info.setMenuVisible( true );
+  // system_registry->runtime_info.setPlayMode( def::playmode::playmode_t::menu_mode );
+  system_registry->runtime_info.setMenuVisible( true );
   if (!hasSubMenu) {
     _menu_array[0]->enter();
   }
@@ -2307,9 +2307,9 @@ void menu_control_t::openMenu(def::menu_category_t category)
 
 bool menu_control_t::enter(void)
 {
-  auto current_level = system_registry.menu_status.getCurrentLevel();
-  auto select_index = system_registry.menu_status.getSelectIndex(current_level);
-  auto current_menu_id = system_registry.menu_status.getCurrentMenuID();
+  auto current_level = system_registry->menu_status.getCurrentLevel();
+  auto select_index = system_registry->menu_status.getSelectIndex(current_level);
+  auto current_menu_id = system_registry->menu_status.getCurrentMenuID();
 
   if (current_menu_id == select_index) {
     return _menu_array[select_index]->execute();
@@ -2319,19 +2319,19 @@ bool menu_control_t::enter(void)
 
 bool menu_control_t::exit(void)
 {
-  auto current_index = system_registry.menu_status.getCurrentMenuID();
+  auto current_index = system_registry->menu_status.getCurrentMenuID();
   return _menu_array[current_index]->exit();
 }
 
 bool menu_control_t::inputNumber(uint8_t number)
 {
-  auto current_index = system_registry.menu_status.getCurrentMenuID();
+  auto current_index = system_registry->menu_status.getCurrentMenuID();
   return _menu_array[current_index]->inputNumber(number);
 }
 
 bool menu_control_t::inputUpDown(int updown)
 {
-  auto current_index = system_registry.menu_status.getCurrentMenuID();
+  auto current_index = system_registry->menu_status.getCurrentMenuID();
 
   return _menu_array[current_index]->inputUpDown(updown);
 }

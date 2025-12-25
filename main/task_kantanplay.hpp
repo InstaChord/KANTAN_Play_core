@@ -125,6 +125,7 @@ Degree操作コマンド {
   void sustainProc(void);
   void setSustain(bool sustain_on);
 
+  void updateNextOptions(void);
   void addSequence(void);
 
   void chordStepReset(void);

@@ -63,17 +63,17 @@ void task_i2c_t::task_func(task_i2c_t* me)
       if (++bat_check_counter == 0) {
 #if defined ( M5UNIFIED_PC_BUILD )
         bool is_charging = M5.Power.isCharging();
-        system_registry.runtime_info.getBatteryCharging();
-        int bat_level = 1 + system_registry.runtime_info.getBatteryLevel();
+        system_registry->runtime_info.getBatteryCharging();
+        int bat_level = 1 + system_registry->runtime_info.getBatteryLevel();
         
         if (bat_level > 100) { bat_level = 0; is_charging = !is_charging; }
-        system_registry.runtime_info.setBatteryLevel(bat_level);
-        system_registry.runtime_info.setBatteryCharging(is_charging);
+        system_registry->runtime_info.setBatteryLevel(bat_level);
+        system_registry->runtime_info.setBatteryCharging(is_charging);
 #else
         auto bat_level = M5.Power.getBatteryLevel();
-        system_registry.runtime_info.setBatteryLevel(bat_level);
+        system_registry->runtime_info.setBatteryLevel(bat_level);
         auto is_charging = M5.Power.isCharging();
-        system_registry.runtime_info.setBatteryCharging(is_charging);
+        system_registry->runtime_info.setBatteryCharging(is_charging);
 #endif
       } else {
 /*
@@ -82,21 +82,21 @@ TODO:CoreS3でのSDカード挿抜状態判定を追加する
         M5.update();
         if (M5.Touch.getCount()) {
           auto td = M5.Touch.getDetail();
-          system_registry.internal_input.setTouchValue(td.x, td.y, td.isPressed());
+          system_registry->internal_input.setTouchValue(td.x, td.y, td.isPressed());
           gui.procTouchControl(td);
         }
         if (M5.BtnPWR.wasHold()) {
-          system_registry.operator_command.addQueue( { def::command::system_control, def::command::system_control_t::sc_power_off } );
+          system_registry->operator_command.addQueue( { def::command::system_control, def::command::system_control_t::sc_power_off } );
         }
 
         if (M5.BtnPWR.wasClicked() && M5.BtnPWR.getClickCount() == 8) {
-if (system_registry.runtime_info.getDeveloperMode()) {
-system_registry.operator_command.addQueue( { def::command::system_control, def::command::system_control_t::sc_erase_nvs } );
+if (system_registry->runtime_info.getDeveloperMode()) {
+system_registry->operator_command.addQueue( { def::command::system_control, def::command::system_control_t::sc_erase_nvs } );
 }
 
 
-          system_registry.runtime_info.setDeveloperMode(true);
-          system_registry.popup_notify.setPopup(true, def::notify_type_t::NOTIFY_DEVELOPER_MODE);
+          system_registry->runtime_info.setDeveloperMode(true);
+          system_registry->popup_notify.setPopup(true, def::notify_type_t::NOTIFY_DEVELOPER_MODE);
         }
 
 #if 0 // for DEBUG
@@ -119,25 +119,25 @@ system_registry.operator_command.addQueue( { def::command::system_control, def::
         }
 #endif
 
-        auto off = system_registry.runtime_info.getPowerOff();
+        auto off = system_registry->runtime_info.getPowerOff();
         if (off)
         {
 #if !defined (M5UNIFIED_PC_BUILD)
           internal_kanplay->mute();
 
-          if (system_registry.runtime_info.getSntpSync()) {
+          if (system_registry->runtime_info.getSntpSync()) {
             time_t t = time(nullptr)+1; // Advance one second.
             while (t > time(nullptr)) M5.delay(1);  /// Synchronization in seconds
             M5.Rtc.setDateTime( gmtime( &t ) );
           }
-          system_registry.file_command.wait();
+          system_registry->file_command.wait();
           if (off == def::command::system_control_t::sc_reset) {
             esp_restart();
           }
           M5.Power.powerOff();
 #endif
         }
-        auto br = system_registry.user_setting.getDisplayBrightness();
+        auto br = system_registry->user_setting.getDisplayBrightness();
         static constexpr const uint8_t brightness_table[] = { 48, 64, 100, 160, 255 };
         br = brightness_table[br];
         if (br != M5.Display.getBrightness()) {
@@ -145,16 +145,16 @@ system_registry.operator_command.addQueue( { def::command::system_control, def::
         }
 
         static bool prev_usb_power_enabled = false;
-        bool usb_power_enabled = system_registry.midi_port_setting.getUSBPowerEnabled();
+        bool usb_power_enabled = system_registry->midi_port_setting.getUSBPowerEnabled();
         if (usb_power_enabled) {
           // InstaChordリンクがUSBポートの場合は電力供給はしない
-          if (system_registry.midi_port_setting.getInstaChordLinkPort() == def::command::instachord_link_port_t::iclp_usb) {
+          if (system_registry->midi_port_setting.getInstaChordLinkPort() == def::command::instachord_link_port_t::iclp_usb) {
             usb_power_enabled = false;
           } else // USBホストモードでない場合は電力供給はしない
-          if (system_registry.midi_port_setting.getUSBMode() != def::command::usb_mode_t::usb_host) {
+          if (system_registry->midi_port_setting.getUSBMode() != def::command::usb_mode_t::usb_host) {
             usb_power_enabled = false;
           } else {
-            usb_power_enabled = (system_registry.runtime_info.getMidiPortStateUSB() != def::command::midiport_info_t::mp_off);
+            usb_power_enabled = (system_registry->runtime_info.getMidiPortStateUSB() != def::command::midiport_info_t::mp_off);
           }
         }
         if (prev_usb_power_enabled != usb_power_enabled)

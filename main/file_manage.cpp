@@ -202,7 +202,7 @@ bool storage_sd_t::beginStorage(void)
 #endif
 
   if (!_is_begin) {
-    system_registry.popup_notify.setPopup(false, def::notify_type_t::NOTIFY_STORAGE_OPEN);
+    system_registry->popup_notify.setPopup(false, def::notify_type_t::NOTIFY_STORAGE_OPEN);
     M5_LOGE("SD card mount failed");
   } else {
     for (auto& dm : dir_manage) {
@@ -425,7 +425,7 @@ bool storage_littlefs_t::beginStorage(void)
 #endif
 
   if (!_is_begin) {
-    system_registry.popup_notify.setPopup(false, def::notify_type_t::NOTIFY_STORAGE_OPEN);
+    system_registry->popup_notify.setPopup(false, def::notify_type_t::NOTIFY_STORAGE_OPEN);
     M5_LOGE("LittleFS mount failed");
   }
 

@@ -33,7 +33,7 @@ static void* alloc_sram_anti_fragment(size_t size)
 {
   void* result = nullptr;
 #if !defined (M5UNIFIED_PC_BUILD)
-  // メモリブロックの断片化への対策として、小さい断片化領域から使用するため、敢えて最大領域を先回りして確保する。
+  // メモリブロックの断片化への対策として、最大領域を先回りして確保しておく。(これにより小さい断片化領域から使用させることができる)
   auto dummy = m5gfx::heap_alloc_dma(heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
   // 上記の処理により、以下のメモリ確保は二番目に小さい領域から確保されることになる。
   result = m5gfx::heap_alloc_dma(size);

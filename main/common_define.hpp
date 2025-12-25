@@ -24,6 +24,13 @@ namespace def::lang {
   };
 };
 //-------------------------------------------------------------------------
+namespace def::mapping {
+  enum class target_t : uint8_t {
+    device = 0,
+    song = 1,
+  };
+}
+//-------------------------------------------------------------------------
 class text_t {
 public:
   virtual const char* get(void) const = 0;
@@ -525,7 +532,7 @@ Button Index mapping
       part_vol = 1, position, voicing, velocity, program, banlift, endpoint, displacement,
     };
     enum autoplay_switch_t : uint8_t {
-      autoplay_off = 0, autoplay_toggle, autoplay_start, autoplay_stop, autoplay_pause,
+      autoplay_off = 0, autoplay_toggle, autoplay_start, autoplay_stop, autoplay_pause, autoplay_beat,
     };
     enum sound_effect_t : uint8_t {
       single = 1, testplay,
@@ -1012,7 +1019,7 @@ Button Index mapping
 
   namespace play {
 
-    enum auto_play_mode_t : uint8_t {
+    enum auto_play_state_t : uint8_t {
       auto_play_none,
       auto_play_waiting,
       auto_play_running,

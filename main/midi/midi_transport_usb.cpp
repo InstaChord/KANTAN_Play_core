@@ -300,7 +300,7 @@ namespace midi_driver {
           if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) {
             // ESP_LOGI("", "No more clients");
             // isMIDIReady = false;
-            // kanplay_ns::system_registry.runtime_info.setMidiPortStateUSB(kanplay_ns::def::command::midiport_info_t::mp_enabled);
+            // kanplay_ns::system_registry->runtime_info.setMidiPortStateUSB(kanplay_ns::def::command::midiport_info_t::mp_enabled);
             // all_clients_gone = true;
           }
           if (event_flags & USB_HOST_LIB_EVENT_FLAGS_ALL_FREE) {
@@ -595,7 +595,7 @@ void MIDI_Transport_USB::setConnected(bool flg)
   } else if (_use_tx || _use_rx) {
     midiport_info = kanplay_ns::def::command::midiport_info_t::mp_enabled;
   }
-  kanplay_ns::system_registry.runtime_info.setMidiPortStateUSB(midiport_info);
+  kanplay_ns::system_registry->runtime_info.setMidiPortStateUSB(midiport_info);
 }
 
 void MIDI_Transport_USB::setUseTxRx(bool tx_enable, bool rx_enable)
@@ -607,7 +607,7 @@ void MIDI_Transport_USB::setUseTxRx(bool tx_enable, bool rx_enable)
   MIDI_Transport::setUseTxRx(tx_enable, rx_enable);
   // M5_LOGD("uart_midi:uart_set_pin: %d", err);
 
-  kanplay_ns::system_registry.runtime_info.setMidiPortStateUSB
+  kanplay_ns::system_registry->runtime_info.setMidiPortStateUSB
   ( (tx_enable || rx_enable)
     ? kanplay_ns::def::command::midiport_info_t::mp_enabled
     : kanplay_ns::def::command::midiport_info_t::mp_off

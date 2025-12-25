@@ -19,18 +19,6 @@
 #include "file_manage.hpp"
 
 namespace kanplay_ns {
-
-  static task_spi_t task_spi;
-  static task_i2c_t task_i2c;
-  static task_i2s_t task_i2s;
-  static task_midi_t task_midi;
-  static task_wifi_t task_wifi;
-  static task_port_a_t task_port_a;
-  static task_port_b_t task_port_b;
-  static task_operator_t task_operator;
-  static task_commander_t task_commander;
-  static task_kantanplay_t task_kantanplay;
-
   static void log_memory(int index = 0)
   {
   #if CORE_DEBUG_LEVEL > 3 // && !defined ( M5UNIFIED_PC_BUILD )
@@ -43,12 +31,20 @@ namespace kanplay_ns {
     // size_t malloc_cap_spi = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) >> 10;
     M5_LOGV("%d Mem heap:%5dKB  Internal:%5dKB  8bit:%5dKB  32bit:%5dKB  DMA free:%5dKB  DMA Large:%5dKB"
     , index, free_heap_size, malloc_cap_internal, malloc_cap_8bit, malloc_cap_32bit, malloc_cap_dma_free, malloc_cap_dma_large);
+    fflush(stdout);
   #endif
   }
 
 
   static void init(void) {
-    log_memory(1);
+#if !defined (M5UNIFIED_PC_BUILD)
+
+// メモリブロックの断片化への対策として、最大領域を先回りして確保しておく。(これにより小さい断片化領域から使用させることができる)
+    auto dummy = m5gfx::heap_alloc_dma(heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+
+
+#endif
+    log_memory(0);
     auto cfg = M5.config();
     cfg.output_power = false;
     M5.begin(cfg);
@@ -97,24 +93,43 @@ namespace kanplay_ns {
 
     M5.Power.setChargeCurrent(200);
 
-    log_memory(2); M5.delay(16); M5.Display.print("."); system_registry.init();
-    log_memory(3); M5.delay(16); M5.Display.print("."); task_i2s.start();
-    log_memory(4); M5.delay(16); M5.Display.print(".");
-    if (!task_i2c.start()) {
+    log_memory(1);
+
+    system_registry = new system_registry_t();
+    auto task_spi = new task_spi_t();
+    auto task_i2c = new task_i2c_t();
+    auto task_i2s = new task_i2s_t();
+    auto task_midi = new task_midi_t();
+    auto task_wifi = new task_wifi_t();
+    auto task_port_a = new task_port_a_t();
+    auto task_port_b = new task_port_b_t();
+    auto task_operator = new task_operator_t();
+    auto task_commander = new task_commander_t();
+    auto task_kantanplay = new task_kantanplay_t();
+
+    log_memory(2); M5.delay(8); M5.Display.print("."); system_registry->init();
+    log_memory(3); M5.delay(8); M5.Display.print("."); task_i2s->start();
+    log_memory(4); M5.delay(8); M5.Display.print(".");
+    if (!task_i2c->start()) {
       M5.Display.print("\nhardware not found.\n");
       M5.delay(4096);
       M5.Power.powerOff();
     }
-    log_memory(5); M5.delay(16); M5.Display.print("."); task_midi.start();
-    log_memory(6); M5.delay(16); M5.Display.print("."); task_wifi.start();
-    log_memory(7); M5.delay(16); M5.Display.print("."); task_kantanplay.start();
-    log_memory(8); M5.delay(16); M5.Display.print("."); task_operator.start();
-    log_memory(9); M5.delay(16); M5.Display.print("."); task_commander.start();
-    log_memory(10); M5.delay(16); M5.Display.print("."); task_port_a.start();
-    log_memory(11); M5.delay(16); M5.Display.print("."); task_port_b.start();
-    log_memory(12); M5.delay(16); M5.Display.print("."); task_spi.start();
+    log_memory(5); M5.delay(8); M5.Display.print("."); task_midi->start();
+    log_memory(6); M5.delay(8); M5.Display.print("."); task_wifi->start();
+    log_memory(7); M5.delay(8); M5.Display.print("."); task_kantanplay->start();
+    log_memory(8); M5.delay(8); M5.Display.print("."); task_operator->start();
+    log_memory(9); M5.delay(8); M5.Display.print("."); task_commander->start();
+    log_memory(10); M5.delay(8); M5.Display.print("."); task_port_a->start();
+    log_memory(11); M5.delay(8); M5.Display.print("."); task_port_b->start();
 
-    system_registry.operator_command.addQueue( { def::command::system_control, def::command::sc_boot } );
+#if !defined (M5UNIFIED_PC_BUILD)
+    m5gfx::heap_free(dummy);
+#endif
+
+    log_memory(12); M5.delay(8); M5.Display.print("."); task_spi->start();
+
+    system_registry->operator_command.addQueue( { def::command::system_control, def::command::sc_boot } );
   }
 };
 
@@ -140,14 +155,14 @@ void loop() {
 #endif
 /*
   M5_LOGV("perf: %d %d  spi:%d i2c:%d i2s:%d midi:%d cmd:%d kanplay:%d"
-    , kanplay_ns::system_registry.task_status.getLowPowerCounter() >> 10
-    , kanplay_ns::system_registry.task_status.getHighPowerCounter() >> 10
-    , kanplay_ns::system_registry.task_status.getWorkingCounter(kanplay_ns::system_registry_t::reg_task_status_t::index_t::TASK_SPI_COUNTER) >> 10
-    , kanplay_ns::system_registry.task_status.getWorkingCounter(kanplay_ns::system_registry_t::reg_task_status_t::index_t::TASK_I2C_COUNTER) >> 10
-    , kanplay_ns::system_registry.task_status.getWorkingCounter(kanplay_ns::system_registry_t::reg_task_status_t::index_t::TASK_I2S_COUNTER) >> 10
-    , kanplay_ns::system_registry.task_status.getWorkingCounter(kanplay_ns::system_registry_t::reg_task_status_t::index_t::TASK_MIDI_INTERNAL_COUNTER) >> 10
-    , kanplay_ns::system_registry.task_status.getWorkingCounter(kanplay_ns::system_registry_t::reg_task_status_t::index_t::TASK_COMMANDER_COUNTER) >> 10
-    , kanplay_ns::system_registry.task_status.getWorkingCounter(kanplay_ns::system_registry_t::reg_task_status_t::index_t::TASK_KANTANPLAY_COUNTER) >> 10
+    , kanplay_ns::system_registry->task_status.getLowPowerCounter() >> 10
+    , kanplay_ns::system_registry->task_status.getHighPowerCounter() >> 10
+    , kanplay_ns::system_registry->task_status.getWorkingCounter(kanplay_ns::system_registry_t::reg_task_status_t::index_t::TASK_SPI_COUNTER) >> 10
+    , kanplay_ns::system_registry->task_status.getWorkingCounter(kanplay_ns::system_registry_t::reg_task_status_t::index_t::TASK_I2C_COUNTER) >> 10
+    , kanplay_ns::system_registry->task_status.getWorkingCounter(kanplay_ns::system_registry_t::reg_task_status_t::index_t::TASK_I2S_COUNTER) >> 10
+    , kanplay_ns::system_registry->task_status.getWorkingCounter(kanplay_ns::system_registry_t::reg_task_status_t::index_t::TASK_MIDI_INTERNAL_COUNTER) >> 10
+    , kanplay_ns::system_registry->task_status.getWorkingCounter(kanplay_ns::system_registry_t::reg_task_status_t::index_t::TASK_COMMANDER_COUNTER) >> 10
+    , kanplay_ns::system_registry->task_status.getWorkingCounter(kanplay_ns::system_registry_t::reg_task_status_t::index_t::TASK_KANTANPLAY_COUNTER) >> 10
   );
 //*/
 }
