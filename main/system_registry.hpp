@@ -1357,7 +1357,7 @@ protected:
     };
 
     struct reg_menu_status_t : public registry_t {
-        reg_menu_status_t(void) : registry_t(16, 0, DATA_SIZE_8) {}
+        reg_menu_status_t(void) : registry_t(20, 0, DATA_SIZE_8) {}
         enum index_t : uint16_t {
           CURRENT_LEVEL,
           MENU_CATEGORY,
@@ -1375,8 +1375,10 @@ protected:
           SELECT_INDEX_LEVEL_3H,
           SELECT_INDEX_LEVEL_4L,
           SELECT_INDEX_LEVEL_4H,
+          SELECT_INDEX_LEVEL_5L,
+          SELECT_INDEX_LEVEL_5H,
         };
-        void reset(void) { for (int i = 0; i < 16; ++i) { set8(i, 0); } }
+        void reset(void) { for (int i = 0; i < 20; ++i) { set8(i, 0); } }
         void setCurrentLevel(uint8_t level) { set8(CURRENT_LEVEL, level); }
         uint8_t getCurrentLevel(void) const { return get8(CURRENT_LEVEL); }
         void setCurrentMenuID(uint16_t menu_id) { set16(CURRENT_MENU_ID_L, menu_id); }
