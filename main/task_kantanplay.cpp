@@ -118,21 +118,21 @@ bool task_kantanplay_t::commandProccessor(void)
           autoplay_state = def::play::auto_play_mode_t::auto_play_none;
         } else {
           switch (command_param.getParam()) {
-            case def::command::autoplay_switch_t::autoplay_toggle:
-              if (autoplay_state == def::play::auto_play_mode_t::auto_play_none) {
-                autoplay_state = def::play::auto_play_mode_t::auto_play_waiting;
-              } else {
-                autoplay_state = def::play::auto_play_mode_t::auto_play_none;
-              }
-              break;
+          case def::command::autoplay_switch_t::autoplay_toggle:
+            if (autoplay_state == def::play::auto_play_mode_t::auto_play_none) {
+              autoplay_state = def::play::auto_play_mode_t::auto_play_waiting;
+            } else {
+              autoplay_state = def::play::auto_play_mode_t::auto_play_none;
+            }
+            break;
 
-            case def::command::autoplay_switch_t::autoplay_start:
-              if (autoplay_state != def::play::auto_play_mode_t::auto_play_running) {
-                autoplay_state = def::play::auto_play_mode_t::auto_play_waiting;
-                system_registry.runtime_info.setAutoplayState(autoplay_state);
-                system_registry.player_command.addQueueW( { def::command::chord_degree, 1 } );
-              }
-              break;
+          case def::command::autoplay_switch_t::autoplay_start:
+            if (autoplay_state != def::play::auto_play_mode_t::auto_play_running) {
+              autoplay_state = def::play::auto_play_mode_t::auto_play_waiting;
+              system_registry.runtime_info.setAutoplayState(autoplay_state);
+              system_registry.player_command.addQueueW( { def::command::chord_degree, 1 } );
+            }
+            break;
 
           case def::command::autoplay_switch_t::autoplay_stop:
             autoplay_state = def::play::auto_play_mode_t::auto_play_none;
@@ -157,7 +157,6 @@ bool task_kantanplay_t::commandProccessor(void)
 
           // シーケンス編集モード以外の場合、オートプレイ停止/ポーズ時にシーケンス位置を先頭に戻す
           if (autoplay_state == def::play::auto_play_mode_t::auto_play_none
-           || autoplay_state == def::play::auto_play_mode_t::auto_play_paused
            || autoplay_state == def::play::auto_play_mode_t::auto_play_beatmode
           ) {
             auto seq_mode = system_registry.runtime_info.getSequenceMode();

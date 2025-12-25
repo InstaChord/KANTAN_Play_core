@@ -606,6 +606,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
       auto seq_mode = (def::seqmode::seqmode_t)param;
       system_registry.runtime_info.setSequenceStepIndex(0);
       system_registry.runtime_info.setSequenceMode(seq_mode);
+      system_registry.player_command.addQueue({ def::command::autoplay_switch, def::command::autoplay_switch_t::autoplay_stop });
     }
     break;
 
