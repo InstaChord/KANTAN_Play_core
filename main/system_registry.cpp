@@ -104,6 +104,7 @@ void system_registry_t::init(void)
   task_status.init();
   sub_button.init();
   internal_input.init();
+  external_input.init();
   internal_imu.init();
   rgbled_control.init();
   midi_out_control.init();
@@ -111,18 +112,15 @@ void system_registry_t::init(void)
   player_command.init();
   chord_play.init();
   color_setting.init();
-  external_input.init();
   command_mapping_current.init();
-  // command_mapping_external.init();
-  command_mapping_port_b.init();
-  // command_mapping_midinote.init();
-  command_mapping_midicc15.init();
-  command_mapping_midicc16.init();
-  drum_mapping.init();
 
   // 以下のデータはPSRAM配置として初期化する
   control_mapping[0].init(true);
   control_mapping[1].init(true);
+  command_mapping_port_b.init(true);
+  command_mapping_midicc15.init(true);
+  command_mapping_midicc16.init(true);
+  drum_mapping.init(true);
   menu_status.init(true);
   popup_notify.init(true);
   popup_qr.init(true);
@@ -669,23 +667,6 @@ static bool loadMappingInternal(system_registry_t::reg_command_mapping_t* mappin
   return false;
 }
 
-static bool saveMappingInternal(system_registry_t::control_mapping_t* ctrl_mapping, JsonVariant &json)
-{
-  {
-    auto json_internal = json["internal"].to<JsonObject>();
-    saveMappingInternal(&ctrl_mapping->internal, json_internal, def::ctrl_assign::playbutton_table);
-  }
-  {
-    auto json_external = json["external"].to<JsonObject>();
-    saveMappingInternal(&ctrl_mapping->external, json_external, def::ctrl_assign::external_table);
-  }
-  {
-    auto json_midinote = json["midinote"].to<JsonObject>();
-    saveMappingInternal(&ctrl_mapping->midinote, json_midinote, def::ctrl_assign::external_table);
-  }
-  return false;
-}
-
 //-------------------------------------------------------------------------
 uint32_t system_registry_t::calcSettingCRC32(void)
 {
@@ -720,10 +701,6 @@ bool system_registry_t::saveSettingInternal(JsonVariant& json_root)
     json["usb_power"] = (uint8_t)midi_port_setting.getUSBPowerEnabled();
   }
 
-  // {
-  //   auto json_control_mapping = json_root["control_mapping"].to<JsonVariant>();
-  //   saveMappingInternal(&control_mapping[0], json_control_mapping);
-  // }
 /* 以下廃止、新仕様では control_mapping に統一
   auto json_key_mapping = json_root["key_mapping"].to<JsonObject>();
   {
@@ -889,7 +866,7 @@ bool system_registry_t::control_mapping_t::loadJSON(const JsonVariant &json)
   auto data_version = json["version"].as<int>();
   if (data_version <= 1 && json["type"] == "Mapping")
   {
-    bool res = true;
+    res = true;
     {
       auto json_internal = json["internal"].as<JsonObject>();
       if (!json_internal.isNull()) {
@@ -1394,8 +1371,12 @@ bool system_registry_t::reg_sequence_timeline_t::saveJson(JsonVariant &json)
   char buf[32];
   sequence_chord_desc_t prev_desc;
   prev_desc.setSlotIndex(0xFF); // 強制的に最初のデータを保存させるため
-  for (const auto &pair : _data)
+
+  auto it = begin();
+  auto it_e = end();
+  for (; it != it_e; ++it)
   {
+    auto &pair = *it;
     if (prev_desc == pair.second) { continue; }
 
     itoa(pair.first, buf, 10);
@@ -1433,7 +1414,10 @@ bool system_registry_t::reg_sequence_timeline_t::saveJson(JsonVariant &json)
 
 bool system_registry_t::reg_sequence_timeline_t::loadJson(const JsonVariant &json)
 {
-  decltype(_data) tmpdata;
+  // decltype(_data) tmpdata;
+  auto it = begin();
+  size_t count = 0;
+  size_t limit = max_count();
 
   sequence_chord_desc_t desc;
   for (auto kvp : json.as<JsonObject>())
@@ -1488,9 +1472,13 @@ bool system_registry_t::reg_sequence_timeline_t::loadJson(const JsonVariant &jso
         }
       }
     }
-    tmpdata[step] = desc;
+    it->first = step;
+    it->second = desc;
+    ++it;
+    ++count;
+    if (count >= limit) { break; }
   }
-  std::swap(_data, tmpdata);
+  _data_count = count;
 
   return true;
 }

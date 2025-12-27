@@ -552,22 +552,24 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
               system_registry->song_data.assign(system_registry->backup_song_data);
               system_registry->backup_song_data.reset();
               system_registry->unchanged_song_crc32 = system_registry->song_data.crc32();
+              system_registry->operator_command.addQueue( { def::command::slot_select, 1 } );
+              system_registry->player_command.addQueue( { def::command::chord_step_reset_request, 1 } );
               
               const auto seqmode = system_registry->runtime_info.getSequenceMode();
+              const auto autostyle = system_registry->runtime_info.getAutoplayState();
+              bool is_auto = (autostyle != def::play::auto_play_state_t::auto_play_none);
               if (system_registry->song_data.sequence.info.getLength() > 0) {
                 // シーケンスデータが存在する場合は、フリープレイモードからガイドプレイモードに変更する
                 if (seqmode == def::seqmode::seq_free_play || seqmode == def::seqmode::seq_beat_play) {
-                  system_registry->operator_command.addQueue( { def::command::sequence_mode_set, def::seqmode::seq_guide_play } );
+                  system_registry->operator_command.addQueue( { def::command::sequence_mode_set, is_auto ? def::seqmode::seq_auto_song : def::seqmode::seq_guide_play } );
                 }
               } else {
                 // シーケンスデータが存在しない場合は、ガイドプレイモードからフリープレイモードに変更する
                 if (seqmode == def::seqmode::seq_guide_play || seqmode == def::seqmode::seq_auto_song) {
-                  system_registry->operator_command.addQueue( { def::command::sequence_mode_set, def::seqmode::seq_free_play } );
+                  system_registry->operator_command.addQueue( { def::command::sequence_mode_set, is_auto ? def::seqmode::seq_beat_play : def::seqmode::seq_free_play } );
                 }
               }
             }
-            system_registry->operator_command.addQueue( { def::command::slot_select, 1 } );
-            system_registry->player_command.addQueue( { def::command::chord_step_reset_request, 1 } );
           }
           break;
         }
@@ -630,7 +632,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
       auto seq_mode = (def::seqmode::seqmode_t)param;
       system_registry->runtime_info.setSequenceStepIndex(0);
       system_registry->runtime_info.setSequenceMode(seq_mode);
-      system_registry->player_command.addQueue({ def::command::autoplay_switch, def::command::autoplay_switch_t::autoplay_stop });
+      // system_registry->player_command.addQueue({ def::command::autoplay_switch, def::command::autoplay_switch_t::autoplay_stop });
     }
     break;
 

@@ -445,6 +445,10 @@ struct ui_container_t : public ui_base_t {
     return nullptr;
   }
 
+  void shrink_to_fit(void) {
+    _ui_child.shrink_to_fit();
+  }
+
 protected:
   std::vector<ui_base_t*> _ui_child;
 
@@ -467,9 +471,9 @@ static ui_background_t ui_background;
 struct ui_timer_popup_t : public ui_base_t
 {
 protected:
-  int32_t _remain_time = 0;
   rect_t _show_rect;
   rect_t _hide_rect;
+  int16_t _remain_time = 0;
 public:
   void setShowRect(const rect_t &rect) {
     _show_rect = rect;
@@ -484,15 +488,16 @@ public:
 
   // 時間経過を管理し表示状態を変更する関数
   void procTime(int step) {
-    if (step >= 0) {
+    if (step < 0) {
+      if (_remain_time >= 0) {
+        _remain_time += step;
+        if (_remain_time < 0) {
+          setTargetRect(_hide_rect);
+        }
+      }
+    } else if (step) {
       _remain_time = step;
       setTargetRect(_show_rect);
-    } else
-    if (_remain_time >= 0) {
-      _remain_time += step;
-      if (_remain_time < 0) {
-        setTargetRect(_hide_rect);
-      }
     }
   }
   void close(void) {
@@ -555,6 +560,7 @@ public:
     int y = offset_y + (_client_rect.h >> 1);
 // M5_LOGD("x:%d y:%d offset_x:%d offset_y:%d", x, y, offset_x, offset_y);
     canvas->fillRect(offset_x, offset_y, _client_rect.w, _client_rect.h, 0);
+    // image_dark_shift(canvas, offset_x, offset_y, _client_rect.w, _client_rect.h, 2);
     canvas->drawRect(offset_x+2, offset_y+2, _client_rect.w-4, _client_rect.h-4, 0xFFFFFFu);
 
     canvas->setTextDatum(m5gfx::datum_t::middle_center);
@@ -2936,6 +2942,7 @@ public:
     for (int i = 0; i < _childrens_count; ++i) {
       _item_array.push_back(menu_control.getItemByMenuID(menu_id_list[i]));
     }
+    _item_array.shrink_to_fit();
   }
 
   void update(ui_base_t* ui, draw_param_t *param, int offset_x, int offset_y) override
@@ -3516,10 +3523,12 @@ void gui_t::init(void)
     }
   }
   ui_chord_part_container.addChild(&ui_arpeggio_edit);
+  ui_chord_part_container.shrink_to_fit();
 
   ui_left_icon_container.addChild(&ui_playkey_info);
   ui_left_icon_container.addChild(&ui_song_modified);
   ui_left_icon_container.addChild(&ui_filename);
+  ui_left_icon_container.shrink_to_fit();
 
   ui_right_icon_container.addChild(&ui_icon_auto_play);  
   ui_right_icon_container.addChild(&ui_midiport_info);
@@ -3527,7 +3536,8 @@ void gui_t::init(void)
   ui_right_icon_container.addChild(&ui_wifi_sta_info);
   ui_right_icon_container.addChild(&ui_battery_info);
   ui_right_icon_container.addChild(&ui_volume_info);
-//*/
+  ui_right_icon_container.shrink_to_fit();
+
   ui_background.addChild(&ui_chord_part_container);
   ui_background.addChild(&ui_main_buttons);
   ui_background.addChild(&ui_sub_buttons);
@@ -3542,6 +3552,7 @@ void gui_t::init(void)
   ui_background.addChild(&ui_playkey_select);
   ui_background.addChild(&ui_popup_notify);
   ui_background.addChild(&ui_popup_qr);
+  ui_background.shrink_to_fit();
 
 //-------------------------------------------------------------------------
 
@@ -3620,9 +3631,10 @@ bool gui_t::update(void)
   uint32_t msec = M5.millis();
   uint32_t prev_msec = param->current_msec;
   int diff = msec - prev_msec;
+  param->current_msec = msec;
+  if (diff <= 0) { return false; }
   if (diff > 255) { diff = 255; }
   param->prev_msec = prev_msec;
-  param->current_msec = msec;
   param->smooth_step = diff;
   // param->flg_update = false;
   ui_background.update(param, 0, 0);

@@ -151,8 +151,7 @@ static const incbin_file_t incbin_files[] = {
   { filename_preset_83, preset_83, (size_t)sizeof_preset_83 },
   { filename_preset_84, preset_84, (size_t)sizeof_preset_84 },
 };
-  
-  
+
 // extern instance
 storage_sd_t storage_sd;
 storage_littlefs_t storage_littlefs;
@@ -323,11 +322,11 @@ int storage_sd_t::saveFromMemoryToFile(const char* path, const uint8_t* data, si
   return length;
 }
 
-int storage_sd_t::getFileList(const char* path, std::vector<file_info_t>& list)
+int storage_sd_t::getFileList(const char* path, std::vector<file_info_string_t>& list)
 {
   if (!_is_begin) { return -1; }
 
-  file_info_t info;
+  file_info_string_t info;
 
 #if __has_include(<SdFat.h>)
   auto dir = SD.open(path);
@@ -385,7 +384,7 @@ M5_LOGE("file size:%d , %s", size, path);
 #endif
 
   if (!list.empty()) {
-    std::sort(list.begin(), list.end(), [](const file_info_t& a, const file_info_t& b) { return a.filename < b.filename; });
+    std::sort(list.begin(), list.end(), [](const file_info_string_t& a, const file_info_string_t& b) { return a.filename < b.filename; });
   }
 
   return list.size();
@@ -520,11 +519,11 @@ int storage_littlefs_t::saveFromMemoryToFile(const char* path, const uint8_t* da
   return writelen;
 }
 
-int storage_littlefs_t::getFileList(const char* path, std::vector<file_info_t>& list)
+int storage_littlefs_t::getFileList(const char* path, std::vector<file_info_string_t>& list)
 {
   if (!_is_begin) { return -1; }
 
-  file_info_t info;
+  file_info_string_t info;
 
 #if __has_include(<LittleFS.h>)
   if (LittleFS.exists(path)) {
@@ -606,9 +605,9 @@ int storage_incbin_t::saveFromMemoryToFile(const char* path, const uint8_t* data
   return -1;
 }
 
-int storage_incbin_t::getFileList(const char* path, std::vector<file_info_t>& list)
+int storage_incbin_t::getFileList(const char* path, std::vector<file_info_string_t>& list)
 {
-  file_info_t info;
+  file_info_string_t info;
   for (auto file : incbin_files) {
     info.filename = file.filename;
     info.filesize = file.size;
@@ -636,17 +635,78 @@ int storage_incbin_t::renameFile(const char* path, const char* newpath)
 
 bool dir_manage_t::update(void)
 {
-  std::vector<file_info_t> list;
-  int result = _storage->getFileList(_path.c_str(), list);
+  _file_list_count = 0;
+  std::vector<file_info_string_t> list;
+  int result = _storage->getFileList(_path, list);
 
-  _files = list;
-  return result >= 0;
+  if (_file_list) {
+    m5gfx::heap_free(_file_list);
+    _file_list = nullptr;
+  }
+  if (_all_filenames) {
+    m5gfx::heap_free(_all_filenames);
+    _all_filenames = nullptr;
+  }
+  if (result <= 0) {
+    // マイナス値の場合はエラーとみなしてfalseを返す。
+    return result == 0;
+  }
+
+  // 以下、得られたデータを std::vector から PSRAM 上のバッファに変換して格納する。
+  {
+    // ファイルリスト構造体配列をPSRAMに確保する。
+    auto file_list = (file_info_t*)m5gfx::heap_alloc_psram(sizeof(file_info_t) * list.size());
+    if (file_list == nullptr) {
+      M5_LOGE("dir_manage_t::update:heap_alloc_psram failed. size:%d", sizeof(file_info_t) * list.size());
+      return false;
+    }
+
+    // ファイル名をヌル区切りで連結したバッファを作成する。
+    std::vector<char> all_filenames;
+    file_info_t* p = file_list;
+    for (auto& file : list) {
+      p->filename = (char*)all_filenames.size();
+      p->filesize = file.filesize;
+      ++p;
+      all_filenames.insert(all_filenames.end(), file.filename.begin(), file.filename.end());
+      all_filenames.insert(all_filenames.end(), 2, '\0'); // ヌル終端
+    }
+
+    // バッファをPSRAMにコピーする。
+    char* psram_buffer = (char*)m5gfx::heap_alloc_psram(all_filenames.size());
+    if (psram_buffer == nullptr) {
+      M5_LOGE("dir_manage_t::update:heap_alloc_psram failed. size:%d", all_filenames.size());
+      m5gfx::heap_free(file_list);
+      return false;
+    }
+    memcpy(psram_buffer, all_filenames.data(), all_filenames.size());
+    // ファイル名ポインタをPSRAM上のアドレスに変換する。
+    p = file_list;
+    for (size_t i = 0; i < list.size(); ++i) {
+      p->filename = psram_buffer + (size_t)(p->filename);
+      ++p;
+    }
+
+    if (_file_list) {
+      _file_list_count = 0;
+      m5gfx::heap_free(_file_list);
+    }
+    _file_list = file_list;
+    _file_list_count = list.size();
+
+    if (_all_filenames) {
+      m5gfx::heap_free(_all_filenames);
+    }
+    _all_filenames = psram_buffer;
+  }
+
+  return true;
 }
 
-int dir_manage_t::search(const char* filename)
+int dir_manage_t::search(const char* filename) const
 {
-  for (size_t i = 0; i < _files.size(); ++i) {
-    if (_files[i].filename == filename) {
+  for (size_t i = 0; i < _file_list_count; ++i) {
+    if (strcmp(_file_list[i].filename, filename) == 0) {
       return i;
     }
   }
@@ -655,13 +715,13 @@ int dir_manage_t::search(const char* filename)
 
 std::string dir_manage_t::getFullPath(size_t index)
 {
-  if (index >= _files.size()) { return ""; }
-  return _path + _files[index].filename;
+  if (index >= _file_list_count) { return ""; }
+  return std::string(_path) + _file_list[index].filename;
 }
 
 std::string dir_manage_t::makeFullPath(const char* filename) const
 {
-  return _path + filename;
+  return std::string(_path) + filename;
 }
 
 //-------------------------------------------------------------------------
@@ -731,7 +791,7 @@ const memory_info_t* file_manage_t::loadFile(def::app::data_type_t dir_type, siz
   if (index < dir->getCount())
   {
     auto info = dir->getInfo(index);
-    M5_LOGD("file_manage_t::loadFile : index:%d %s", index, info->filename.c_str());
+    M5_LOGD("file_manage_t::loadFile : index:%d %s", index, info->filename);
     if (info->filesize == 0) { return nullptr; }
     auto memory = createMemoryInfo(info->filesize);
     if (memory != nullptr) {
@@ -740,7 +800,7 @@ const memory_info_t* file_manage_t::loadFile(def::app::data_type_t dir_type, siz
       memory->filename = fullpath;
       auto storage = dir->getStorage();
       if (0 <= storage->loadFromFileToMemory(fullpath.c_str(), memory->data, memory->size, index)) {
-        setLatestFileInfo(info->filename.c_str(), dir_type);
+        setLatestFileInfo(info->filename, dir_type);
         return memory;
       }
     }

@@ -964,9 +964,103 @@ protected:
         uint8_t getConfirm_Paste(void) const { return get8(CONFIRM_PASTE); }
     };
 
+    struct reg_sequence_timeline_t : public registry_t {
+        reg_sequence_timeline_t(void) : registry_t(8192, 0, DATA_SIZE_32) {}
+        std::pair<uint32_t, sequence_chord_desc_t>* begin(void) const {
+            return (std::pair<uint32_t, sequence_chord_desc_t>*)_reg_data;
+        }
+        std::pair<uint32_t, sequence_chord_desc_t>* end(void) const {
+            return (std::pair<uint32_t, sequence_chord_desc_t>*)(_reg_data) + _data_count;
+        }
+        size_t max_count(void) const {
+            return _registry_size / sizeof(std::pair<uint32_t, sequence_chord_desc_t>);
+        }
+
+        // 指定したステップと同値かそれより小さい最大のステップを持つ要素のイテレータを返す
+        std::pair<uint32_t, sequence_chord_desc_t>* find(uint16_t step) const {
+            if (step >= def::app::max_sequence_step) { return nullptr; }
+            auto bg = begin();
+            auto ed = end();
+            // upper_boundでstepより大きい最初の要素を見つける
+            auto it = std::upper_bound( bg
+                                      , ed
+                                      , step
+                                      , [](const auto& a, const auto& b) { return a < b.first; }
+                                      );
+            if (it == bg) { return nullptr; }
+            return --it;
+        }
+        sequence_chord_desc_t getStepDescriptor(uint16_t step) const {
+            // 指定した位置またはその直前のステップ情報を返す
+            auto it = find(step);
+            if (it != nullptr) { if (it->first <= step) { return it->second; } }
+            return sequence_chord_desc_t();
+        }
+
+        // 指定したステップに対して値を設定する
+        bool setStepDescriptor(uint16_t step, const sequence_chord_desc_t& value) {
+            // 最大値チェック
+            if (step >= def::app::max_sequence_step) { return false; }
+            if (_data_count >= max_count()) { return false; }
+
+            // 対象ステップの要素を探索
+            auto it = find(step);
+            auto insert_pos = begin();
+            if (it != nullptr) {
+                if (it->first < step) {
+                    // 指定ステップより前の要素が見つかった場合、その次の位置に挿入する
+                    insert_pos = it + 1;
+                } else {
+                    // 指定ステップと同じ要素が見つかった場合、その位置に上書きする
+                    it->second = value;
+                    return true;
+                }
+            } else {
+                // 指定ステップより前の要素が存在しない場合、先頭に挿入する
+                insert_pos = begin();
+            }
+
+            // 挿入位置以降の要素を1つ後ろにシフトする
+            auto e = end();
+            for (auto shift_it = e; shift_it != insert_pos; ) {
+                --shift_it;
+                *(shift_it + 1) = *shift_it;
+            }
+            // 新しい要素を挿入する
+            insert_pos->first = step;
+            insert_pos->second = value;
+            ++_data_count;
+            return true;
+        }
+        void clear(void) { _data_count = 0; }
+        void deleteAfter(uint16_t step) {
+            // 指定したステップ以降のデータを削除する
+            auto it = find(step);
+            if (it != nullptr) {
+                if (it->first < step) {
+                    ++it;
+                }
+                size_t index = it - begin();
+                _data_count = index;
+            }
+        }
+        bool saveJson(JsonVariant &json);
+        bool loadJson(const JsonVariant &json);
+        uint32_t crc32(uint32_t crc_init) const override {
+            return calc_crc32(_reg_data, _data_count * sizeof(std::pair<uint32_t, sequence_chord_desc_t>), crc_init);
+        }
+        void assign(const reg_sequence_timeline_t &src) {
+            _data_count = src._data_count;
+            memcpy(_reg_data, src._reg_data, _registry_size);
+        }
+
+    protected:
+        size_t _data_count = 0;
+    };
+#if 0
     // シーケンス演奏パターン情報
-    struct reg_sequence_timeline_t : public registry_map_t<sequence_chord_desc_t> {
-        reg_sequence_timeline_t(void) : registry_map_t<sequence_chord_desc_t>(sequence_chord_desc_t()) {}
+    struct reg_sequence_timeline_map_t : public registry_map_t<sequence_chord_desc_t> {
+        reg_sequence_timeline_map_t(void) : registry_map_t<sequence_chord_desc_t>(sequence_chord_desc_t()) {}
         std::map<uint16_t, sequence_chord_desc_t>::const_iterator get_le(uint16_t step) const {
             // 指定した位置またはその直前のステップ情報を返す
             if (step >= def::app::max_sequence_step) {
@@ -1031,7 +1125,7 @@ protected:
         bool saveJson(JsonVariant &json);
         bool loadJson(const JsonVariant &json);
     };
-
+#endif
     struct reg_sequence_info_t : public registry_t {
         reg_sequence_info_t(void) : registry_t(16, 0, DATA_SIZE_8) {}
         enum index_t : uint16_t {
@@ -1063,7 +1157,7 @@ protected:
             crc = timeline.crc32(crc);
             return crc;
         }
-        const sequence_chord_desc_t& getStepDescriptor(uint16_t step) const {
+        sequence_chord_desc_t getStepDescriptor(uint16_t step) const {
             if (step >= info.getLength()) {
                 step = -1;
             }
@@ -1465,8 +1559,10 @@ protected:
     reg_command_mapping_t command_mapping_port_b { 4 };     // 外部機器ボタンのマッピングテーブル
     // reg_command_mapping_t command_mapping_midinote { def::midi::max_note };    // MIDIノートへのコマンドマッピングテーブル
     // reg_midi_command_mapping_t command_mapping_midinote;    // MIDIノートへのコマンドマッピングテーブル
-    reg_midi_command_mapping_t command_mapping_midicc15;    // MIDI CCへのコマンドマッピングテーブル
-    reg_midi_command_mapping_t command_mapping_midicc16;    // MIDI CCへのコマンドマッピングテーブル
+    // reg_midi_command_mapping_t command_mapping_midicc15;    // MIDI CCへのコマンドマッピングテーブル
+    // reg_midi_command_mapping_t command_mapping_midicc16;    // MIDI CCへのコマンドマッピングテーブル
+    reg_command_mapping_t command_mapping_midicc15 { def::midi::max_note };    // MIDI CCへのコマンドマッピングテーブル
+    reg_command_mapping_t command_mapping_midicc16 { def::midi::max_note };    // MIDI CCへのコマンドマッピングテーブル
 
     // reg_command_mapping_t command_mapping_custom_main { def::hw::max_button_mask };  // メインボタンの割当カスタマイズテーブル
 

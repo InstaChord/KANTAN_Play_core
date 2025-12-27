@@ -15,8 +15,12 @@
 
 namespace kanplay_ns {
 //-------------------------------------------------------------------------
-struct file_info_t {
+struct file_info_string_t {
   std::string filename;
+  size_t filesize;
+};
+struct file_info_t {
+  char* filename;
   size_t filesize;
 };
 
@@ -45,7 +49,7 @@ public:
   virtual int saveFromMemoryToFile(const char* path, const uint8_t* data, size_t length) { return 0; }
 
   // ファイルのリストを取得する
-  virtual int getFileList(const char* path, std::vector<file_info_t>& list) { return 0; }
+  virtual int getFileList(const char* path, std::vector<file_info_string_t>& list) { return 0; }
 
   // ディレクトリを作成する
   virtual bool makeDirectory(const char* path) { return false; }
@@ -65,7 +69,7 @@ public:
   bool fileExists(const char* path) override;
   int loadFromFileToMemory(const char* path, uint8_t* dst, size_t max_length, int dir_index = -1) override;
   int saveFromMemoryToFile(const char* path, const uint8_t* data, size_t length) override;
-  int getFileList(const char* path, std::vector<file_info_t>& list) override;
+  int getFileList(const char* path, std::vector<file_info_string_t>& list) override;
   bool makeDirectory(const char* path) override;
   int removeFile(const char* path) override;
   int renameFile(const char* path, const char* newpath) override;
@@ -81,7 +85,7 @@ public:
   bool fileExists(const char* path) override;
   int loadFromFileToMemory(const char* path, uint8_t* dst, size_t max_length, int dir_index = -1) override;
   int saveFromMemoryToFile(const char* path, const uint8_t* data, size_t length) override;
-  int getFileList(const char* path, std::vector<file_info_t>& list) override;
+  int getFileList(const char* path, std::vector<file_info_string_t>& list) override;
   bool makeDirectory(const char* path) override;
   int removeFile(const char* path) override;
   int renameFile(const char* path, const char* newpath) override;
@@ -97,7 +101,7 @@ public:
   bool fileExists(const char* path) override;
   int loadFromFileToMemory(const char* path, uint8_t* dst, size_t max_length, int dir_index = -1) override;
   int saveFromMemoryToFile(const char* path, const uint8_t* data, size_t length) override;
-  int getFileList(const char* path, std::vector<file_info_t>& list) override;
+  int getFileList(const char* path, std::vector<file_info_string_t>& list) override;
   bool makeDirectory(const char* path) override;
   int removeFile(const char* path) override;
   int renameFile(const char* path, const char* newpath) override;
@@ -111,24 +115,26 @@ class dir_manage_t
 public:
   dir_manage_t (storage_base_t* storage, const char *path) : _storage { storage }, _path { path } {}
   storage_base_t* getStorage(void) { return _storage; }
-  bool isEmpty(void) const { return _files.empty(); }
-  size_t getCount(void) { return _files.size(); }
-  const file_info_t* getInfo(size_t index) { return &_files[index]; }
+  bool isEmpty(void) const { return _file_list_count == 0; }
+  size_t getCount(void) const { return _file_list_count; }
+  const file_info_t* getInfo(size_t index) const { return &_file_list[index]; }
   bool update(void);
-  int search(const char* filename);
+  int search(const char* filename) const;
   std::string getFullPath(size_t index);
   std::string makeFullPath(const char* filename) const;
 protected:
-  storage_base_t* _storage;
-  std::string _path;
-  std::vector<file_info_t> _files;
+  storage_base_t* _storage = nullptr;
+  const char* _path;
+
+  char* _all_filenames = nullptr;
+  file_info_t* _file_list = nullptr;
+  size_t _file_list_count = 0;
 };
 
 
 // ファイルの読み込み・保存に使用するメモリ情報を保持する構造体
 struct memory_info_t {
   memory_info_t(uint8_t index) : index { index } {}
-  const uint8_t index; 
 
   std::string filename;      // ファイル名 (フルパスではない)
   uint8_t* data = nullptr;
@@ -136,6 +142,8 @@ struct memory_info_t {
   def::app::data_type_t dir_type;
 
   void release(void);
+
+  const uint8_t index; 
 };
 
 class file_manage_t

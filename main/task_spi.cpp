@@ -94,7 +94,7 @@ void task_spi_t::task_func(task_spi_t* me)
 
       gui.startWrite();
     }
-    int wait = !gui.update() ? 8 : 1;
+    int wait = !gui.update() ? 8 : 2;
 #if defined (M5UNIFIED_PC_BUILD)
     M5.delay(wait);
     flg_notify = true;

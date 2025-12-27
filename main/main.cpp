@@ -117,17 +117,17 @@ namespace kanplay_ns {
       M5.Power.powerOff();
     }
     log_memory(5); M5.delay(8); M5.Display.print("."); task_midi->start();
-    log_memory(6); M5.delay(8); M5.Display.print("."); task_wifi->start();
-    log_memory(7); M5.delay(8); M5.Display.print("."); task_kantanplay->start();
-    log_memory(8); M5.delay(8); M5.Display.print("."); task_operator->start();
-    log_memory(9); M5.delay(8); M5.Display.print("."); task_commander->start();
-    log_memory(10); M5.delay(8); M5.Display.print("."); task_port_a->start();
-    log_memory(11); M5.delay(8); M5.Display.print("."); task_port_b->start();
+    log_memory(6); M5.delay(8); M5.Display.print("."); task_kantanplay->start();
+    log_memory(7); M5.delay(8); M5.Display.print("."); task_operator->start();
+    log_memory(8); M5.delay(8); M5.Display.print("."); task_commander->start();
+    log_memory(9); M5.delay(8); M5.Display.print("."); task_port_a->start();
+    log_memory(10); M5.delay(8); M5.Display.print("."); task_port_b->start();
 
 #if !defined (M5UNIFIED_PC_BUILD)
     m5gfx::heap_free(dummy);
 #endif
 
+    log_memory(11); M5.delay(8); M5.Display.print("."); task_wifi->start();
     log_memory(12); M5.delay(8); M5.Display.print("."); task_spi->start();
 
     system_registry->operator_command.addQueue( { def::command::system_control, def::command::sc_boot } );

@@ -111,7 +111,7 @@ bool task_kantanplay_t::commandProccessor(void)
   case def::command::autoplay_switch:
     { // 自動演奏モードのオン・オフのトグル
       auto seq_mode = system_registry->runtime_info.getSequenceMode();
-      auto autoplay_state = system_registry->runtime_info.getGuiAutoplayState();
+      auto autoplay_state = system_registry->runtime_info.getAutoplayState();
       auto prev_autoplay_state = autoplay_state;
 
       if (is_pressed) {
@@ -137,6 +137,13 @@ bool task_kantanplay_t::commandProccessor(void)
             break;
 
           case def::command::autoplay_switch_t::autoplay_start:
+            if (seq_mode == def::seqmode::seq_free_play) { // フリープレイモードの場合はビート演奏モードに移行する
+              seq_mode = def::seqmode::seq_beat_play;
+            } else
+            if (seq_mode == def::seqmode::seq_guide_play) { // ガイドプレイモードの場合はオートソングモードに移行する
+              seq_mode = def::seqmode::seq_auto_song;
+            }
+            system_registry->runtime_info.setSequenceMode( seq_mode );
             if (autoplay_state != def::play::auto_play_state_t::auto_play_running) {
               autoplay_state = def::play::auto_play_state_t::auto_play_waiting;
               system_registry->runtime_info.setAutoplayState(autoplay_state);

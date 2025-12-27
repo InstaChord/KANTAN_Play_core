@@ -41,6 +41,7 @@ public:
   virtual bool set8(uint16_t index, uint8_t value, bool force_notify = false);
   virtual bool set16(uint16_t index, uint16_t value, bool force_notify = false);
   virtual bool set32(uint16_t index, uint32_t value, bool force_notify = false);
+  virtual uint32_t crc32(uint32_t crc_init = 0) const { return crc_init; }
 
   const history_t* getHistory(history_code_t &code);
   history_code_t getHistoryCode(void) const { return _history_code; }
@@ -78,7 +79,7 @@ public:
   void* getBuffer(uint16_t index = 0) const { return &_reg_data_8[index]; }
   void assign(const registry_t &src);
   size_t size(void) const { return _registry_size; }
-  uint32_t crc32(uint32_t crc_init = 0) const;
+  uint32_t crc32(uint32_t crc_init = 0) const override;
 
   // 比較オペレータ
   bool operator==(const registry_t &rhs) const;
@@ -139,7 +140,7 @@ public:
     }
     _execNotify();
   }
-  uint32_t crc32(uint32_t crc) const {
+  uint32_t crc32(uint32_t crc) const override {
     for (const auto& pair : _data) {
       crc = calc_crc32( reinterpret_cast<const uint8_t*>(&pair), sizeof(pair), crc);
     }
