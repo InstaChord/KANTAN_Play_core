@@ -157,7 +157,7 @@ public:
                                 : 0;
               // インスタコード連携モードでない場合は、ノートによる制御のためのコマンドを取得する
               if (!me->_flg_instachord_link) {
-                command_param_array = system_registry->command_mapping_midinote.getCommandParamArray(message.data[0]);
+                command_param_array = system_registry->command_mapping_midinote->getCommandParamArray(message.data[0]);
                 if (!command_param_array.empty() && velocity) {
                   system_registry->operator_command.addQueue( { def::command::set_velocity, velocity } );
                 }

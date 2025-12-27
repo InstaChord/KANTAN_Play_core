@@ -1208,6 +1208,7 @@ Button Index mapping
       data_song_preset,
       data_setting,
       data_resume,
+      data_mapping,
       data_type_max,
     };
     static constexpr const char* data_path[] = {
@@ -1216,6 +1217,7 @@ Button Index mapping
       "",               // バイナリ埋め込みのためフォルダ情報なし
       "/setting.json",
       "/resume.json",
+      "/mapping.kmap",
     };
     struct file_command_info_t {
       union {
@@ -1314,6 +1316,7 @@ Button Index mapping
       { "sharp[m7_5]"  , { "♯ [ m7-5 ]"     , nullptr              }, { command::chord_semitone, 2,                               command::chord_modifier, KANTANMusic_Modifier_m7_5 } },
       { "slot -1"      , { "Slot -1"       , "スロット -1"          }, { command::slot_select_ud  , command::slot_select_ud_t::slot_prev } },
       { "slot +1"      , { "Slot +1"       , "スロット +1"          }, { command::slot_select_ud  , command::slot_select_ud_t::slot_next } },
+      { ""             , { "---"            , nullptr             }, {} },
       { nullptr        , nullptr                                   , {} },
     };
     static constexpr const control_assignment_t external_table[] = {

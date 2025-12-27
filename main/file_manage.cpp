@@ -166,6 +166,7 @@ static dir_manage_t dir_manage[def::app::data_type_t::data_type_max] =
   { &storage_incbin  , def::app::data_path[2] }, // data_song_preset
   { &storage_littlefs, def::app::data_path[3] }, // data_setting
   { &storage_littlefs, def::app::data_path[4] }, // data_resume
+  { &storage_littlefs, def::app::data_path[5] }, // data_mapping
 };
 
 static std::string trimExtension(const std::string& filename)

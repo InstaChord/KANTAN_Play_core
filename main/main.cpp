@@ -47,6 +47,7 @@ namespace kanplay_ns {
     log_memory(0);
     auto cfg = M5.config();
     cfg.output_power = false;
+    cfg.internal_spk = false;
     M5.begin(cfg);
 
     M5.Display.setRotation(0);

@@ -542,24 +542,27 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
         case def::app::data_type_t::data_song_users:
           {
   uint32_t msec = M5.millis();
-            bool result = system_registry->unchanged_song_data.loadSongJSON(mem->data, mem->size);
+            bool result = system_registry->backup_song_data.loadSongJSON(mem->data, mem->size);
   msec = M5.millis() - msec;
   M5_LOGD("load time %d", msec);
             if (!result) {
-              result = system_registry->unchanged_song_data.loadText(mem->data, mem->size);
+              result = system_registry->backup_song_data.loadText(mem->data, mem->size);
             }
             if (result) {
+              system_registry->song_data.assign(system_registry->backup_song_data);
+              system_registry->backup_song_data.reset();
+              system_registry->unchanged_song_crc32 = system_registry->song_data.crc32();
+              
               const auto seqmode = system_registry->runtime_info.getSequenceMode();
-              system_registry->song_data.assign(system_registry->unchanged_song_data);
               if (system_registry->song_data.sequence.info.getLength() > 0) {
                 // シーケンスデータが存在する場合は、フリープレイモードからガイドプレイモードに変更する
                 if (seqmode == def::seqmode::seq_free_play || seqmode == def::seqmode::seq_beat_play) {
-                  system_registry->runtime_info.setSequenceMode(def::seqmode::seq_guide_play);
+                  system_registry->operator_command.addQueue( { def::command::sequence_mode_set, def::seqmode::seq_guide_play } );
                 }
               } else {
                 // シーケンスデータが存在しない場合は、ガイドプレイモードからフリープレイモードに変更する
                 if (seqmode == def::seqmode::seq_guide_play || seqmode == def::seqmode::seq_auto_song) {
-                  system_registry->runtime_info.setSequenceMode(def::seqmode::seq_free_play);
+                  system_registry->operator_command.addQueue( { def::command::sequence_mode_set, def::seqmode::seq_free_play } );
                 }
               }
             }
@@ -696,7 +699,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
             }
           }
           system_registry->syncParams();
-          system_registry->clearUpdateSettingFlag();
+          system_registry->updateCRC32();
 
           // 演奏の強制停止処理を入れておく
           system_registry->player_command.addQueueW( { def::command::play_control, def::command::play_control_t::pc_panic_stop } );
@@ -839,7 +842,6 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
       default:
       case def::command::edit_exit_t::save:
         { // 確定操作は特になにもしなくてよい。
-          system_registry->setUpdateResumeFlag();
         }
         break;
       }
@@ -1332,7 +1334,7 @@ void task_operator_t::changeCommandMapping(void)
   }
   if (custom_map) {
     for (int i = 0; i < def::hw::max_main_button; ++i) {
-      auto pair = system_registry->command_mapping_custom_main.getCommandParamArray(i);
+      auto pair = system_registry->command_mapping_internal->getCommandParamArray(i);
       system_registry->command_mapping_current.setCommandParamArray(i, pair);
     }
   }

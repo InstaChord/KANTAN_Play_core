@@ -113,9 +113,9 @@ void system_registry_t::init(void)
   color_setting.init();
   external_input.init();
   command_mapping_current.init();
-  command_mapping_external.init();
+  // command_mapping_external.init();
   command_mapping_port_b.init();
-  command_mapping_midinote.init();
+  // command_mapping_midinote.init();
   command_mapping_midicc15.init();
   command_mapping_midicc16.init();
   drum_mapping.init();
@@ -129,10 +129,9 @@ void system_registry_t::init(void)
   song_data.init(true);
   file_command.init(true);
   backup_song_data.init(true);
-  unchanged_song_data.init(true);
   clipboard_slot.init(true);
   clipboard_arpeggio.init(true);
-  command_mapping_custom_main.init(true);
+// command_mapping_custom_main.init(true);
 //sequence_play.init(true);
 //current_sequence_timeline.init(true);
 
@@ -221,9 +220,9 @@ void system_registry_t::reset(void)
   runtime_info.setPressVelocity(127);
 
 
-  command_mapping_external.reset();
+  control_mapping[0].external.reset();
   for (int i = 0; i < def::hw::max_button_mask; ++i) {
-    command_mapping_external.setCommandParamArray(i, def::command::command_mapping_external_table[i]);
+    control_mapping[0].external.setCommandParamArray(i, def::command::command_mapping_external_table[i]);
   }
 
   command_mapping_port_b.reset();
@@ -236,7 +235,7 @@ void system_registry_t::reset(void)
     def::command::command_param_array_t command_param;
   };
   {
-    command_mapping_midinote.reset();
+    control_mapping[0].midinote.reset();
     static constexpr const note_cp_t note_cp_table[] = {
       { 53, { def::command::chord_modifier  , KANTANMusic_Modifier_dim } },
       { 55, { def::command::chord_modifier  , KANTANMusic_Modifier_7 } },
@@ -258,7 +257,7 @@ void system_registry_t::reset(void)
       { 71, { def::command::chord_degree, make_degree(7, false               ) } },
     };
     for (const auto& cp : note_cp_table) {
-      command_mapping_midinote.setCommandParamArray(cp.note, cp.command_param);
+      control_mapping[0].midinote.setCommandParamArray(cp.note, cp.command_param);
     }
   }
 
@@ -328,9 +327,9 @@ void system_registry_t::reset(void)
   }
 
   // コード演奏時のメインボタンのカスタマイズ用マッピングを準備
-  for (int i = 0; i < def::hw::max_button_mask; ++i) {
+  for (int i = 0; i < def::hw::max_main_button; ++i) {
     auto pair = def::command::command_mapping_chord_play_table[i];
-    system_registry->command_mapping_custom_main.setCommandParamArray(i, pair);
+    control_mapping[0].internal.setCommandParamArray(i, pair);
   }
 
   // ドラム演奏モードのボタンマッピング設定
@@ -363,75 +362,82 @@ void system_registry_t::reset(void)
 }
 
 
-bool system_registry_t::saveSetting(void)
+bool system_registry_t::save_impl(def::app::data_type_t type)
 {
   // 各種設定を内蔵フラッシュに保存
   auto mem = file_manage.createMemoryInfo(def::app::max_file_len);
   mem->filename = "";
-  mem->dir_type = def::app::data_type_t::data_setting;
-  auto len = saveSettingJSON(mem->data, def::app::max_file_len);
+  mem->dir_type = type;
+  size_t len = 0;
+  switch (type) {
+    case def::app::data_type_t::data_setting:
+      len = saveSettingJSON(mem->data, def::app::max_file_len);
+      break;
+    case def::app::data_type_t::data_resume:
+      len = saveResumeJSON(mem->data, def::app::max_file_len);
+      break;
+    case def::app::data_type_t::data_mapping:
+      // len = saveMappingJSON(mem->data, def::app::max_file_len);
+      len = control_mapping[0].saveJSON(mem->data, def::app::max_file_len);
+      break;
+    default:
+      return false;
+  }
+  M5.delay(1);
   if (len < 16) { // 極端に小さいサイズの場合は失敗と見做す
     return false;
   }
   mem->size = len;
   // セーブリクエストは使用せず直接保存する。 (内蔵フラッシュへの保存なのでSPIタスクに任せる必要が無いため)
 
-  return file_manage.saveFile(def::app::data_type_t::data_setting, mem->index);
-
-/* // 以下はセーブリクエストを使用してSPIタスクで処理する場合のコード
-  def::app::file_command_info_t info;
-  info.mem_index = mem->index;
-  info.dir_type = def::app::data_type_t::data_setting;
-  info.file_index = -1;
-  file_command.setFileSaveRequest(info);
-//*/
-}  
-
-bool system_registry_t::saveResume(void)
-{
-  // レジューム用ファイルを内蔵フラッシュに保存
-  auto mem = file_manage.createMemoryInfo(def::app::max_file_len);
-  mem->filename = "";
-  mem->dir_type = def::app::data_type_t::data_resume;
-  auto len = saveResumeJSON(mem->data, def::app::max_file_len);
-  if (len < 16) { // 極端に小さいサイズの場合は失敗と見做す
-    return false;
-  }
-  mem->size = len;
-
-  return file_manage.saveFile(def::app::data_type_t::data_resume, mem->index);
+  return file_manage.saveFile(type, mem->index);
 }
 
 // 設定を保存する
 bool system_registry_t::save(void)
 {
   bool result = true;
-  if (_update_setting_flag) {
-    if (saveSetting()) {
-      _update_setting_flag = false;
-    } else {
+
+  if (_last_setting_crc32 != calcSettingCRC32()) {
+    if (!save_impl(def::app::data_type_t::data_setting)) {
       result = false;
     }
   }
-  if (_update_resume_flag) {
-    if (saveResume()) {
-      _update_resume_flag = false;
-    } else {
+
+  if (_last_resume_crc32 != calcResumeCRC32()) {
+    if (!save_impl(def::app::data_type_t::data_resume)) {
       result = false;
     }
   }
+
+  if (_last_mapping_crc32 != calcMappingCRC32()) {
+    if (!save_impl(def::app::data_type_t::data_mapping)) {
+      result = false;
+    }
+  }
+  updateCRC32();
+
   return result;
 }
 
 // 設定を読み込む
 bool system_registry_t::loadSetting(void)
 {
-  reset();
-
   bool result = false;
   auto mem = file_manage.loadFile(def::app::data_type_t::data_setting, 0);
   if (mem != nullptr) {
     result = loadSettingJSON(mem->data, mem->size);
+  }
+
+  return result;
+}
+
+bool system_registry_t::loadMapping(void)
+{
+  bool result = false;
+  auto mem = file_manage.loadFile(def::app::data_type_t::data_mapping, 0);
+  if (mem != nullptr) {
+    result =  control_mapping[0].loadJSON(mem->data, mem->size);
   }
 
   return result;
@@ -461,18 +467,27 @@ bool system_registry_t::loadResume(void)
 
 bool system_registry_t::load(void)
 {
+  reset();
+
   bool result = true;
-  if (loadSetting()) {
-    _update_setting_flag = false;
-  } else {
+  if (!loadSetting()) {
     result = false;
   }
-  if (loadResume()) {
-    _update_resume_flag = false;
-  } else {
+  if (!loadMapping()) {
     result = false;
   }
+  if (!loadResume()) {
+    result = false;
+  }
+  updateCRC32();
   return result;
+}
+
+void system_registry_t::updateCRC32(void)
+{
+  _last_setting_crc32 = calcSettingCRC32();
+  _last_mapping_crc32 = calcMappingCRC32();
+  _last_resume_crc32 = calcResumeCRC32();
 }
 
 //-------------------------------------------------------------------------
@@ -583,7 +598,7 @@ void system_registry_t::reg_task_status_t::setSuspend(bitindex_t index)
 
 void system_registry_t::reg_user_setting_t::setTimeZone15min(int8_t offset)
 {
-  if (set8(TIMEZONE, offset)) { system_registry->setUpdateSettingFlag(); }
+  set8(TIMEZONE, offset);
 #if !defined (M5UNIFIED_PC_BUILD)
   configTime(offset * 15 * 60, 0, def::ntp::server1, def::ntp::server2, def::ntp::server3);
 #endif
@@ -623,7 +638,62 @@ namespace def::ctrl_assign {
 const char* localize_text_t::get(void) const
 { auto i = (uint8_t)system_registry->user_setting.getLanguage(); return text[i] ? text[i] : text[0]; }
 
+
+static bool saveMappingInternal(system_registry_t::reg_command_mapping_t* mapping, JsonObject &json, const def::ctrl_assign::control_assignment_t* table)
+{
+  size_t count = mapping->getButtonCount();
+  for (int num = 0; num < count; ++num) {
+    auto cmd = mapping->getCommandParamArray(num);
+    if (cmd.empty()) { continue; }
+    auto index = def::ctrl_assign::get_index_from_command(table, cmd);
+    if (index < 0) { continue; }
+    json[std::to_string(num + 1)] = table[index].jsonname;
+  }
+  return true;
+}
+
+static bool loadMappingInternal(system_registry_t::reg_command_mapping_t* mapping, const JsonObject &json, const def::ctrl_assign::control_assignment_t* table)
+{
+  if (!json.isNull()) {
+    mapping->reset();
+    size_t count = mapping->getButtonCount();
+    for (int num = 0; num < count; ++num) {
+      auto name = json[std::to_string(num + 1)].as<const char*>();
+      if (name == nullptr) { continue; }
+      auto index = def::ctrl_assign::get_index_from_jsonname(table, name);
+      if (index < 0) { continue; }
+      mapping->setCommandParamArray(num, table[index].command);
+    }
+    return true;
+  }
+  return false;
+}
+
+static bool saveMappingInternal(system_registry_t::control_mapping_t* ctrl_mapping, JsonVariant &json)
+{
+  {
+    auto json_internal = json["internal"].to<JsonObject>();
+    saveMappingInternal(&ctrl_mapping->internal, json_internal, def::ctrl_assign::playbutton_table);
+  }
+  {
+    auto json_external = json["external"].to<JsonObject>();
+    saveMappingInternal(&ctrl_mapping->external, json_external, def::ctrl_assign::external_table);
+  }
+  {
+    auto json_midinote = json["midinote"].to<JsonObject>();
+    saveMappingInternal(&ctrl_mapping->midinote, json_midinote, def::ctrl_assign::external_table);
+  }
+  return false;
+}
+
 //-------------------------------------------------------------------------
+uint32_t system_registry_t::calcSettingCRC32(void)
+{
+  uint32_t crc = user_setting.crc32();
+  crc = midi_port_setting.crc32(crc);
+  return crc;
+}
+
 bool system_registry_t::saveSettingInternal(JsonVariant& json_root)
 {
   {
@@ -650,39 +720,27 @@ bool system_registry_t::saveSettingInternal(JsonVariant& json_root)
     json["usb_power"] = (uint8_t)midi_port_setting.getUSBPowerEnabled();
   }
 
+  // {
+  //   auto json_control_mapping = json_root["control_mapping"].to<JsonVariant>();
+  //   saveMappingInternal(&control_mapping[0], json_control_mapping);
+  // }
+/* 以下廃止、新仕様では control_mapping に統一
   auto json_key_mapping = json_root["key_mapping"].to<JsonObject>();
   {
     {
       auto json = json_key_mapping["chord_play"].to<JsonObject>();
-      for (int btn = 1; btn <= 15; ++btn) {
-        auto cmd = command_mapping_custom_main.getCommandParamArray(btn - 1);
-        auto index = def::ctrl_assign::get_index_from_command(def::ctrl_assign::playbutton_table, cmd);
-        if (index < 0) { continue; }
-        json[std::to_string(btn)] = def::ctrl_assign::playbutton_table[index].jsonname;
-      }
+      saveMappingInternal(&command_mapping_custom_main, json, def::ctrl_assign::playbutton_table);
     }
     {
       auto json = json_key_mapping["external"].to<JsonObject>();
-      for (int btn = 1; btn <= def::hw::max_button_mask; ++btn) {
-        auto cmd = command_mapping_external.getCommandParamArray(btn - 1);
-        if (cmd.empty()) { continue; }
-        auto index = def::ctrl_assign::get_index_from_command(def::ctrl_assign::external_table, cmd);
-        if (index < 0) { continue; }
-        json[std::to_string(btn)] = def::ctrl_assign::external_table[index].jsonname;
-      }
+      saveMappingInternal(&command_mapping_external, json, def::ctrl_assign::external_table);
     }
     {
       auto json = json_key_mapping["midinote"].to<JsonObject>();
-      for (int btn = 1; btn <= def::midi::max_note; ++btn) {
-        auto cmd = command_mapping_midinote.getCommandParamArray(btn - 1);
-        if (cmd.empty()) { continue; }
-        auto index = def::ctrl_assign::get_index_from_command(def::ctrl_assign::external_table, cmd);
-        if (index < 0) { continue; }
-        json[std::to_string(btn)] = def::ctrl_assign::external_table[index].jsonname;
-      }
+      saveMappingInternal(&command_mapping_midinote, json, def::ctrl_assign::external_table);
     }
   }
-
+//*/
   return true;
 }
 
@@ -732,8 +790,8 @@ bool system_registry_t::loadSettingInternal(JsonVariant& json_root)
     midi_port_setting.setUSBPowerEnabled(json["usb_power"].as<bool>());
   }
 
-  // control_assignment::play button ( 旧名 key mapping )
   {
+    // control_assignment::play button ( 旧名 key mapping )
     auto json_key_mapping = json_root["key_mapping"].as<JsonObject>();
     if (!json_key_mapping.isNull())
     {
@@ -743,41 +801,20 @@ bool system_registry_t::loadSettingInternal(JsonVariant& json_root)
           if (data_version == 1 && json["9"] == "7") {
             // 旧仕様のキーアサイン設定で Degree 7 と 7th を混同するケースがあったので、ここで古いデータを無視する
           } else {
-            for (int btn = 1; btn <= 15; ++btn) {
-              auto name = json[std::to_string(btn)].as<const char*>();
-              if (name == nullptr) { continue; }
-              auto index = def::ctrl_assign::get_index_from_jsonname(def::ctrl_assign::playbutton_table, name);
-              if (index < 0) { continue; }
-              command_mapping_custom_main.setCommandParamArray(btn - 1, def::ctrl_assign::playbutton_table[index].command);
-            }
+            loadMappingInternal(&control_mapping[0].internal, json, def::ctrl_assign::playbutton_table);
+            // loadMappingInternal(&command_mapping_custom_main, json, def::ctrl_assign::playbutton_table);
           }
         }
       }
       {
         auto json = json_key_mapping["external"].as<JsonObject>();
-        if (!json.isNull()) {
-          command_mapping_external.reset();
-          for (int btn = 1; btn <= def::hw::max_button_mask; ++btn) {
-            auto name = json[std::to_string(btn)].as<const char*>();
-            if (name == nullptr) { continue; }
-            auto index = def::ctrl_assign::get_index_from_jsonname(def::ctrl_assign::external_table, name);
-            if (index < 0) { continue; }
-            command_mapping_external.setCommandParamArray(btn - 1, def::ctrl_assign::external_table[index].command);
-          }
-        }
+        loadMappingInternal(&control_mapping[0].external, json, def::ctrl_assign::external_table);
+        // loadMappingInternal(&command_mapping_external, json, def::ctrl_assign::external_table);
       }
       {
         auto json = json_key_mapping["midinote"].as<JsonObject>();
-        if (!json.isNull()) {
-          command_mapping_midinote.reset();
-          for (int btn = 1; btn <= def::midi::max_note; ++btn) {
-            auto name = json[std::to_string(btn)].as<const char*>();
-            if (name == nullptr) { continue; }
-            auto index = def::ctrl_assign::get_index_from_jsonname(def::ctrl_assign::external_table, name);
-            if (index < 0) { continue; }
-            command_mapping_midinote.setCommandParamArray(btn - 1, def::ctrl_assign::external_table[index].command);
-          }
-        }
+        loadMappingInternal(&control_mapping[0].midinote, json, def::ctrl_assign::external_table);
+        // loadMappingInternal(&command_mapping_midinote, json, def::ctrl_assign::external_table);
       }
     }
   }
@@ -814,6 +851,102 @@ bool system_registry_t::loadSettingJSON(const uint8_t* data, size_t data_length)
   }
 //*/
   return false;
+}
+
+//-------------------------------------------------------------------------
+uint32_t system_registry_t::calcMappingCRC32(void)
+{
+  uint32_t crc = control_mapping[0].crc32();
+  return crc;
+}
+
+bool system_registry_t::control_mapping_t::saveJSON(JsonVariant &json)
+{
+  json["type"] = "Mapping";
+  json["version"] = 1;
+
+  if (!internal.empty())
+  {
+    auto json_internal = json["internal"].to<JsonObject>();
+    saveMappingInternal(&internal, json_internal, def::ctrl_assign::playbutton_table);
+  }
+  if (!external.empty())
+  {
+    auto json_external = json["external"].to<JsonObject>();
+    saveMappingInternal(&external, json_external, def::ctrl_assign::external_table);
+  }
+  if (!midinote.empty())
+  {
+    auto json_midinote = json["midinote"].to<JsonObject>();
+    saveMappingInternal(&midinote, json_midinote, def::ctrl_assign::external_table);
+  }
+  return false;
+}
+
+bool system_registry_t::control_mapping_t::loadJSON(const JsonVariant &json)
+{
+  bool res = false;
+  auto data_version = json["version"].as<int>();
+  if (data_version <= 1 && json["type"] == "Mapping")
+  {
+    bool res = true;
+    {
+      auto json_internal = json["internal"].as<JsonObject>();
+      if (!json_internal.isNull()) {
+        loadMappingInternal(&internal, json_internal, def::ctrl_assign::playbutton_table);
+      }
+    }
+    {
+      auto json_external = json["external"].as<JsonObject>();
+      if (!json_external.isNull()) {
+        loadMappingInternal(&external, json_external, def::ctrl_assign::external_table);
+      }
+    }
+    {
+      auto json_midinote = json["midinote"].as<JsonObject>();
+      if (!json_midinote.isNull()) {
+        loadMappingInternal(&midinote, json_midinote, def::ctrl_assign::external_table);
+      }
+    }
+  }
+  return res;
+}
+
+size_t system_registry_t::control_mapping_t::saveJSON(uint8_t* data, size_t data_length)
+{
+  ArduinoJson::JsonDocument json_root;
+
+  json_root["format"] = "KANTANPlayCore";
+
+  {
+    auto variant = json_root.as<JsonVariant>();
+    saveJSON(variant);
+  }
+
+  auto result = serializeJson(json_root, (char*)data, data_length);
+// ESP_LOGV("sysreg", "saveSettingJSON result: %d\n", result);
+
+  return result;
+}
+
+bool system_registry_t::control_mapping_t::loadJSON(const uint8_t* data, size_t data_length)
+{
+  ArduinoJson::JsonDocument json_root;
+  auto error = deserializeJson(json_root, (const char*)data, data_length);
+  if (error)
+  {
+    M5_LOGE("deserializeJson error: %s", error.c_str());
+    return false;
+  }
+
+  if (json_root["format"] != "KANTANPlayCore")
+  {
+    M5_LOGE("format error: %s", json_root["format"].as<const char*>());
+    return false;
+  }
+
+  auto variant = json_root.as<JsonVariant>();
+  return loadJSON(variant);
 }
 
 //-------------------------------------------------------------------------
@@ -1395,6 +1528,7 @@ static bool saveSongInternal(system_registry_t::song_data_t* song, JsonVariant &
   json["swing"] = song->song_info.getSwing();
   json["base_key"] = system_registry->runtime_info.getMasterKey();
 
+  if (song->sequence.info.getLength() > 0)
   {
     auto json_sequence = json["sequence"].to<JsonVariant>();
     saveSequenceInternal(&song->sequence, json_sequence);
@@ -1645,6 +1779,12 @@ bool system_registry_t::song_data_t::loadSongJSON(const uint8_t* data, size_t da
   return loadSongInternal(this, variant);
 }
 
+uint32_t system_registry_t::calcResumeCRC32(void)
+{
+  uint32_t crc = song_data.crc32();
+  return crc;
+}
+
 size_t system_registry_t::saveResumeJSON(uint8_t* data, size_t data_length)
 {
   ArduinoJson::JsonDocument json;
@@ -1662,10 +1802,10 @@ size_t system_registry_t::saveResumeJSON(uint8_t* data, size_t data_length)
 
   // 未変更のソングデータの情報を保存
   auto json_unchanged_song = json["unchanged_song"].to<JsonVariant>();
-  saveSongInternal(&unchanged_song_data, json_unchanged_song);
   {
     json_unchanged_song["filename"] =          file_manage.getLatestFileName();
     json_unchanged_song["datatype"] = (uint8_t)file_manage.getLatestDataType();
+    json_unchanged_song["crc32"   ] = unchanged_song_crc32;
   }
 
 
@@ -1703,22 +1843,27 @@ bool system_registry_t::loadResumeJSON(const uint8_t* data, size_t data_length)
 
   auto json_unchanged_song = json["unchanged_song"].as<JsonVariant>();
   if (!json_unchanged_song.isNull()) {
-    loadSongInternal(&unchanged_song_data, json_unchanged_song);
+    if (json_unchanged_song["crc32"].isNull()) {
+      loadSongInternal(&song_data, json_unchanged_song);
+      unchanged_song_crc32 = song_data.crc32();
+    } else {
+      unchanged_song_crc32 = json_unchanged_song["crc32"].as<uint32_t>();
+    }
 
     // 最後に開いたソングデータの情報
     // 初期値として空の情報をセットしておく
     file_manage.setLatestFileInfo("", kanplay_ns::def::app::data_type_t::data_song_preset);
+
+    // ファイル名情報があれば取り込む
     auto song_filename = json_unchanged_song["filename"].as<const char*>();
     if (song_filename != nullptr && song_filename[0] != 0) {
       auto song_datatype = (def::app::data_type_t)(json_unchanged_song["datatype"].as<uint8_t>());
       file_manage.setLatestFileInfo(song_filename, song_datatype);
     }
-
-    song_data.assign(unchanged_song_data);
-    auto json_song = json["song"].as<JsonVariant>();
-    if (!json_song.isNull()) {
-      result = loadSongInternal(&song_data, json_song);
-    }
+  }
+  auto json_song = json["song"].as<JsonVariant>();
+  if (!json_song.isNull()) {
+    result = loadSongInternal(&song_data, json_song);
   }
 
   auto slot_index = json["slot_index"].as<int>();

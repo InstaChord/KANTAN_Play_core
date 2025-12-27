@@ -1269,11 +1269,6 @@ protected:
   }
 };
 
-enum class ctrl_map_target_t : uint8_t {
-  ctrl_map_device = 0,
-  ctrl_map_song = 1,
-};
-
 struct mi_ctrl_assign_t : public mi_normal_t {
   constexpr mi_ctrl_assign_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, const def::ctrl_assign::control_assignment_t table[], uint16_t size, def::mapping::target_t map_target)
   : mi_normal_t { cate, menu_id, level, title }
@@ -1303,9 +1298,11 @@ public:
   : mi_ctrl_assign_t { cate, menu_id, level, title, def::ctrl_assign::playbutton_table, sizeof(def::ctrl_assign::playbutton_table) / sizeof(def::ctrl_assign::playbutton_table[0])-1, map_target }
   , _button_index { button_index } {}
 
+  system_registry_t::reg_command_mapping_t* target(void) const { return &system_registry->control_mapping[(int)_map_target].internal; }
+
   int getValue(void) const override
   {
-    auto cmd = system_registry->command_mapping_custom_main.getCommandParamArray(_button_index);
+    auto cmd = target()->getCommandParamArray(_button_index);
     int index = def::ctrl_assign::get_index_from_command(_table, cmd);
     if (index < 0) {
       index = 0;
@@ -1316,7 +1313,7 @@ public:
   {
     if (mi_ctrl_assign_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    system_registry->command_mapping_custom_main.setCommandParamArray(_button_index, _table[value].command);
+    target()->setCommandParamArray(_button_index, _table[value].command);
     return true;
   }
 
@@ -1324,16 +1321,17 @@ protected:
   const uint8_t _button_index;
 };
 
-// control assignment for internal
 struct mi_ca_external_t : public mi_ctrl_assign_t {
 public:
   constexpr mi_ca_external_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, uint8_t button_index, def::mapping::target_t map_target)
   : mi_ctrl_assign_t { cate, menu_id, level, title, def::ctrl_assign::external_table, sizeof(def::ctrl_assign::external_table) / sizeof(def::ctrl_assign::external_table[0])-1, map_target }
   , _button_index { button_index } {}
 
+  system_registry_t::reg_command_mapping_t* target(void) const { return &system_registry->control_mapping[(int)_map_target].external; }
+
   int getValue(void) const override
   {
-    auto cmd = system_registry->command_mapping_external.getCommandParamArray(_button_index);
+    auto cmd = target()->getCommandParamArray(_button_index);
     int index = def::ctrl_assign::get_index_from_command(_table, cmd);
     if (index < 0) {
       index = 0;
@@ -1344,7 +1342,7 @@ public:
   {
     if (mi_ctrl_assign_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    system_registry->command_mapping_external.setCommandParamArray(_button_index, _table[value].command);
+    target()->setCommandParamArray(_button_index, _table[value].command);
     return true;
   }
 
@@ -1358,9 +1356,11 @@ public:
   : mi_ctrl_assign_t { cate, menu_id, level, title, def::ctrl_assign::external_table, sizeof(def::ctrl_assign::external_table) / sizeof(def::ctrl_assign::external_table[0])-1, map_target }
   , _button_index { button_index } {}
 
+  system_registry_t::reg_command_mapping_t* target(void) const { return &system_registry->control_mapping[(int)_map_target].midinote; }
+
   int getValue(void) const override
   {
-    auto cmd = system_registry->command_mapping_midinote.getCommandParamArray(_button_index);
+    auto cmd = target()->getCommandParamArray(_button_index);
     int index = def::ctrl_assign::get_index_from_command(_table, cmd);
     if (index < 0) {
       index = 0;
@@ -1371,7 +1371,7 @@ public:
   {
     if (mi_ctrl_assign_t::setValue(value) == false) { return false; }
     value -= getMinValue();
-    system_registry->command_mapping_midinote.setCommandParamArray(_button_index, _table[value].command);
+    target()->setCommandParamArray(_button_index, _table[value].command);
     return true;
   }
 
@@ -1807,24 +1807,52 @@ protected:
 
   bool execute(void) const override
   {
-    auto mem = file_manage.createMemoryInfo(def::app::max_file_len);
     auto index = _selecting_value - getMinValue();
-    mem->filename = _filenames[index];
-    mem->dir_type = _dir_type;
-
-    system_registry->unchanged_song_data.assign(system_registry->song_data);
-    auto len = system_registry->unchanged_song_data.saveSongJSON(mem->data, def::app::max_file_len);
-    mem->size = len;
-    if (len == 0 || mem->data[0] != '{') {
-      system_registry->popup_notify.setPopup(false, def::notify_type_t::NOTIFY_FILE_SAVE);
-      M5_LOGE("mi_save_t: saveSongJSON failed");
-      return false;
+    {
+      auto mem = file_manage.createMemoryInfo(def::app::max_file_len);
+      mem->filename = _filenames[index];
+      mem->dir_type = _dir_type;
+  
+      auto len = system_registry->song_data.saveSongJSON(mem->data, def::app::max_file_len);
+  
+      mem->size = len;
+      if (len == 0 || mem->data[0] != '{') {
+        system_registry->popup_notify.setPopup(false, def::notify_type_t::NOTIFY_FILE_SAVE);
+        M5_LOGE("mi_save_t: saveSongJSON failed");
+        return false;
+      }
+      system_registry->unchanged_song_crc32 = system_registry->song_data.crc32();
+      def::app::file_command_info_t info;
+      info.mem_index = mem->index;
+      info.dir_type = _dir_type;
+      info.file_index = -1;
+      system_registry->file_command.setFileSaveRequest(info);
     }
-    def::app::file_command_info_t info;
-    info.mem_index = mem->index;
-    info.dir_type = _dir_type;
-    info.file_index = -1;
-    system_registry->file_command.setFileSaveRequest(info);
+
+    if (system_registry->control_mapping[1].empty() == false)
+    { // コントロールマッピング .kmap も保存する
+      auto mem = file_manage.createMemoryInfo(def::app::max_file_len);
+      mem->filename = _filenames[index];
+      mem->filename.replace(mem->filename.find(".json", mem->filename.size() - 5), 5, ".kmap");
+      mem->dir_type = _dir_type;
+
+      auto len = system_registry->control_mapping[1].saveJSON(mem->data, def::app::max_file_len);
+  
+      mem->size = len;
+      if (len == 0 || mem->data[0] != '{') {
+        system_registry->popup_notify.setPopup(false, def::notify_type_t::NOTIFY_FILE_SAVE);
+        M5_LOGE("mi_save_t: control_mapping saveJSON failed");
+        return false;
+      }
+      def::app::file_command_info_t info;
+      info.mem_index = mem->index;
+      info.dir_type = _dir_type;
+      info.file_index = -1;
+      system_registry->file_command.setFileSaveRequest(info);
+    }
+
+
+
     return mi_normal_t::execute();
   }
 protected:

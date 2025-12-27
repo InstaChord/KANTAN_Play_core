@@ -15,6 +15,8 @@
 
 namespace kanplay_ns {
 //-------------------------------------------------------------------------
+uint32_t calc_crc32(const void *data, size_t length, uint32_t crc_init);
+//-------------------------------------------------------------------------
 class registry_base_t {
 public:
   enum data_size_t : uint8_t {
@@ -73,8 +75,10 @@ public:
   uint8_t get8(uint16_t index) const;
   uint16_t get16(uint16_t index) const;
   uint32_t get32(uint16_t index) const;
-  void* getBuffer(uint16_t index) const { return &_reg_data_8[index]; }
+  void* getBuffer(uint16_t index = 0) const { return &_reg_data_8[index]; }
   void assign(const registry_t &src);
+  size_t size(void) const { return _registry_size; }
+  uint32_t crc32(uint32_t crc_init = 0) const;
 
   // 比較オペレータ
   bool operator==(const registry_t &rhs) const;
@@ -135,6 +139,13 @@ public:
     }
     _execNotify();
   }
+  uint32_t crc32(uint32_t crc) const {
+    for (const auto& pair : _data) {
+      crc = calc_crc32( reinterpret_cast<const uint8_t*>(&pair), sizeof(pair), crc);
+    }
+    return crc;
+  }
+
 
   // 比較オペレータ
   bool operator==(const registry_map_t<T> &rhs) const { return _data == rhs._data; }
