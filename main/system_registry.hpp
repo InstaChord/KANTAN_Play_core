@@ -25,7 +25,7 @@ class system_registry_t;
 extern system_registry_t* system_registry;
 
 class system_registry_t {
-    bool save_impl(def::app::data_type_t type);
+    bool save_impl(const char* filename);
     bool loadInternal(def::app::data_type_t type);
 
     bool saveSettingInternal(JsonVariant& json);
@@ -52,6 +52,8 @@ public:
     void init(void);
 
     void updateCRC32(void);
+
+    void updateControlMapping(void);
 
     void reset(void);
     bool save(void);
@@ -191,6 +193,8 @@ protected:
     struct reg_runtime_info_t : public registry_t {
         reg_runtime_info_t(void) : registry_t(44, 0, DATA_SIZE_8) {}
         enum index_t : uint16_t {
+            SEQUENCE_STEP_L,
+            SEQUENCE_STEP_H,
             PART_EFFECT_1,
             PART_EFFECT_2,
             PART_EFFECT_3,
@@ -213,8 +217,6 @@ protected:
             PLAY_SLOT,
             PLAY_MODE,
             SEQUENCE_MODE,
-            SEQUENCE_STEP_L,
-            SEQUENCE_STEP_H,
             MENU_VISIBLE,
             CHORD_AUTOPLAY_STATE,
             SUSTAIN_STATE,
@@ -1209,35 +1211,6 @@ protected:
         }
     };
 
-    struct reg_file_command_t : public registry_t {
-        reg_file_command_t(void) : registry_t(16, 8, DATA_SIZE_32) {}
-        enum index_t : uint8_t {
-            CURRENT_SONG_INFO = 0x00,
-            UPDATE_LIST = 0x04,
-            FILE_LOAD = 0x08,
-            FILE_SAVE = 0x0C,
-        };
-        void setCurrentSongInfo(const def::app::file_command_info_t& info) { set32(CURRENT_SONG_INFO, info.raw, true); }
-        def::app::file_command_info_t getCurrentSongInfo(void) const { return def::app::file_command_info_t(get32(CURRENT_SONG_INFO)); }
-
-        void wait(void);
-
-        void waitUpdateList(void);
-        void setUpdateList(const def::app::file_command_info_t& info) { set32(UPDATE_LIST, info.raw, true); }
-        def::app::file_command_info_t getUpdateList(void) const { return def::app::file_command_info_t(get32(UPDATE_LIST)); }
-        void clearUpdateList(void) { set32(UPDATE_LIST, 0, false); }
-
-        void waitFileLoad(void);
-        void setFileLoadRequest(const def::app::file_command_info_t& info) { waitFileLoad(); set32(FILE_LOAD, info.raw, true); }
-        def::app::file_command_info_t getFileLoadRequest(void) const { return def::app::file_command_info_t(get32(FILE_LOAD)); }
-        void clearFileLoadRequest(void) { set32(FILE_LOAD, 0, false); }
-
-        void waitFileSave(void);
-        void setFileSaveRequest(const def::app::file_command_info_t& info) { waitFileSave(); set32(FILE_SAVE, info.raw, true); }
-        def::app::file_command_info_t getFileSaveRequest(void) const { return def::app::file_command_info_t(get32(FILE_SAVE)); }
-        void clearFileSaveRequest(void) { set32(FILE_SAVE, 0, false); }
-    };
-
     struct reg_song_info_t : public registry_t {
         reg_song_info_t(void) : registry_t(8, 0, DATA_SIZE_8) {}
         enum index_t : uint16_t {
@@ -1368,42 +1341,6 @@ protected:
         }
     };
 
-    struct reg_midi_command_mapping_t : public registry_map_t<def::command::command_param_array_t> {
-        reg_midi_command_mapping_t(void) : registry_map_t<def::command::command_param_array_t>( def::command::command_param_array_t(0) ) {}
-        void setCommandParamArray(uint8_t button_index, def::command::command_param_array_t command) { set(button_index, command, true); }
-        const def::command::command_param_array_t& getCommandParamArray(uint8_t button_index) const { return get(button_index); }
-        void reset(void) {
-            _data.clear();
-        }
-    };
-
-/*
-    struct reg_command_mapping_t : public registry_base_t {
-        reg_command_mapping_t(void) : registry_base_t { 0 } {}
-        void setCommandParamArray(uint8_t button_index, def::command::command_param_array_t command)
-        {
-            _command_map[button_index].clear();
-            _command_map[button_index].push_back(command.array[0]);
-            if (command.array[1].raw != 0) { _command_map[button_index].push_back(command.array[1]); }
-        }
-        def::command::command_param_array_t getCommandParamArray(uint8_t button_index) const
-        {
-            def::command::command_param_array_t result;
-            auto it = _command_map.find(button_index);
-            if (it != _command_map.end()) {
-                result.array[0] = it->second[0];
-                if (it->second.size() > 1) { result.array[1] = it->second[1]; }
-            }
-            return result;
-        }
-        // const std::vector<def::command::command_param_t>& getCommandParam(uint8_t button_index) const
-        // {
-        //     return static_cast<def::command::command_param_array_t>(get32(button_index * 4));
-        // }
-    protected:
-        std::map<uint8_t, std::vector<def::command::command_param_t> > _command_map;
-    };
-//*/
     struct reg_color_setting_t : public registry_t {
         reg_color_setting_t(void) : registry_t(72, 0, DATA_SIZE_32) {}
         enum index_t : uint16_t {
@@ -1522,6 +1459,12 @@ protected:
         bool empty(void) const {
             return internal.empty() && external.empty() && midinote.empty();
         }
+        void reset(void) {
+            internal.reset();
+            external.reset();
+            midinote.reset();
+            system_registry->updateControlMapping();
+        }
     };
 
     reg_menu_status_t      menu_status;
@@ -1555,16 +1498,9 @@ protected:
     reg_command_mapping_t* command_mapping_midinote = &control_mapping[0].midinote;
 
     reg_command_mapping_t command_mapping_current { def::hw::max_button_mask };      // 現在のボタンマッピングテーブル
-    // reg_command_mapping_t command_mapping_external { def::hw::max_button_mask };     // 外部機器ボタンのマッピングテーブル
     reg_command_mapping_t command_mapping_port_b { 4 };     // 外部機器ボタンのマッピングテーブル
-    // reg_command_mapping_t command_mapping_midinote { def::midi::max_note };    // MIDIノートへのコマンドマッピングテーブル
-    // reg_midi_command_mapping_t command_mapping_midinote;    // MIDIノートへのコマンドマッピングテーブル
-    // reg_midi_command_mapping_t command_mapping_midicc15;    // MIDI CCへのコマンドマッピングテーブル
-    // reg_midi_command_mapping_t command_mapping_midicc16;    // MIDI CCへのコマンドマッピングテーブル
     reg_command_mapping_t command_mapping_midicc15 { def::midi::max_note };    // MIDI CCへのコマンドマッピングテーブル
     reg_command_mapping_t command_mapping_midicc16 { def::midi::max_note };    // MIDI CCへのコマンドマッピングテーブル
-
-    // reg_command_mapping_t command_mapping_custom_main { def::hw::max_button_mask };  // メインボタンの割当カスタマイズテーブル
 
     kanplay_slot_t       clipboard_slot;      // コピー/ペースト(クリップボード)データ。コピー/カットしたデータを一時的に保持する
     reg_arpeggio_table_t clipboard_arpeggio;  // コピー/ペースト(クリップボード)データ。コピー/カットしたデータを一時的に保持する
@@ -1578,8 +1514,6 @@ protected:
     clipboard_contetn_t clipboard_content;    // コピー/ペースト(クリップボード)の内容
 
     registry_t drum_mapping { 16, 0, registry_t::DATA_SIZE_8 }; // ドラム演奏モードのコマンドとノートナンバーのマッピングテーブル
-
-    reg_file_command_t file_command;  // ファイル操作に対するコマンド
 
     // 変更前のソングデータのCRC32値 (変更検出用)
     uint32_t unchanged_song_crc32 = 0;

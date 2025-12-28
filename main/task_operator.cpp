@@ -536,6 +536,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
         switch (mem->dir_type)
         {
         default:
+          mem->release();
           break;
         case def::app::data_type_t::data_song_preset:
         case def::app::data_type_t::data_song_extra:
@@ -548,16 +549,18 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
             if (!result) {
               result = system_registry->backup_song_data.loadText(mem->data, mem->size);
             }
+            system_registry->popup_notify.setPopup(result, def::notify_type_t::NOTIFY_FILE_LOAD);
             if (result) {
+              const auto seqmode = system_registry->runtime_info.getSequenceMode();
+              const auto autostyle = system_registry->runtime_info.getAutoplayState();
+              const bool is_auto = (autostyle != def::play::auto_play_state_t::auto_play_none);
+
+              system_registry->player_command.addQueue( { def::command::chord_step_reset_request, 1 } );
               system_registry->song_data.assign(system_registry->backup_song_data);
               system_registry->backup_song_data.reset();
               system_registry->unchanged_song_crc32 = system_registry->song_data.crc32();
               system_registry->operator_command.addQueue( { def::command::slot_select, 1 } );
-              system_registry->player_command.addQueue( { def::command::chord_step_reset_request, 1 } );
-              
-              const auto seqmode = system_registry->runtime_info.getSequenceMode();
-              const auto autostyle = system_registry->runtime_info.getAutoplayState();
-              bool is_auto = (autostyle != def::play::auto_play_state_t::auto_play_none);
+
               if (system_registry->song_data.sequence.info.getLength() > 0) {
                 // シーケンスデータが存在する場合は、フリープレイモードからガイドプレイモードに変更する
                 if (seqmode == def::seqmode::seq_free_play || seqmode == def::seqmode::seq_beat_play) {
@@ -569,13 +572,23 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
                   system_registry->operator_command.addQueue( { def::command::sequence_mode_set, is_auto ? def::seqmode::seq_beat_play : def::seqmode::seq_free_play } );
                 }
               }
+              if (is_auto) {
+                system_registry->player_command.addQueue( { def::command::autoplay_switch, def::command::autoplay_switch_t::autoplay_start } );
+              }
+              file_manage.setLatestFileInfo(mem->dir_type, mem->filename.c_str());
             }
           }
           break;
+
+        case def::app::data_type_t::data_kmap:
+          {
+            bool result = system_registry->control_mapping[1].loadJSON(mem->data, mem->size);
+          }
+          break;
         }
-        system_registry->checkSongModified();
         // メモリを解放しておく
         mem->release();
+        system_registry->checkSongModified();
       }
       changeCommandMapping();
     }
@@ -680,26 +693,6 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
 
       case def::command::system_control_t::sc_boot:
         {
-          // 最後に扱ったソングデータのファイル名とデータタイプを取得
-          auto filename = file_manage.getLatestFileName();
-          auto datatype = file_manage.getLatestDataType();
-          M5_LOGV("file:%s  type:%d", filename.c_str(), (uint8_t)datatype);
-
-          system_registry->file_command.setUpdateList(datatype);
-          auto dm = file_manage.getDirManage(datatype);
-          if (dm != nullptr) {
-            // 前回使用していたファイルを特定する (ファイル名からindex特定)
-            for (int retry = 16; dm->isEmpty() && retry; --retry) {
-              M5.delay(16);
-            }
-            auto index = dm->search(filename.c_str());
-            if (index >= 0) {
-              def::app::file_command_info_t songinfo;
-              songinfo.file_index = index;
-              songinfo.dir_type = datatype;
-              system_registry->file_command.setCurrentSongInfo(songinfo);
-            }
-          }
           system_registry->syncParams();
           system_registry->updateCRC32();
 

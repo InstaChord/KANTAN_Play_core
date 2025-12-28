@@ -129,6 +129,7 @@ namespace kanplay_ns {
 
     log_memory(11); M5.delay(8); M5.Display.print("."); task_wifi->start();
     log_memory(12); M5.delay(8); M5.Display.print("."); task_spi->start();
+    log_memory(13);
 
     system_registry->operator_command.addQueue( { def::command::system_control, def::command::sc_boot } );
   }

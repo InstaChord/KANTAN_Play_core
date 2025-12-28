@@ -1206,32 +1206,21 @@ Button Index mapping
       data_song_users,
       data_song_extra,
       data_song_preset,
-      data_setting,
-      data_resume,
-      data_mapping,
+      data_system,
       data_type_max,
+      data_kmap,
     };
     static constexpr const char* data_path[] = {
       "/songs/user/",
       "/songs/extra/",
       "",               // バイナリ埋め込みのためフォルダ情報なし
-      "/setting.json",
-      "/resume.json",
-      "/mapping.kmap",
+      "/",
     };
-    struct file_command_info_t {
-      union {
-        uint32_t raw;
-        struct {
-          data_type_t dir_type;
-          uint8_t mem_index;
-          uint16_t file_index;
-        };
-      };
-      constexpr file_command_info_t(uint32_t raw_value = 0) : raw { raw_value } {}
-      constexpr file_command_info_t(data_type_t dir_type, uint8_t mem_index, uint16_t file_index) : dir_type { dir_type }, mem_index { mem_index }, file_index { file_index } {}
-    };
-    // static constexpr const char setting_filename[] = "setting.json";
+    static constexpr const char filename_setting[] = "setting.json";
+    static constexpr const char filename_resume[] = "resume.json";
+    static constexpr const char filename_mapping[] = "mapping.json";
+    static constexpr const char fileext_song[] = ".json";
+    static constexpr const char fileext_kmap[] = ".kmap";
   };
 
   namespace ctrl_assign {

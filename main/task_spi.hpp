@@ -19,8 +19,6 @@ public:
   void start(void);
 private:
   static void task_func(task_spi_t* me);
-  void procFile(void);
-  registry_t::history_code_t _history_code = 0;
 };
 
 //-------------------------------------------------------------------------

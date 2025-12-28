@@ -40,16 +40,16 @@ public:
 
   virtual void endStorage(void) {}
 
-  virtual bool fileExists(const char* path) { return false; }
+  virtual int getFileSize(const char* path) { return -1; }
 
   // 指定されたファイルをメモリに読み込む
-  virtual int loadFromFileToMemory(const char* path, uint8_t* dst, size_t max_length, int dir_index = -1) { return 0; }
+  virtual int loadFromFileToMemory(const char* path, uint8_t* dst, size_t max_length) { return 0; }
 
   // メモリのデータを指定されたファイルに書き込む
   virtual int saveFromMemoryToFile(const char* path, const uint8_t* data, size_t length) { return 0; }
 
   // ファイルのリストを取得する
-  virtual int getFileList(const char* path, std::vector<file_info_string_t>& list) { return 0; }
+  virtual int getFileList(std::vector<file_info_string_t>& list, const char* path, const char* suffix = "") { return 0; }
 
   // ディレクトリを作成する
   virtual bool makeDirectory(const char* path) { return false; }
@@ -66,10 +66,10 @@ class storage_sd_t : public storage_base_t
 public:
   bool beginStorage(void) override;
   void endStorage(void) override;
-  bool fileExists(const char* path) override;
-  int loadFromFileToMemory(const char* path, uint8_t* dst, size_t max_length, int dir_index = -1) override;
+  int getFileSize(const char* path) override;
+  int loadFromFileToMemory(const char* path, uint8_t* dst, size_t max_length) override;
   int saveFromMemoryToFile(const char* path, const uint8_t* data, size_t length) override;
-  int getFileList(const char* path, std::vector<file_info_string_t>& list) override;
+  int getFileList(std::vector<file_info_string_t>& list, const char* path, const char* suffix = "") override;
   bool makeDirectory(const char* path) override;
   int removeFile(const char* path) override;
   int renameFile(const char* path, const char* newpath) override;
@@ -82,10 +82,10 @@ class storage_littlefs_t : public storage_base_t
 public:
   bool beginStorage(void) override;
   void endStorage(void) override;
-  bool fileExists(const char* path) override;
-  int loadFromFileToMemory(const char* path, uint8_t* dst, size_t max_length, int dir_index = -1) override;
+  int getFileSize(const char* path) override;
+  int loadFromFileToMemory(const char* path, uint8_t* dst, size_t max_length) override;
   int saveFromMemoryToFile(const char* path, const uint8_t* data, size_t length) override;
-  int getFileList(const char* path, std::vector<file_info_string_t>& list) override;
+  int getFileList(std::vector<file_info_string_t>& list, const char* path, const char* suffix = "") override;
   bool makeDirectory(const char* path) override;
   int removeFile(const char* path) override;
   int renameFile(const char* path, const char* newpath) override;
@@ -98,10 +98,10 @@ class storage_incbin_t : public storage_base_t
 public:
   bool beginStorage(void) override;
   void endStorage(void) override;
-  bool fileExists(const char* path) override;
-  int loadFromFileToMemory(const char* path, uint8_t* dst, size_t max_length, int dir_index = -1) override;
+  int getFileSize(const char* path) override;
+  int loadFromFileToMemory(const char* path, uint8_t* dst, size_t max_length) override;
   int saveFromMemoryToFile(const char* path, const uint8_t* data, size_t length) override;
-  int getFileList(const char* path, std::vector<file_info_string_t>& list) override;
+  int getFileList(std::vector<file_info_string_t>& list, const char* path, const char* suffix = "") override;
   bool makeDirectory(const char* path) override;
   int removeFile(const char* path) override;
   int renameFile(const char* path, const char* newpath) override;
@@ -154,14 +154,18 @@ class file_manage_t
   std::string _latest_file_name;
   std::string _display_file_name;
   def::app::data_type_t _latest_data_type;
+  int _latest_file_index = -1;
 public:
-  void setLatestFileInfo(const char* filename, def::app::data_type_t data_type);
+  void setLatestFileInfo(def::app::data_type_t data_type, const char* filename);
 
   // 現在使用中のファイル名 (拡張子あり)
   const std::string& getLatestFileName(void) const { return _latest_file_name; }
 
   // 現在使用中のファイルのデータタイプ
   def::app::data_type_t getLatestDataType(void) const { return _latest_data_type; }
+
+  // 現在使用中のファイルのインデックス番号
+  int getLatestFileIndex(void) const { return _latest_file_index; }
 
   // GUI表示用、現在使用中のファイル名 (拡張子なし)
   const std::string& getDisplayFileName(void) const { return _display_file_name; }
@@ -180,7 +184,10 @@ public:
   bool updateFileList(def::app::data_type_t dir_type);
 
   // ファイルを読み込む。
-  const memory_info_t* loadFile(def::app::data_type_t dir_type, size_t file_index);
+  memory_info_t* loadFile(def::app::data_type_t dir_type, size_t file_index);
+
+  // ファイルを読み込む。
+  memory_info_t* loadFile(def::app::data_type_t dir_type, const char* file_name);
 
   // ファイルを保存する。保存が終わったら system_registry経由でcommandを発行する
   bool saveFile(def::app::data_type_t dir_type, size_t memory_index);
@@ -190,90 +197,6 @@ public:
 };
 
 extern file_manage_t file_manage;
-
-
-#if 0
-class file_manage_t
-{
-public:
-  enum lockstate_t {
-    LOCKSTATE_UNLOCK,
-    LOCKSTATE_LOCK,
-    LOCKSTATE_PRESET,
-  };
-
-  struct fileinfo_t {
-    std::string filename;
-    lockstate_t lockstate;
-    int makeFullPath(char* dst, size_t len) const;
-  };
-
-  size_t getFileCount(void) { return _config_files.size(); };
-  fileinfo_t* getFileInfo(size_t index) { return &_config_files[index]; };
-
-
-  // bool hasRequest(void) const { return _has_request; }
-  bool copyPresetToLocked(void);
-  bool updateFileList(void);
-  int saveToFile(const char* path, const uint8_t* data, size_t length);
-
-  // 引数のファイルインデックスをファイル数以内に収まるように調整する関数
-  uint16_t adjustFileIndex(uint16_t index) const;
-  uint8_t getFileIndex(void) const { return _loaded_fileindex; }
-
-  int loadFromFile(const char* path);
-  int loadFromFileList(uint_fast16_t index);
-
-  bool isEmpty(void) const { return _config_files.empty(); }
-
-  const fileinfo_t* getPartsetFileInfo(void) const { return _config_files.empty() ? nullptr : &_config_files[_loaded_fileindex]; }
-
-  bool getLoadFileBuffer(uint8_t** buffer, size_t* size) const { *buffer = _file_load_buffer; *size = _file_load_size; return _file_load_buffer != nullptr; };
-  bool getFileName(uint8_t** buffer, size_t* size) const { *buffer = _file_load_buffer; *size = _file_load_size; return _file_load_buffer != nullptr; };
-
-  uint8_t* getSaveFileBuffer(int index, size_t length);
-
-  // task_operator_t からセットされるファイル保存要求
-  bool setSaveRequest(const std::string& filename, int index, size_t length);
-
-  // task_spi_t から実行されるファイル保存処理
-  void procSaveRequest(void);
-
-  bool changeLock(void);
-
-private:
-  void clearFileBuffer(void);
-  bool sdBegin(void);
-  void sdEnd(void);
-  bool copydir(const char* src, const char* dst);
-  bool updateFileList_inner(const char* path, lockstate_t lockstate);
-
-  std::vector<fileinfo_t> _config_files;
-  uint16_t _loaded_fileindex;
-  uint8_t* _file_load_buffer = nullptr;
-  size_t _file_load_size = 0;
-
-  struct save_info_t {
-    uint8_t* buffer = nullptr;
-    size_t buffer_size = 0;
-    std::string filename;
-    size_t data_size = 0;
-    bool is_request = false;
-  };
-
-  static constexpr const size_t max_save_buffers = 2;
-  save_info_t _save_info[max_save_buffers];
-
-  enum sd_status_t {
-    SD_STATUS_NONE,
-    SD_STATUS_MOUNTED,
-    SD_STATUS_ERROR,
-  };
-  sd_status_t _sd_status = SD_STATUS_NONE;
-};
-
-extern file_manage_t file_manage;
-#endif
 
 //-------------------------------------------------------------------------
 }; // namespace kanplay_ns

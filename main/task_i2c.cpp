@@ -130,7 +130,6 @@ system_registry->operator_command.addQueue( { def::command::system_control, def:
             while (t > time(nullptr)) M5.delay(1);  /// Synchronization in seconds
             M5.Rtc.setDateTime( gmtime( &t ) );
           }
-          system_registry->file_command.wait();
           if (off == def::command::system_control_t::sc_reset) {
             esp_restart();
           }

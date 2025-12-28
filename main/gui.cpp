@@ -2478,6 +2478,7 @@ protected:
   int32_t _x_scroll_offset = 0;
   uint8_t _offset_step = 0;
   uint8_t _highlight_index = 0;
+  bool _no_data = false;
   def::seqmode::seqmode_t _prev_mode = def::seqmode::seq_free_play;
 
   sequence_chord_desc_t _desc[max_visible_step + 2];
@@ -2508,6 +2509,9 @@ protected:
       }
       setTargetRect(r);
     }
+    // 表示データが無い場合の判定
+    _no_data = (_offset_step == 0)
+            && (system_registry->current_sequence->info.getLength() == 0);
 
     ui_base_t::update_impl(param, offset_x, offset_y);
 
@@ -2633,6 +2637,11 @@ protected:
     for (int i = 1; i < 3; ++i) {
       image_color_or(canvas, offset_x, offset_y + (main_btns_height/3) * i, _client_rect.w, 1, 0x8410u);
 //      canvas->drawFastHLine(offset_x, offset_y + (main_btns_height/3) * i, _client_rect.w, TFT_DARKGRAY);
+    }
+    if (_no_data) {
+      canvas->setTextSize(2, 2);
+      canvas->drawString("No Data", offset_x + (_client_rect.w >> 1), y_degree);
+      return;
     }
   }
 };

@@ -1707,7 +1707,6 @@ protected:
     }
 
     return _tmp_filename.c_str();
-    // return fileinfo->filename.c_str();
   }
 
   size_t getSelectorCount(void) const override { return file_manage.getDirManage(_dir_type)->getCount(); }
@@ -1719,12 +1718,20 @@ protected:
 
   int getValue(void) const override
   {
-    auto songinfo = system_registry->file_command.getCurrentSongInfo();
-    if (songinfo.dir_type == _dir_type) {
-      return songinfo.file_index + getMinValue();
+    if (_dir_type == file_manage.getLatestDataType()) {
+      return file_manage.getLatestFileIndex() + getMinValue();
     }
-    return 0;
+    return -1;
   }
+
+  bool exit(void) const override
+  {
+    // ファイルメニューから抜ける時はオートプレイは無効にする
+    system_registry->runtime_info.setAutoplayState(def::play::auto_play_state_t::auto_play_none);
+    system_registry->runtime_info.setSequenceStepIndex(0);
+    return mi_normal_t::exit();
+  }
+
 };
 
 struct mi_load_file_t : public mi_filelist_t {
@@ -1740,24 +1747,35 @@ protected:
   bool enter(void) const override
   {
     system_registry->backup_song_data.assign(system_registry->song_data);
-    system_registry->file_command.setUpdateList(_dir_type);
-    M5.delay(64);
+    file_manage.updateFileList(_dir_type);
+
     return mi_filelist_t::enter();
   }
-/*
-  bool exit(void) const override
-  {
-    system_registry->song_data.assign(system_registry->backup_song_data);
-    return mi_filelist_t::exit();
-  }
-//*/
   bool execute(void) const override
   {
-    auto songinfo = system_registry->file_command.getCurrentSongInfo();
-    songinfo.file_index = _selecting_value - getMinValue();
-    songinfo.dir_type = _dir_type;
-    system_registry->file_command.setFileLoadRequest(songinfo);
-    system_registry->file_command.setCurrentSongInfo(songinfo);
+    auto fileinfo = file_manage.getFileInfo(_dir_type, _selecting_value - getMinValue());
+    auto mem = file_manage.loadFile(_dir_type, fileinfo->filename);
+    if (mem != nullptr) {
+      system_registry->operator_command.addQueue( { def::command::file_load_notify, mem->index } );
+      std::string filename = fileinfo->filename;
+
+      system_registry->control_mapping[1].reset();
+
+      // 拡張子を探す (末尾から . を探す)
+      auto pos = filename.rfind(".");
+      // 拡張子が見つかったら削除
+      if (pos != std::string::npos) { filename = filename.substr(0, pos); }
+      // 拡張子を追加する
+      filename += def::app::fileext_kmap;
+
+      auto mem_kmap = file_manage.loadFile(_dir_type, filename.c_str());
+      if (mem_kmap != nullptr) {
+        mem_kmap->dir_type = def::app::data_type_t::data_kmap;
+        system_registry->operator_command.addQueue( { def::command::file_load_notify, mem_kmap->index } );
+      }
+    } else {
+      system_registry->popup_notify.setPopup(false, def::notify_type_t::NOTIFY_FILE_LOAD);
+    }
     return mi_filelist_t::execute();
   }
 };
@@ -1808,50 +1826,48 @@ protected:
   bool execute(void) const override
   {
     auto index = _selecting_value - getMinValue();
+    bool result = false;
     {
       auto mem = file_manage.createMemoryInfo(def::app::max_file_len);
-      mem->filename = _filenames[index];
-      mem->dir_type = _dir_type;
-  
-      auto len = system_registry->song_data.saveSongJSON(mem->data, def::app::max_file_len);
-  
-      mem->size = len;
-      if (len == 0 || mem->data[0] != '{') {
-        system_registry->popup_notify.setPopup(false, def::notify_type_t::NOTIFY_FILE_SAVE);
-        M5_LOGE("mi_save_t: saveSongJSON failed");
-        return false;
+      if (mem) {
+        mem->filename = _filenames[index];
+        mem->dir_type = _dir_type;
+    
+        auto len = system_registry->song_data.saveSongJSON(mem->data, def::app::max_file_len);
+        if (len > 0 && mem->data[0] == '{') {
+          mem->size = len;
+          result = file_manage.saveFile(_dir_type, mem->index);
+        }
+        mem->release();
       }
-      system_registry->unchanged_song_crc32 = system_registry->song_data.crc32();
-      def::app::file_command_info_t info;
-      info.mem_index = mem->index;
-      info.dir_type = _dir_type;
-      info.file_index = -1;
-      system_registry->file_command.setFileSaveRequest(info);
     }
-
-    if (system_registry->control_mapping[1].empty() == false)
+    if (result && system_registry->control_mapping[1].empty() == false)
     { // コントロールマッピング .kmap も保存する
       auto mem = file_manage.createMemoryInfo(def::app::max_file_len);
-      mem->filename = _filenames[index];
-      mem->filename.replace(mem->filename.find(".json", mem->filename.size() - 5), 5, ".kmap");
-      mem->dir_type = _dir_type;
+      if (mem) {
+        std::string filename = _filenames[index];
+        // 拡張子を探す (末尾から . を探す)
+        auto pos = filename.rfind(".");
+        // 拡張子が見つかったら削除
+        if (pos != std::string::npos) { filename = filename.substr(0, pos); }
+        // 拡張子を追加する
+        mem->filename = filename + def::app::fileext_kmap;
+        mem->dir_type = _dir_type;
 
-      auto len = system_registry->control_mapping[1].saveJSON(mem->data, def::app::max_file_len);
-  
-      mem->size = len;
-      if (len == 0 || mem->data[0] != '{') {
-        system_registry->popup_notify.setPopup(false, def::notify_type_t::NOTIFY_FILE_SAVE);
-        M5_LOGE("mi_save_t: control_mapping saveJSON failed");
-        return false;
+        auto len = system_registry->control_mapping[1].saveJSON(mem->data, def::app::max_file_len);
+        if (len > 0 && mem->data[0] == '{') {
+          mem->size = len;
+          result = file_manage.saveFile(_dir_type, mem->index) && result;
+        }
+        mem->release();
       }
-      def::app::file_command_info_t info;
-      info.mem_index = mem->index;
-      info.dir_type = _dir_type;
-      info.file_index = -1;
-      system_registry->file_command.setFileSaveRequest(info);
     }
-
-
+    if (result) {
+      system_registry->unchanged_song_crc32 = system_registry->song_data.crc32();
+    }
+    system_registry->popup_notify.setPopup(result, def::notify_type_t::NOTIFY_FILE_SAVE);
+    // // 未保存の編集の警告表示を更新する
+    system_registry->checkSongModified();
 
     return mi_normal_t::execute();
   }
