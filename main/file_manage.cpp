@@ -467,14 +467,25 @@ bool storage_sd_t::makeDirectory(const char* path)
   return res;
 }
 
-int storage_sd_t::removeFile(const char* path)
+bool storage_sd_t::removeFile(const char* path)
 {
-  return 0;
+  bool res = false;
+  spi_lock();
+#if __has_include (<SdFat.h>)
+  res = SD.remove(path);
+#elif __has_include (<SD.h>)
+  res = SD.remove(path);
+#else
+  if (path[0] == '/') { ++path; }
+  res = std::filesystem::remove(path);
+#endif
+  spi_unlock();
+  return res;
 }
 
-int storage_sd_t::renameFile(const char* path, const char* newpath)
+bool storage_sd_t::renameFile(const char* path, const char* newpath)
 {
-  return 0;
+  return false;
 }
 
 //-------------------------------------------------------------------------
@@ -613,6 +624,13 @@ M5_LOGV("LittleFS check exists:%s found", path);
       while (false != (file = dir.openNextFile())) {
         info.filename = file.name();
         info.filesize = file.size();
+        auto len_name = info.filename.length();
+        if (len_name < len_suffix) continue;
+        if (len_suffix > 0) {
+          if (strcmp(&info.filename[len_name - len_suffix], suffix) != 0) {
+            continue;
+          }
+        }
         list.push_back( info );
 M5_LOGV("file %s %d", info.filename.c_str(), info.filesize);
       }
@@ -671,14 +689,21 @@ bool storage_littlefs_t::makeDirectory(const char* path)
   return false;
 }
 
-int storage_littlefs_t::removeFile(const char* path)
+bool storage_littlefs_t::removeFile(const char* path)
 {
-  return 0;
+  bool res = false;
+#if __has_include(<LittleFS.h>)
+  res = LittleFS.remove(path);
+#else
+  if (path[0] == '/') { ++path; }
+  res = std::filesystem::remove(path);
+#endif
+  return res;
 }
 
-int storage_littlefs_t::renameFile(const char* path, const char* newpath)
+bool storage_littlefs_t::renameFile(const char* path, const char* newpath)
 {
-  return 0;
+  return false;
 }
 
 //-------------------------------------------------------------------------
@@ -737,28 +762,18 @@ int storage_incbin_t::getFileList(std::vector<file_info_string_t>& list, const c
   return list.size();
 }
 
-bool storage_incbin_t::makeDirectory(const char* path)
-{
-  return false;
-}
-
-int storage_incbin_t::removeFile(const char* path)
-{
-  return 0;
-}
-
-int storage_incbin_t::renameFile(const char* path, const char* newpath)
-{
-  return 0;
-}
-
 //-------------------------------------------------------------------------
 
-bool dir_manage_t::update(void)
+bool dir_manage_t::updateFileList(void)
 {
   _file_list_count = 0;
   std::vector<file_info_string_t> list;
   int result = _storage->getFileList(list, _path, def::app::fileext_song);
+  if (result < 0) {
+    _storage->endStorage();
+    _storage->beginStorage();
+    result = _storage->getFileList(list, _path, def::app::fileext_song);
+  }
 
   if (result <= 0) {
     if (_file_list) {
@@ -863,13 +878,7 @@ bool file_manage_t::updateFileList(def::app::data_type_t dir_type)
   M5_LOGV("updateFileList");
   auto dir = getDirManage(dir_type);
   if (dir == nullptr) { return false; }
-  if (!dir->update()) {
-    auto st = dir->getStorage();
-    st->endStorage();
-    st->beginStorage();
-    return !dir->update();
-  }
-  return true;
+  return dir->updateFileList();
 }
 
 void file_manage_t::setLatestFileInfo(def::app::data_type_t data_type, const char* filename)
@@ -912,8 +921,9 @@ memory_info_t* file_manage_t::createMemoryInfo(size_t length)
 memory_info_t* file_manage_t::loadFile(def::app::data_type_t dir_type, size_t index)
 {
   auto dir = getDirManage(dir_type);
+  if (dir == nullptr) { return nullptr; }
   if (index >= dir->getCount()) {
-    updateFileList(dir_type);
+    dir->updateFileList();
   }
   if ((int16_t)index < 0) { // マイナス指定されている場合は末尾側として扱えるようにindexを加算する
     index = ((int16_t)index) + dir->getCount();
@@ -930,10 +940,11 @@ memory_info_t* file_manage_t::loadFile(def::app::data_type_t dir_type, size_t in
 memory_info_t* file_manage_t::loadFile(def::app::data_type_t dir_type, const char* file_name)
 {
   auto dir = getDirManage(dir_type);
+  if (dir == nullptr) { return nullptr; }
   auto storage = dir->getStorage();
-  if (storage->isBegin() == false) {
-    storage->beginStorage();
-  }
+  if (storage == nullptr) { return nullptr; }
+
+  if (storage->isBegin() == false) { storage->beginStorage(); }
   auto fullpath = dir->makeFullPath(file_name);
   auto filesize = storage->getFileSize(fullpath.c_str());
 // M5_LOGV("file_manage_t::loadFile : %s size:%d", fullpath.c_str(), filesize);
@@ -976,8 +987,6 @@ bool file_manage_t::saveFile(def::app::data_type_t dir_type, size_t memory_index
   }
 // M5_LOGV("save:%s size:%d result:%d", path.c_str(), mem->size, result);
 
-  dir->update();
-
   if (result != mem->size) {
     return false;
   }
@@ -985,6 +994,14 @@ bool file_manage_t::saveFile(def::app::data_type_t dir_type, size_t memory_index
   return true;
 }
 
-
+bool file_manage_t::removeFile(def::app::data_type_t dir_type, const char* filename)
+{
+  auto dir = getDirManage(dir_type);
+  if (dir == nullptr) { return false; }
+  auto storage = dir->getStorage();
+  if (storage == nullptr) { return false; }
+  auto fullpath = dir->makeFullPath(filename);
+  return storage->removeFile(fullpath.c_str());
+}
 //-------------------------------------------------------------------------
 }; // namespace kanplay_ns

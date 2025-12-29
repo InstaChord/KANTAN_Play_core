@@ -558,7 +558,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
               system_registry->player_command.addQueue( { def::command::chord_step_reset_request, 1 } );
               system_registry->song_data.assign(system_registry->backup_song_data);
               system_registry->backup_song_data.reset();
-              system_registry->unchanged_song_crc32 = system_registry->song_data.crc32();
+              system_registry->updateUnchangedSongCRC32();
               system_registry->operator_command.addQueue( { def::command::slot_select, 1 } );
 
               if (system_registry->song_data.sequence.info.getLength() > 0) {
@@ -583,6 +583,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
         case def::app::data_type_t::data_kmap:
           {
             bool result = system_registry->control_mapping[1].loadJSON(mem->data, mem->size);
+            system_registry->updateUnchangedKmapCRC32();
           }
           break;
         }

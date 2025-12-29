@@ -55,10 +55,10 @@ public:
   virtual bool makeDirectory(const char* path) { return false; }
 
   // ファイルを削除する
-  virtual int removeFile(const char* path) { return 0; }
+  virtual bool removeFile(const char* path) { return false; }
 
   // ファイルをリネームする
-  virtual int renameFile(const char* path, const char* newpath) { return 0; }
+  virtual bool renameFile(const char* path, const char* newpath) { return false; }
 };
 
 class storage_sd_t : public storage_base_t
@@ -71,8 +71,8 @@ public:
   int saveFromMemoryToFile(const char* path, const uint8_t* data, size_t length) override;
   int getFileList(std::vector<file_info_string_t>& list, const char* path, const char* suffix = "") override;
   bool makeDirectory(const char* path) override;
-  int removeFile(const char* path) override;
-  int renameFile(const char* path, const char* newpath) override;
+  bool removeFile(const char* path) override;
+  bool renameFile(const char* path, const char* newpath) override;
 };
 extern storage_sd_t storage_sd;
 
@@ -87,8 +87,8 @@ public:
   int saveFromMemoryToFile(const char* path, const uint8_t* data, size_t length) override;
   int getFileList(std::vector<file_info_string_t>& list, const char* path, const char* suffix = "") override;
   bool makeDirectory(const char* path) override;
-  int removeFile(const char* path) override;
-  int renameFile(const char* path, const char* newpath) override;
+  bool removeFile(const char* path) override;
+  bool renameFile(const char* path, const char* newpath) override;
 };
 extern storage_littlefs_t storage_littlefs;
 
@@ -102,9 +102,6 @@ public:
   int loadFromFileToMemory(const char* path, uint8_t* dst, size_t max_length) override;
   int saveFromMemoryToFile(const char* path, const uint8_t* data, size_t length) override;
   int getFileList(std::vector<file_info_string_t>& list, const char* path, const char* suffix = "") override;
-  bool makeDirectory(const char* path) override;
-  int removeFile(const char* path) override;
-  int renameFile(const char* path, const char* newpath) override;
 };
 extern storage_incbin_t storage_incbin;
 
@@ -118,7 +115,7 @@ public:
   bool isEmpty(void) const { return _file_list_count == 0; }
   size_t getCount(void) const { return _file_list_count; }
   const file_info_t* getInfo(size_t index) const { return &_file_list[index]; }
-  bool update(void);
+  bool updateFileList(void);
   int search(const char* filename) const;
   std::string getFullPath(size_t index);
   std::string makeFullPath(const char* filename) const;
@@ -192,8 +189,8 @@ public:
   // ファイルを保存する。保存が終わったら system_registry経由でcommandを発行する
   bool saveFile(def::app::data_type_t dir_type, size_t memory_index);
 
-  // ファイル保存用のメモリバッファを取得する
-  // memory_info_t* getSaveMemory(size_t length);
+  // ファイルを削除する
+  bool removeFile(def::app::data_type_t dir_type, const char* filename);
 };
 
 extern file_manage_t file_manage;

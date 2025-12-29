@@ -5,10 +5,6 @@
 
 #include "internal_kanplay.hpp"
 
-#include "internal_es8388.hpp"
-#include "internal_si5351.hpp"
-#include "internal_bmi270.hpp"
-#include "../system_registry.hpp"
 #include "../common_define.hpp"
 #include "firmware_kanplay.h"
 
@@ -18,10 +14,6 @@ namespace kanplay_ns {
 static constexpr const uint32_t i2c_freq = 800000;
 static constexpr const uint8_t i2c_addr = 0x56;
 static constexpr const uint8_t i2c_bootloader_addr = 0x54;
-
-static internal_es8388_t internal_es8388;
-static internal_si5351_t internal_si5351;
-static internal_bmi270_t internal_bmi270;
 
 static bool writeRegister8(uint8_t reg, uint8_t data)
 {
@@ -127,7 +119,7 @@ bool internal_kanplay_t::init(void)
   return true;
 }
 
-static uint32_t calcImuStandardDeviation(void)
+uint32_t internal_kanplay_t::calcImuStandardDeviation(void)
 {
   // 過去サンプルの加速度の平均値を求める
   int32_t avg_x = 0;
@@ -154,7 +146,7 @@ static uint32_t calcImuStandardDeviation(void)
   return sd;
 }
 
-static void updateImuVelocity(void)
+void internal_kanplay_t::updateImuVelocity(void)
 {
   if (internal_bmi270.update()) {
     // IMUの標準偏差をsystem_registryに保存

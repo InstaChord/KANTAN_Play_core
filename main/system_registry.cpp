@@ -206,9 +206,9 @@ void system_registry_t::updateControlMapping(void)
     }
   }
 
-  command_mapping_internal = &control_mapping[control_mapping[1].internal.empty() ? 0 : 1].internal;
-  command_mapping_external = &control_mapping[control_mapping[1].external.empty() ? 0 : 1].external;
-  command_mapping_midinote = &control_mapping[control_mapping[1].midinote.empty() ? 0 : 1].midinote;
+  command_mapping_internal = &(control_mapping[control_mapping[1].internal.empty() ? 0 : 1].internal);
+  command_mapping_external = &(control_mapping[control_mapping[1].external.empty() ? 0 : 1].external);
+  command_mapping_midinote = &(control_mapping[control_mapping[1].midinote.empty() ? 0 : 1].midinote);
 }
 //-------------------------------------------------------------------------
 
@@ -387,19 +387,16 @@ bool system_registry_t::save_impl(const char* filename)
     len = saveSettingJSON(mem->data, def::app::max_file_len);
   } else if (strcmp(filename, def::app::filename_resume) == 0) {
     len = saveResumeJSON(mem->data, def::app::max_file_len);
-  } else if (strcmp(filename, def::app::filename_mapping) == 0) {
+  } else if (strcmp(filename, def::app::filename_mapping_device) == 0) {
     len = control_mapping[0].saveJSON(mem->data, def::app::max_file_len);
+  } else if (strcmp(filename, def::app::filename_mapping_song) == 0) {
+    len = control_mapping[1].saveJSON(mem->data, def::app::max_file_len);
   } else {
     mem->release();
     return false;
   }
-  M5.delay(1);
-  if (len < 16) { // 極端に小さいサイズの場合は失敗と見做す
-    mem->release();
-    return false;
-  }
   mem->size = len;
-  // セーブリクエストは使用せず直接保存する。 (内蔵フラッシュへの保存なのでSPIタスクに任せる必要が無いため)
+M5_LOGV("save_impl %s %d", filename, (int)len);
 
   return file_manage.saveFile(mem->dir_type, mem->index);
 }
@@ -418,6 +415,17 @@ bool system_registry_t::save(void)
       result = false;
     }
   }
+  crc = calcMappingCRC32();
+  if (_last_mapping_crc32 != crc) {
+    bool result_device = save_impl(def::app::filename_mapping_device);
+    bool result_song = save_impl(def::app::filename_mapping_song);
+// printf("save mapping device=%d song=%d\n", result_device ? 1 : 0, result_song ? 1 : 0);
+    if (result_device && result_song) {
+      _last_mapping_crc32 = crc;
+    } else {
+      result = false;
+    }
+  }
   crc = calcResumeCRC32();
   if (_last_resume_crc32 != crc) {
     if (save_impl(def::app::filename_resume)) {
@@ -426,15 +434,6 @@ bool system_registry_t::save(void)
       result = false;
     }
   }
-  crc = calcMappingCRC32();
-  if (_last_mapping_crc32 != crc) {
-    if (save_impl(def::app::filename_mapping)) {
-      _last_mapping_crc32 = crc;
-    } else {
-      result = false;
-    }
-  }
-
   return result;
 }
 
@@ -453,9 +452,17 @@ bool system_registry_t::loadSetting(void)
 bool system_registry_t::loadMapping(void)
 {
   bool result = false;
-  auto mem = file_manage.loadFile(def::app::data_type_t::data_system, def::app::filename_mapping);
-  if (mem != nullptr) {
-    result =  control_mapping[0].loadJSON(mem->data, mem->size);
+  {
+    auto mem = file_manage.loadFile(def::app::data_type_t::data_system, def::app::filename_mapping_device);
+    if (mem != nullptr) {
+      result =  control_mapping[0].loadJSON(mem->data, mem->size);
+    }
+  }
+  {
+    auto mem = file_manage.loadFile(def::app::data_type_t::data_system, def::app::filename_mapping_song);
+    if (mem != nullptr) {
+      result =  control_mapping[1].loadJSON(mem->data, mem->size);
+    }
   }
 
   return result;
@@ -506,6 +513,54 @@ void system_registry_t::updateCRC32(void)
   _last_setting_crc32 = calcSettingCRC32();
   _last_mapping_crc32 = calcMappingCRC32();
   _last_resume_crc32 = calcResumeCRC32();
+}
+
+//-------------------------------------------------------------------------
+uint32_t system_registry_t::calcSettingCRC32(void) const
+{
+  uint32_t crc = user_setting.crc32();
+  crc = midi_port_setting.crc32(crc);
+  return crc;
+}
+
+uint32_t system_registry_t::calcMappingCRC32(void) const
+{
+  // コントロールマッピングデータのCRC32を計算する
+  // ※ リジューム目的なのでソングに付帯するコントロールマッピングも含む
+  uint32_t crc = control_mapping[0].crc32();
+  crc = control_mapping[1].crc32(crc);
+  return crc;
+}
+
+uint32_t system_registry_t::calcResumeCRC32(void) const
+{
+  uint32_t crc = song_data.crc32();
+  crc = calc_crc32(&unchanged_song_crc32, sizeof(unchanged_song_crc32), crc);
+  crc = calc_crc32(&unchanged_kmap_crc32, sizeof(unchanged_kmap_crc32), crc);
+  return crc;
+}
+
+uint32_t system_registry_t::calcSongCRC32(void) const
+{
+  // ソングデータ本体のCRC32を計算する
+  uint32_t crc = system_registry->song_data.crc32();
+  return crc;
+}
+uint32_t system_registry_t::calcKmapCRC32(void) const
+{
+  // ソングに付帯するコントロールマッピングデータのCRC32を計算する
+  // ※ デバイス側コントロールマッピングは除外する
+  uint32_t crc = control_mapping[1].crc32();
+  return crc;
+}
+
+void system_registry_t::checkSongModified(void) const {
+    auto song_crc32 = calcSongCRC32();
+    auto kmap_crc32 = calcKmapCRC32();
+    bool mod = song_crc32 != unchanged_song_crc32;
+    mod |= kmap_crc32 != unchanged_kmap_crc32;
+M5_LOGV("checkSongModified: song_crc32=0x%08X (unchanged=0x%08X) kmap_crc32=0x%08X (unchanged=0x%08X) mod=%d", song_crc32, unchanged_song_crc32, kmap_crc32, unchanged_kmap_crc32, mod);
+    system_registry->runtime_info.setSongModified(mod);
 }
 
 //-------------------------------------------------------------------------
@@ -680,13 +735,6 @@ static bool loadMappingInternal(system_registry_t::reg_command_mapping_t* mappin
 }
 
 //-------------------------------------------------------------------------
-uint32_t system_registry_t::calcSettingCRC32(void)
-{
-  uint32_t crc = user_setting.crc32();
-  crc = midi_port_setting.crc32(crc);
-  return crc;
-}
-
 bool system_registry_t::saveSettingInternal(JsonVariant& json_root)
 {
   {
@@ -842,13 +890,6 @@ bool system_registry_t::loadSettingJSON(const uint8_t* data, size_t data_length)
   return false;
 }
 
-//-------------------------------------------------------------------------
-uint32_t system_registry_t::calcMappingCRC32(void)
-{
-  uint32_t crc = control_mapping[0].crc32();
-  return crc;
-}
-
 bool system_registry_t::control_mapping_t::saveJSON(JsonVariant &json)
 {
   json["type"] = "Mapping";
@@ -878,6 +919,7 @@ bool system_registry_t::control_mapping_t::loadJSON(const JsonVariant &json)
   auto data_version = json["version"].as<int>();
   if (data_version <= 1 && json["type"] == "Mapping")
   {
+    reset();
     res = true;
     {
       auto json_internal = json["internal"].as<JsonObject>();
@@ -1782,12 +1824,6 @@ bool system_registry_t::song_data_t::loadSongJSON(const uint8_t* data, size_t da
   return loadSongInternal(this, variant);
 }
 
-uint32_t system_registry_t::calcResumeCRC32(void)
-{
-  uint32_t crc = song_data.crc32();
-  return crc;
-}
-
 size_t system_registry_t::saveResumeJSON(uint8_t* data, size_t data_length)
 {
   ArduinoJson::JsonDocument json;
@@ -1808,9 +1844,9 @@ size_t system_registry_t::saveResumeJSON(uint8_t* data, size_t data_length)
   {
     json_unchanged_song["filename"] =          file_manage.getLatestFileName();
     json_unchanged_song["datatype"] = (uint8_t)file_manage.getLatestDataType();
-    json_unchanged_song["crc32"   ] = unchanged_song_crc32;
+    json_unchanged_song["song_crc32"] = unchanged_song_crc32;
+    json_unchanged_song["kmap_crc32"] = unchanged_kmap_crc32;
   }
-
 
   return serializeJson(json, (char*)data, data_length);
 }
@@ -1852,11 +1888,14 @@ bool system_registry_t::loadResumeJSON(const uint8_t* data, size_t data_length)
 
   auto json_unchanged_song = json["unchanged_song"].as<JsonVariant>();
   if (!json_unchanged_song.isNull()) {
-    if (json_unchanged_song["crc32"].isNull()) {
+    if (json_unchanged_song["song_crc32"].isNull()) {
       loadSongInternal(&song_data, json_unchanged_song);
-      unchanged_song_crc32 = song_data.crc32();
+      unchanged_song_crc32 = system_registry->calcSongCRC32();
     } else {
-      unchanged_song_crc32 = json_unchanged_song["crc32"].as<uint32_t>();
+      unchanged_song_crc32 = json_unchanged_song["song_crc32"].as<uint32_t>();
+    }
+    if (!json_unchanged_song["kmap_crc32"].isNull()) {
+      unchanged_kmap_crc32 = json_unchanged_song["kmap_crc32"].as<uint32_t>();
     }
     // ファイル名情報があれば取り込む
     auto fn = json_unchanged_song["filename"].as<const char*>();

@@ -239,10 +239,13 @@ namespace def {
     NOTIFY_CLEAR_ALL_NOTES,
     NOTIFY_ALL_RESET,
     NOTIFY_CLEAR_AFTER_CURSOR,
+    NOTIFY_COPY_CONTROL_MAPPING,
+    NOTIFY_DELETE_CONTROL_MAPPING,
     NOTIFY_DEVELOPER_MODE,
     MESSAGE_NEED_RESTART,
+    NOTIFY_MAX,
   };
-  static constexpr const localize_text_array_t notify_name_array = { 12, (const localize_text_t[]){
+  static constexpr const localize_text_array_t notify_name_array = { NOTIFY_MAX, (const localize_text_t[]){
     { "-"                 , nullptr },
     { "Storage Open"      , nullptr },
     { "File Load"         , nullptr },
@@ -254,6 +257,8 @@ namespace def {
     { "Clear all notes"   , nullptr },
     { "All Reset"         , nullptr },
     { "Clear After Cursor", nullptr },
+    { "Copy Control Mapping", nullptr },
+    { "Delete Control Mapping", nullptr },
     { "Developer"         , nullptr },
     { "Please restart now", nullptr },
   }};
@@ -1146,8 +1151,8 @@ Button Index mapping
 
     static constexpr const uint32_t app_version_major = 0;
     static constexpr const uint32_t app_version_minor = 6;
-    static constexpr const uint32_t app_version_patch = 5;
-    static constexpr const char app_version_string[] = "065";
+    static constexpr const uint32_t app_version_patch = 6;
+    static constexpr const char app_version_string[] = "066";
     static constexpr const uint32_t app_version_raw = app_version_major<<16|app_version_minor<<8|app_version_patch;
 
     static constexpr const char url_manual[] = "https://kantan-play.com/core/manual/";
@@ -1218,7 +1223,8 @@ Button Index mapping
     };
     static constexpr const char filename_setting[] = "setting.json";
     static constexpr const char filename_resume[] = "resume.json";
-    static constexpr const char filename_mapping[] = "mapping.json";
+    static constexpr const char filename_mapping_device[] = "device.kmap"; // デバイスのマッピング情報
+    static constexpr const char filename_mapping_song[] = "song.kmap"; // ソングのマッピング情報（レジューム用に必要）
     static constexpr const char fileext_song[] = ".json";
     static constexpr const char fileext_kmap[] = ".kmap";
   };

@@ -762,11 +762,7 @@ public:
   : mi_selector_t { cate, menu_id, level, title, &name_array } {}
 
   const char* getValueText(void) const override { return "..."; }
-
-  int getValue(void) const override
-  {
-    return getMinValue();
-  }
+  int getValue(void) const override { return getMinValue(); }
   bool setValue(int value) const override
   {
     if (mi_selector_t::setValue(value) == false) { return false; }
@@ -1285,9 +1281,84 @@ struct mi_ctrl_assign_t : public mi_normal_t {
     return _table[getValue() - getMinValue()].text.get();
   }
 
+  bool exit(void) const override
+  {
+    system_registry->updateControlMapping();
+    return mi_normal_t::exit();
+  }
+
 protected:
   const def::ctrl_assign::control_assignment_t* _table;
   const uint16_t _size;
+  const def::mapping::target_t _map_target;
+};
+
+struct mi_cmap_copy_t : public mi_selector_t {
+protected:
+  static constexpr const localize_text_array_t name_array = { 2, (const localize_text_t[]){
+    { "Cancel", "キャンセル" },
+    { "Copy",   "コピー"   },
+  }};
+
+public:
+  constexpr mi_cmap_copy_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, def::mapping::target_t map_target )
+  : mi_selector_t { cate, menu_id, level, title, &name_array }
+  , _map_target { map_target }
+  {
+  }
+
+  const char* getValueText(void) const override { return "..."; }
+  int getValue(void) const override { return getMinValue(); }
+  bool setValue(int value) const override
+  {
+    if (mi_selector_t::setValue(value) == false) { return false; }
+    value -= getMinValue();
+    if (value == 1) {
+      auto dst_mapping = &system_registry->control_mapping[(int)_map_target];
+      auto src_mapping = &system_registry->control_mapping[1-(int)_map_target];
+      dst_mapping->internal.assign(src_mapping->internal);
+      dst_mapping->external.assign(src_mapping->external);
+      dst_mapping->midinote.assign(src_mapping->midinote);
+
+      system_registry->popup_notify.setPopup(true, def::notify_type_t::NOTIFY_COPY_CONTROL_MAPPING);
+      system_registry->updateControlMapping();
+    }
+    return true;
+  }
+
+protected:
+  const def::mapping::target_t _map_target;
+};
+
+struct mi_cmap_delete_t : public mi_selector_t {
+protected:
+  static constexpr const localize_text_array_t name_array = { 2, (const localize_text_t[]){
+    { "Cancel", "キャンセル" },
+    { "Delete", "削除"   },
+  }};
+
+public:
+  constexpr mi_cmap_delete_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title, def::mapping::target_t map_target )
+  : mi_selector_t { cate, menu_id, level, title, &name_array }
+  , _map_target { map_target }
+  {
+  }
+
+  const char* getValueText(void) const override { return "..."; }
+  int getValue(void) const override { return getMinValue(); }
+  bool setValue(int value) const override
+  {
+    if (mi_selector_t::setValue(value) == false) { return false; }
+    value -= getMinValue();
+    if (value == 1) {
+      auto dst_mapping = &system_registry->control_mapping[(int)_map_target];
+      dst_mapping->reset();
+      system_registry->popup_notify.setPopup(true, def::notify_type_t::NOTIFY_DELETE_CONTROL_MAPPING);
+    }
+    return true;
+  }
+
+protected:
   const def::mapping::target_t _map_target;
 };
 
@@ -1760,6 +1831,7 @@ protected:
       std::string filename = fileinfo->filename;
 
       system_registry->control_mapping[1].reset();
+      system_registry->updateUnchangedKmapCRC32();
 
       // 拡張子を探す (末尾から . を探す)
       auto pos = filename.rfind(".");
@@ -1841,31 +1913,42 @@ protected:
         mem->release();
       }
     }
-    if (result && system_registry->control_mapping[1].empty() == false)
+    if (result)
     { // コントロールマッピング .kmap も保存する
-      auto mem = file_manage.createMemoryInfo(def::app::max_file_len);
-      if (mem) {
-        std::string filename = _filenames[index];
-        // 拡張子を探す (末尾から . を探す)
-        auto pos = filename.rfind(".");
-        // 拡張子が見つかったら削除
-        if (pos != std::string::npos) { filename = filename.substr(0, pos); }
-        // 拡張子を追加する
-        mem->filename = filename + def::app::fileext_kmap;
-        mem->dir_type = _dir_type;
+      std::string filename = _filenames[index];
+      // 拡張子を探す (末尾から . を探す)
+      auto pos = filename.rfind(".");
+      // 拡張子が見つかったら削除
+      if (pos != std::string::npos) { filename = filename.substr(0, pos); }
+      filename += def::app::fileext_kmap;
 
-        auto len = system_registry->control_mapping[1].saveJSON(mem->data, def::app::max_file_len);
-        if (len > 0 && mem->data[0] == '{') {
-          mem->size = len;
-          result = file_manage.saveFile(_dir_type, mem->index) && result;
+      if (system_registry->control_mapping[1].empty()) {
+        // 保存するデータが無い場合は既存KMAPファイルを削除する
+        file_manage.removeFile(_dir_type, filename.c_str());
+      } else {
+        auto mem = file_manage.createMemoryInfo(def::app::max_file_len);
+        if (mem) {
+          // 拡張子を追加する
+          mem->filename = filename;
+          mem->dir_type = _dir_type;
+  
+          auto len = system_registry->control_mapping[1].saveJSON(mem->data, def::app::max_file_len);
+          if (len > 0 && mem->data[0] == '{') {
+            mem->size = len;
+            result = file_manage.saveFile(_dir_type, mem->index) && result;
+          }
+          mem->release();
         }
-        mem->release();
       }
     }
-    if (result) {
-      system_registry->unchanged_song_crc32 = system_registry->song_data.crc32();
-    }
     system_registry->popup_notify.setPopup(result, def::notify_type_t::NOTIFY_FILE_SAVE);
+    if (result) {
+      system_registry->updateUnchangedSongCRC32();
+      system_registry->updateUnchangedKmapCRC32();
+      // レジュームの状態に影響があるのでここで保存しておく
+      system_registry->save();
+    }
+    file_manage.updateFileList(_dir_type);
     // // 未保存の編集の警告表示を更新する
     system_registry->checkSongModified();
 
@@ -2083,7 +2166,8 @@ static constexpr menu_item_ptr menu_system[] = {
   MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  9" , nullptr }, 125 , def::mapping::target_t::device),
   MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 9" , nullptr }, 126 , def::mapping::target_t::device),
   MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  9" , nullptr }, 127 , def::mapping::target_t::device),
-  MENU_BUILDER(mi_tree_t          ,   3  , { "Mapping 2(Song)", "マッピング1 (ソング)" }),
+  MENU_BUILDER(mi_cmap_copy_t     ,    4 , { "Copy from Mapping 2", "マッピング2からコピー" }, def::mapping::target_t::device),
+  MENU_BUILDER(mi_tree_t          ,   3  , { "Mapping 2(Song)", "マッピング2 (ソング)" }),
   MENU_BUILDER(mi_tree_t          ,    4 , { "Play Button"   , "プレイボタン" }),
   MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 1"      , "ボタン 1"     },  1 - 1, def::mapping::target_t::song),
   MENU_BUILDER(mi_ca_internal_t   ,     5, { "Button 2"      , "ボタン 2"     },  2 - 1, def::mapping::target_t::song),
@@ -2261,6 +2345,8 @@ static constexpr menu_item_ptr menu_system[] = {
   MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F  9" , nullptr }, 125 , def::mapping::target_t::song),
   MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  F# 9" , nullptr }, 126 , def::mapping::target_t::song),
   MENU_BUILDER(mi_ca_midinote_t   ,     5, { "  G  9" , nullptr }, 127 , def::mapping::target_t::song),
+  MENU_BUILDER(mi_cmap_copy_t     ,    4 , { "Copy from Mapping 1", "マッピング1からコピー" }, def::mapping::target_t::song),
+  MENU_BUILDER(mi_cmap_delete_t    ,    4 , { "Delete Mapping" , "マッピング消去" }, def::mapping::target_t::song),
   MENU_BUILDER(mi_tree_t          ,  2   , { "External Device", "外部デバイス" }),
   MENU_BUILDER(mi_portc_midi_t    ,   3  , { "PortC MIDI"     , "ポートC MIDI" }),
   MENU_BUILDER(mi_ble_midi_t      ,   3  , { "BLE MIDI"       , nullptr     }),

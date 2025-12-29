@@ -41,9 +41,11 @@ class system_registry_t {
     bool loadSettingJSON(const uint8_t* data, size_t data_length);
     bool loadMappingJSON(const uint8_t* data, size_t data_length);
     bool loadResumeJSON(const uint8_t* data, size_t data_length);
-    uint32_t calcSettingCRC32(void);
-    uint32_t calcMappingCRC32(void);
-    uint32_t calcResumeCRC32(void);
+    uint32_t calcSettingCRC32(void) const;
+    uint32_t calcMappingCRC32(void) const;
+    uint32_t calcResumeCRC32(void) const;
+    uint32_t calcSongCRC32(void) const;
+    uint32_t calcKmapCRC32(void) const;
 
     uint32_t _last_setting_crc32 = 0;
     uint32_t _last_mapping_crc32 = 0;
@@ -52,6 +54,8 @@ public:
     void init(void);
 
     void updateCRC32(void);
+    void updateUnchangedSongCRC32(void) { unchanged_song_crc32 = calcSongCRC32(); }
+    void updateUnchangedKmapCRC32(void) { unchanged_kmap_crc32 = calcKmapCRC32(); }
 
     void updateControlMapping(void);
 
@@ -1515,17 +1519,16 @@ protected:
 
     registry_t drum_mapping { 16, 0, registry_t::DATA_SIZE_8 }; // ドラム演奏モードのコマンドとノートナンバーのマッピングテーブル
 
-    // 変更前のソングデータのCRC32値 (変更検出用)
-    uint32_t unchanged_song_crc32 = 0;
-
-    void checkSongModified(void) const {
-        bool mod = song_data.crc32() != unchanged_song_crc32;
-        system_registry->runtime_info.setSongModified(mod);
-    }
+    void checkSongModified(void) const;
 
     static constexpr const size_t raw_wave_length = 320;
     std::pair<uint8_t, uint8_t> raw_wave[raw_wave_length] = { { 128, 128 },};
     uint16_t raw_wave_pos = 0;
+
+protected:
+    // 変更前のソングデータのCRC32値 (変更検出用)
+    uint32_t unchanged_song_crc32 = 0;
+    uint32_t unchanged_kmap_crc32 = 0;
 };
 
 //-------------------------------------------------------------------------
