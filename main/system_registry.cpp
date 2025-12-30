@@ -117,6 +117,9 @@ void system_registry_t::init(void)
   // 以下のデータはPSRAM配置として初期化する
   control_mapping[0].init(true);
   control_mapping[1].init(true);
+  command_mapping_internal.init(true);
+  command_mapping_external.init(true);
+  command_mapping_midinote.init(true);
   command_mapping_port_b.init(true);
   command_mapping_midicc15.init(true);
   command_mapping_midicc16.init(true);
@@ -206,9 +209,39 @@ void system_registry_t::updateControlMapping(void)
     }
   }
 
-  command_mapping_internal = &(control_mapping[control_mapping[1].internal.empty() ? 0 : 1].internal);
-  command_mapping_external = &(control_mapping[control_mapping[1].external.empty() ? 0 : 1].external);
-  command_mapping_midinote = &(control_mapping[control_mapping[1].midinote.empty() ? 0 : 1].midinote);
+  // command_mapping_internal = &(control_mapping[control_mapping[1].internal.empty() ? 0 : 1].internal);
+  // command_mapping_external = &(control_mapping[control_mapping[1].external.empty() ? 0 : 1].external);
+  // command_mapping_midinote = &(control_mapping[control_mapping[1].midinote.empty() ? 0 : 1].midinote);
+  command_mapping_internal.assign(control_mapping[0].internal);
+  command_mapping_external.assign(control_mapping[0].external);
+  command_mapping_midinote.assign(control_mapping[0].midinote);
+
+  // マッピング１のうち値があるものを優先的に使用する
+  if (!control_mapping[1].internal.empty()) {
+    for (int i = 0; i < def::hw::max_main_button; ++i) {
+      auto command_param_array = control_mapping[1].internal.getCommandParamArray(i);
+      if (!command_param_array.empty()) {
+        command_mapping_internal.setCommandParamArray(i, command_param_array);
+      }
+    }
+  }
+  if (!control_mapping[1].external.empty()) {
+    for (int i = 0; i < def::hw::max_button_mask; ++i) {
+      auto command_param_array = control_mapping[1].external.getCommandParamArray(i);
+      if (!command_param_array.empty()) {
+        command_mapping_external.setCommandParamArray(i, command_param_array);
+      }
+    }
+  }
+  if (!control_mapping[1].midinote.empty()) {
+    for (int i = 0; i < def::midi::max_note; ++i) {
+      auto command_param_array = control_mapping[1].midinote.getCommandParamArray(i);
+      if (!command_param_array.empty()) {
+        command_mapping_midinote.setCommandParamArray(i, command_param_array);
+      }
+    }
+  }
+  
 }
 //-------------------------------------------------------------------------
 

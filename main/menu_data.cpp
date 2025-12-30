@@ -2404,14 +2404,39 @@ static constexpr menu_item_ptr menu_part[] = {
 };
 // const size_t menu_part_size = sizeof(menu_part) / sizeof(menu_part[0]) - 1;
 
+#undef MENU_ID
+#undef MENU_BUILDER
+static constexpr const size_t START_COUNTER_SEQMODE = __COUNTER__ + 1;
+#define MENU_ID (__COUNTER__ - START_COUNTER_SEQMODE)
+#define MENU_BUILDER(type, ...) (const type[]){ { def::menu_category_t::menu_seqmode, MENU_ID, __VA_ARGS__ } }
+
 static constexpr menu_item_ptr menu_seqmode[] = {
-  (const mi_sequence_mode_t []){{ def::menu_category_t::menu_seqmode,  0,0  , { "Select Mode"       , "モード選択"        }}},
+  MENU_BUILDER(mi_sequence_mode_t   ,0   , { "Select Mode"       , "モード選択"        }),
   nullptr, // end of menu
 };
 
+#undef MENU_ID
+#undef MENU_BUILDER
+static constexpr const size_t START_COUNTER_SEQEDIT = __COUNTER__ + 1;
+#define MENU_ID (__COUNTER__ - START_COUNTER_SEQEDIT)
+#define MENU_BUILDER(type, ...) (const type[]){ { def::menu_category_t::menu_seqedit, MENU_ID, __VA_ARGS__ } }
+
 static constexpr menu_item_ptr menu_seqedit[] = {
-  (const mi_tree_t          []){{ def::menu_category_t::menu_seqedit,  0,0  , { "Sequence"          , "シーケンス"        }}},
-  (const mi_clear_seq_t     []){{ def::menu_category_t::menu_seqedit,  1, 1 , { "Clear After Cursor", "カーソル後をクリア"}}},
+  MENU_BUILDER(mi_tree_t           ,0  , { "Sequence"          , "シーケンス"        }),
+  MENU_BUILDER(mi_sequence_mode_t  , 1 , { "Select Mode"       , "モード選択"        }),
+  MENU_BUILDER(mi_clear_seq_t      , 1 , { "Clear After Cursor", "カーソル後をクリア" }),
+  nullptr, // end of menu
+};
+
+#undef MENU_ID
+#undef MENU_BUILDER
+static constexpr const size_t START_COUNTER_SEQPLAY = __COUNTER__ + 1;
+#define MENU_ID (__COUNTER__ - START_COUNTER_SEQPLAY)
+#define MENU_BUILDER(type, ...) (const type[]){ { def::menu_category_t::menu_seqplay, MENU_ID, __VA_ARGS__ } }
+
+static constexpr menu_item_ptr menu_seqplay[] = {
+  MENU_BUILDER(mi_tree_t           ,0   , { "Sequence"          , "シーケンス"        }),
+  MENU_BUILDER(mi_sequence_mode_t  , 1  , { "Select Mode"       , "モード選択"        }),
   nullptr, // end of menu
 };
 
@@ -2499,18 +2524,16 @@ static menu_item_ptr_array getMenuArray(def::menu_category_t category)
   assert(menu_id_check(menu_part   , def::menu_category_t::menu_part    ) && "menu_part definition error");
   assert(menu_id_check(menu_seqmode, def::menu_category_t::menu_seqmode ) && "menu_seqmode definition error");
   assert(menu_id_check(menu_seqedit, def::menu_category_t::menu_seqedit ) && "menu_seqedit definition error");
+  assert(menu_id_check(menu_seqplay, def::menu_category_t::menu_seqplay ) && "menu_seqplay definition error");
 #endif
 
   switch (category) {
   default:
-  case def::menu_category_t::menu_system:
-    return menu_system;
-  case def::menu_category_t::menu_part:
-    return menu_part;
-  case def::menu_category_t::menu_seqmode:
-    return menu_seqmode;
-  case def::menu_category_t::menu_seqedit:
-    return menu_seqedit;
+  case def::menu_category_t::menu_system:  return menu_system;
+  case def::menu_category_t::menu_part:    return menu_part;
+  case def::menu_category_t::menu_seqmode: return menu_seqmode;
+  case def::menu_category_t::menu_seqedit: return menu_seqedit;
+  case def::menu_category_t::menu_seqplay: return menu_seqplay;
   }
   return nullptr;
 }

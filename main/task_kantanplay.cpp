@@ -497,13 +497,13 @@ void task_kantanplay_t::updateNextOptions(void)
   }
   auto semitone_shift = system_registry->chord_play.getChordSemitoneShift();
   if (semitone_shift) {
-    semitone_shift += _next_option.main_degree.getSemitoneShift();
-    _next_option.main_degree.setSemitoneShift(semitone_shift);
+    semitone_shift += _next_option.getSemitoneShift();
+    _next_option.setSemitoneShift(semitone_shift);
   }
   auto bass_semitone_shift = system_registry->chord_play.getChordBassSemitoneShift();
   if (bass_semitone_shift) {
-    bass_semitone_shift += _next_option.bass_degree.getSemitoneShift();
-    _next_option.bass_degree.setSemitoneShift(bass_semitone_shift);
+    bass_semitone_shift += _next_option.getBassSemitoneShift();
+    _next_option.setBassSemitoneShift(bass_semitone_shift);
   }
 }
 
@@ -612,8 +612,14 @@ void task_kantanplay_t::setOnbeatCycle(int32_t usec)
 {
   uint32_t song_tempo = getOnbeatCycleBySongTempo();
 
-  // 一定時間経過後にアルペジエータを先頭に戻す時間を更新する
-  _arpeggio_reset_remain_usec = song_tempo * def::app::arpeggio_reset_timeout_beats;
+  auto seqmode = system_registry->runtime_info.getSequenceMode();
+  if (seqmode == def::seqmode::seq_free_play) {
+    // 一定時間経過後にアルペジエータを先頭に戻す時間を更新する
+    _arpeggio_reset_remain_usec = song_tempo * def::app::arpeggio_reset_timeout_beats;
+  } else {
+    // フリープレイモードの場合はアルペジエータの先頭戻しを無効にする
+    _arpeggio_reset_remain_usec = -1;
+  }
 
   // 無効値の場合はソングデータのテンポに基づいた値に変更する。
   //  - ステップが強制リセットされた後
@@ -1099,6 +1105,8 @@ void task_kantanplay_t::procSoundEffect(const def::command::command_param_t& com
   options.minor_swap = system_registry->chord_play.getChordMinorSwap();
   options.semitone_shift = system_registry->chord_play.getChordSemitoneShift();
   options.modifier = system_registry->chord_play.getChordModifier();
+  options.bass_degree = system_registry->chord_play.getChordBassDegree();
+  options.bass_semitone_shift = system_registry->chord_play.getChordBassSemitoneShift();
   options.voicing = part_info->getVoicing();
   options.position = part_info->getPosition();
 

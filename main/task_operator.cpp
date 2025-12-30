@@ -582,7 +582,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
 
         case def::app::data_type_t::data_kmap:
           {
-            bool result = system_registry->control_mapping[1].loadJSON(mem->data, mem->size);
+            system_registry->control_mapping[1].loadJSON(mem->data, mem->size);
             system_registry->updateUnchangedKmapCRC32();
           }
           break;
@@ -871,17 +871,20 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
 
       case def::command::mf_enter: // 子階層に入る / アイテムの実行
         menu_control.enter();
+        system_registry->checkSongModified();
         break;
 
       case def::command::mf_back: // 親階層に戻る
         if (!menu_control.exit()) {
           afterMenuClose();
         }
+        system_registry->checkSongModified();
         break;
 
       case def::command::mf_exit: // メニューをすべて閉じる
         while (menu_control.exit()) { M5.delay(1); };
         afterMenuClose();
+        system_registry->checkSongModified();
         break;
 
       default: // mf_0 ～ mf_9
@@ -893,7 +896,6 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
         }
         break;
       }
-      system_registry->checkSongModified();
     }
     break;
   }
@@ -1330,7 +1332,7 @@ void task_operator_t::changeCommandMapping(void)
   }
   if (custom_map) {
     for (int i = 0; i < def::hw::max_main_button; ++i) {
-      auto pair = system_registry->command_mapping_internal->getCommandParamArray(i);
+      auto pair = system_registry->command_mapping_internal.getCommandParamArray(i);
       system_registry->command_mapping_current.setCommandParamArray(i, pair);
     }
   }

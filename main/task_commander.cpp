@@ -374,7 +374,7 @@ void task_commander_t::task_func(task_commander_t* me)
     {
       if (history->index == system_registry_t::reg_external_input_t::PORTA_BITMASK_BYTE0) {
         hit_a = true;
-        auto result = commander_port_a.update(history->value, M5.millis(), system_registry->command_mapping_external);
+        auto result = commander_port_a.update(history->value, M5.millis(), &system_registry->command_mapping_external);
         if (delay_msec > result) {
           delay_msec = result;
         }
@@ -388,7 +388,7 @@ void task_commander_t::task_func(task_commander_t* me)
       }
     }
     if (hit_a == false) { // 履歴がない場合は読み取って処理を行う (チャタリング回避のための遅延処理があり得るため)
-      auto result = commander_port_a.update(system_registry->external_input.getPortAButtonBitmask(), M5.millis(), system_registry->command_mapping_external);
+      auto result = commander_port_a.update(system_registry->external_input.getPortAButtonBitmask(), M5.millis(), &system_registry->command_mapping_external);
       if (delay_msec > result) {
         delay_msec = result;
       }

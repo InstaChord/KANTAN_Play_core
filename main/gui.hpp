@@ -18,7 +18,7 @@ public:
   void procTouchControl(const m5::touch_detail_t& td);
 
   static constexpr const size_t disp_buf_count = 2;
-  static constexpr const size_t max_disp_buf_pixels = 48 * 96 + 2;
+  static constexpr const size_t max_disp_buf_pixels = 40 * 42 + 2;
   static constexpr const uint8_t color_depth = 16;
 protected:
   uint16_t* _draw_buffer[disp_buf_count] = { nullptr, };

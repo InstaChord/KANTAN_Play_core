@@ -54,7 +54,7 @@ protected:
   void _addHistory(uint16_t index, uint32_t value, data_size_t data_size);
 #if __has_include (<freertos/freertos.h>)
   TaskHandle_t _task_handle = nullptr;
-  void _execNotify(void) const { if (_task_handle != nullptr) { xTaskNotify(_task_handle, true, eNotifyAction::eSetValueWithOverwrite); } }
+  void _execNotify(void) const { if (_task_handle != nullptr) { xTaskNotify(_task_handle, (uint32_t)this, eNotifyAction::eSetValueWithOverwrite); } }
 #else
   void _execNotify(void) const {}
 #endif

@@ -124,6 +124,7 @@ namespace kanplay_ns {
     log_memory(10); M5.delay(8); M5.Display.print("."); task_port_b->start();
 
 #if !defined (M5UNIFIED_PC_BUILD)
+    log_memory(11); 
     m5gfx::heap_free(dummy);
 #endif
 

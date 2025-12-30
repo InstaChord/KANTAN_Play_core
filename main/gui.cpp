@@ -152,62 +152,161 @@ static rect_t rect_or(const rect_t &a, const rect_t &b)
 
 struct draw_param_t
 {
-  static constexpr const int max_clip_rect = 23;
-  rect_t clip_rect[max_clip_rect];
+  static constexpr int16_t w_d2 = disp_width / 2;
+  static constexpr int16_t w_d3 = disp_width / 3;
+  static constexpr int16_t w_d4 = disp_width / 4;
+  static constexpr int16_t w_d5 = disp_width / 5;
+  static constexpr int16_t w_d6 = disp_width / 6;
+  static constexpr int16_t h_p = main_area_height / 4;
+  static constexpr int16_t y_0 = header_height;
+  static constexpr int16_t y_1 = y_0 + h_p;
+  static constexpr int16_t y_2 = y_1 + h_p;
+  static constexpr int16_t y_3 = y_2 + h_p;
+  static constexpr int16_t h_s = sub_btns_height / 2;
+  static constexpr int16_t y_s0 = y_0 + main_area_height;
+  static constexpr int16_t y_s1 = y_s0 + h_s;
+  static constexpr int16_t h_m = main_btns_height / 3;
+  static constexpr int16_t y_b0 = disp_height - main_btns_height;
+  static constexpr int16_t y_b1 = y_b0 + h_m;
+  static constexpr int16_t y_b2 = y_b1 + h_m;
+
+  // 部分描画のためのクリップ矩形群
+  // （DMAバッファを小さく抑えつつ描画負荷を軽くするため、メニュー時と通常時で分割テーブルを分ける）
+  // メニューモード時
+  static constexpr rect_t clip_rect_menu[] = {
+// ヘッダ部
+    {        0,   0, w_d4, y_0 }, // 60 x 24 = 1440
+    {     w_d4,   0, w_d4, y_0 },
+    { 2 * w_d4,   0, w_d4, y_0 },
+    { 3 * w_d4,   0, w_d4, y_0 },
+// メニュー部
+    {    0, y_0 + 0 * 7, disp_width, 7 }, // 240 x 7 = 1680
+    {    0, y_0 + 1 * 7, disp_width, 7 },
+    {    0, y_0 + 2 * 7, disp_width, 7 },
+    {    0, y_0 + 3 * 7, disp_width, 7 },
+
+    {    0, y_0 + 4 * 7, disp_width, 7 },
+    {    0, y_0 + 5 * 7, disp_width, 7 },
+    {    0, y_0 + 6 * 7, disp_width, 7 },
+    {    0, y_0 + 7 * 7, disp_width, 7 },
+
+    {    0, y_0 + 8 * 7, disp_width, 7 },
+    {    0, y_0 + 9 * 7, disp_width, 7 },
+    {    0, y_0 +10 * 7, disp_width, 7 },
+    {    0, y_0 +11 * 7, disp_width, 7 },
+
+    {    0, y_0 +12 * 7, disp_width, 7 },
+    {    0, y_0 +13 * 7, disp_width, 7 },
+    {    0, y_0 +14 * 7, disp_width, 7 },
+    {    0, y_0 +15 * 7, disp_width, 7 },
+
+    {    0, y_0 +16 * 7, disp_width, 7 },
+    {    0, y_0 +17 * 7, disp_width, 7 },
+    {    0, y_0 +18 * 7, disp_width, 7 },
+    {    0, y_0 +19 * 7, disp_width, 7 },
+
+    {    0, y_0 +20 * 7, disp_width, 7 },
+    {    0, y_0 +21 * 7, disp_width, 7 },
+    {    0, y_0 +22 * 7, disp_width, 7 },
+    {    0, y_0 +23 * 7, disp_width, 7 },
+
+// サブボタン部
+    { 0 * w_d4, y_s0, w_d4, h_s }, // 60 x 16 = 960
+    { 1 * w_d4, y_s0, w_d4, h_s },
+    { 2 * w_d4, y_s0, w_d4, h_s },
+    { 3 * w_d4, y_s0, w_d4, h_s },
+    { 0 * w_d4, y_s1, w_d4, h_s },
+    { 1 * w_d4, y_s1, w_d4, h_s },
+    { 2 * w_d4, y_s1, w_d4, h_s },
+    { 3 * w_d4, y_s1, w_d4, h_s },
+// メインボタン部
+    { 0       , y_b0, w_d5, h_m }, // 48 x 32 = 1536
+    { 0       , y_b1, w_d5, h_m },
+    { 0       , y_b2, w_d5, h_m },
+    { 1 * w_d5, y_b0, w_d5, h_m },
+    { 1 * w_d5, y_b1, w_d5, h_m },
+    { 1 * w_d5, y_b2, w_d5, h_m },
+    { 2 * w_d5, y_b0, w_d5, h_m },
+    { 2 * w_d5, y_b1, w_d5, h_m },
+    { 2 * w_d5, y_b2, w_d5, h_m },
+    { 3 * w_d5, y_b0, w_d5, h_m },
+    { 3 * w_d5, y_b1, w_d5, h_m },
+    { 3 * w_d5, y_b2, w_d5, h_m },
+    { 4 * w_d5, y_b0, w_d5, h_m },
+    { 4 * w_d5, y_b1, w_d5, h_m },
+    { 4 * w_d5, y_b2, w_d5, h_m },
+  };
+
+  // 通常モード時
+  static constexpr rect_t clip_rect_normal[] = {
+// ヘッダ部
+    {        0,   0, w_d4, y_0 }, // 60 x 24 = 1440
+    {     w_d4,   0, w_d4, y_0 },
+    { 2 * w_d4,   0, w_d4, y_0 },
+    { 3 * w_d4,   0, w_d4, y_0 },
+// 6個のパート
+    {        0, y_0, w_d6, h_p }, // 40 x 42 = 1680
+    {        0, y_1, w_d6, h_p },
+    {        0, y_2, w_d6, h_p },
+    {        0, y_3, w_d6, h_p },
+    { 1 * w_d6, y_0, w_d6, h_p },
+    { 1 * w_d6, y_1, w_d6, h_p },
+    { 1 * w_d6, y_2, w_d6, h_p },
+    { 1 * w_d6, y_3, w_d6, h_p },
+    { 2 * w_d6, y_0, w_d6, h_p },
+    { 2 * w_d6, y_1, w_d6, h_p },
+    { 2 * w_d6, y_2, w_d6, h_p },
+    { 2 * w_d6, y_3, w_d6, h_p },
+    { 3 * w_d6, y_0, w_d6, h_p },
+    { 3 * w_d6, y_1, w_d6, h_p },
+    { 3 * w_d6, y_2, w_d6, h_p },
+    { 3 * w_d6, y_3, w_d6, h_p },
+    { 4 * w_d6, y_0, w_d6, h_p },
+    { 4 * w_d6, y_1, w_d6, h_p },
+    { 4 * w_d6, y_2, w_d6, h_p },
+    { 4 * w_d6, y_3, w_d6, h_p },
+    { 5 * w_d6, y_0, w_d6, h_p },
+    { 5 * w_d6, y_1, w_d6, h_p },
+    { 5 * w_d6, y_2, w_d6, h_p },
+    { 5 * w_d6, y_3, w_d6, h_p },
+
+// サブボタン部
+    { 0 * w_d4, y_s0, w_d4, h_s }, // 60 x 16 = 960
+    { 1 * w_d4, y_s0, w_d4, h_s },
+    { 2 * w_d4, y_s0, w_d4, h_s },
+    { 3 * w_d4, y_s0, w_d4, h_s },
+    { 0 * w_d4, y_s1, w_d4, h_s },
+    { 1 * w_d4, y_s1, w_d4, h_s },
+    { 2 * w_d4, y_s1, w_d4, h_s },
+    { 3 * w_d4, y_s1, w_d4, h_s },
+// メインボタン部
+    { 0       , y_b0, w_d5, h_m }, // 48 x 32 = 1536
+    { 0       , y_b1, w_d5, h_m },
+    { 0       , y_b2, w_d5, h_m },
+    { 1 * w_d5, y_b0, w_d5, h_m },
+    { 1 * w_d5, y_b1, w_d5, h_m },
+    { 1 * w_d5, y_b2, w_d5, h_m },
+    { 2 * w_d5, y_b0, w_d5, h_m },
+    { 2 * w_d5, y_b1, w_d5, h_m },
+    { 2 * w_d5, y_b2, w_d5, h_m },
+    { 3 * w_d5, y_b0, w_d5, h_m },
+    { 3 * w_d5, y_b1, w_d5, h_m },
+    { 3 * w_d5, y_b2, w_d5, h_m },
+    { 4 * w_d5, y_b0, w_d5, h_m },
+    { 4 * w_d5, y_b1, w_d5, h_m },
+    { 4 * w_d5, y_b2, w_d5, h_m },
+  };
+  // static constexpr const int max_clip_rect = 33;
+  static constexpr const int max_clip_rect_normal = sizeof(clip_rect_normal) / sizeof(clip_rect_normal[0]);
+  static constexpr const int max_clip_rect_menu = sizeof(clip_rect_menu) / sizeof(clip_rect_menu[0]);
+  static constexpr const int max_clip_rect = std::max(max_clip_rect_normal, max_clip_rect_menu);
+
   rect_t invalidated_rect[max_clip_rect];
   uint32_t current_msec = 0;
   uint32_t prev_msec = 0;
   uint8_t smooth_step = 0;
   bool hasInvalidated;
-  void resetClipRect(void)
-  {
-    // 描画時の画面分割単位を設定する
-
-    // ※ ここの分割面積を変更する場合は、max_disp_buf_pixels の値も変更すること
-    // max_disp_buf_pixels の値は分割面積のうち最大のものが収まるように設定する
-
-    static constexpr const int part_width = main_area_width / 3;
-    static constexpr const int part_height = main_area_height >> 1;
-    static constexpr const int main_btn_width = 48;
-
-    static constexpr const int y0 = header_height;
-    static constexpr const int y1 = y0 + part_height;
-    static constexpr const int y2 = y1 + part_height;
-    static constexpr const int y3 = y2 + sub_btns_height;
-    static constexpr const int w0 = main_btn_width;
-
-    // ヘッダ部
-    clip_rect[0] = {               0, 0, disp_width>>1, header_height };  // 120 x 24 = 2880
-    clip_rect[1] = { disp_width >> 1, 0, disp_width>>1, header_height };
-
-    auto pw_half = part_width >> 1;
-    // ６個のパート
-    clip_rect[ 2] = {          0, y0, pw_half, part_height }; // 40 x 84 = 3360
-    clip_rect[ 3] = {    pw_half, y0, pw_half, part_height };
-    clip_rect[ 4] = {          0, y1, pw_half, part_height };
-    clip_rect[ 5] = {    pw_half, y1, pw_half, part_height };
-    clip_rect[ 6] = {2 * pw_half, y0, pw_half, part_height };
-    clip_rect[ 7] = {3 * pw_half, y0, pw_half, part_height };
-    clip_rect[ 8] = {2 * pw_half, y1, pw_half, part_height };
-    clip_rect[ 9] = {3 * pw_half, y1, pw_half, part_height };
-    clip_rect[10] = {4 * pw_half, y0, pw_half, part_height };
-    clip_rect[11] = {5 * pw_half, y0, pw_half, part_height };
-    clip_rect[12] = {4 * pw_half, y1, pw_half, part_height };
-    clip_rect[13] = {5 * pw_half, y1, pw_half, part_height };
-
-    // サブボタン部
-    clip_rect[14] = {                0, y2, disp_width >> 2, sub_btns_height }; // 60 x 32 = 1920
-    clip_rect[16] = { disp_width  >> 2, y2, disp_width >> 2, sub_btns_height };
-    clip_rect[19] = { disp_width  >> 1, y2, disp_width >> 2, sub_btns_height };
-    clip_rect[21] = { disp_width*3>> 2, y2, disp_width >> 2, sub_btns_height };
-
-    // メインボタン部
-    clip_rect[15] = { 0 * w0, y3, w0, main_btns_height }; // 48 x 96 = 4608
-    clip_rect[17] = { 1 * w0, y3, w0, main_btns_height };
-    clip_rect[18] = { 2 * w0, y3, w0, main_btns_height };
-    clip_rect[20] = { 3 * w0, y3, w0, main_btns_height };
-    clip_rect[22] = { 4 * w0, y3, w0, main_btns_height };
-  }
+  bool is_menu_mode = false;
   void resetInvalidatedRect(void)
   {
     hasInvalidated = false;
@@ -218,6 +317,8 @@ struct draw_param_t
   void addInvalidatedRect(const rect_t &rect)
   {
     if (rect.empty()) return;
+    auto &clip_rect = is_menu_mode ? clip_rect_menu : clip_rect_normal;
+    auto max_clip_rect = is_menu_mode ? max_clip_rect_menu : max_clip_rect_normal;
     for (int i = 0; i < max_clip_rect; ++i) {
       auto clipped_rect = rect_and(clip_rect[i], rect);
       if (clipped_rect.empty()) continue;
@@ -1709,7 +1810,7 @@ protected:
   registry_t::history_code_t _arpeggio_history_code;
   uint8_t _slot_index;
   uint8_t _hit_effect_index;
-  bool _isEnabled;
+  bool _isEnabled; // パートが有効かどうか
   bool _isEmpty;   // ベロシティパターンが空欄かどうか
   bool _isDetailMode;
   bool _need_draw = true;
@@ -1815,9 +1916,10 @@ public:
   }
 
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
-    _isDetailMode = system_registry->user_setting.getGuiDetailMode();
+    ui_base_t::update_impl(param, offset_x, offset_y);
+    if (_parent->getClientRect().empty()) { return; }
     if (system_registry->runtime_info.getPlayMode() != def::playmode::chord_edit_mode) {
-      ui_base_t::update_impl(param, offset_x, offset_y);
+      _isDetailMode = system_registry->user_setting.getGuiDetailMode();
       update_inner(param, offset_x, offset_y);
     }
   }
@@ -2120,6 +2222,7 @@ protected:
   bool _is_enabled = false;
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
+    if (_parent->getClientRect().empty()) { return; }
     bool visible = !_client_rect.empty();
     bool moving = _client_rect != _target_rect;
 
@@ -2155,7 +2258,7 @@ public:
         setTargetRect({0, 0, 0, 0});
         setClientRect({0, 0, 0, 0});
       }
-  }
+    }
 
   
     auto part = &system_registry->current_slot->chord_part[_part_index];
@@ -2446,6 +2549,7 @@ protected:
   {
     auto mode = system_registry->runtime_info.getCurrentMode();
     if (_prev_mode != mode) {
+M5_LOGV("ui_chord_part_container_t::update_impl: mode changed %d -> %d", _prev_mode, mode);
       _prev_mode = mode;
       switch (mode) {
       case def::playmode::chord_mode:
@@ -2458,6 +2562,7 @@ protected:
         break;
 
       default:
+      case def::playmode::menu_mode:
         setTargetRect({0, header_height, 0, main_area_height}); // TODO: 仮の値
         break;
       }
@@ -3377,6 +3482,7 @@ public:
     image_dark_shift(canvas, offset_x, offset_y, _client_rect.w, _client_rect.h);
 
     const int ch = _client_rect.h;
+    const int clip_h = clip_rect->h;
     const int min_y = (_prev_min_y * ch) >> 8;
     const int max_y = (_prev_max_y * ch) >> 8;
     for (int i = 1; i < 8; ++i) {
@@ -3415,7 +3521,7 @@ public:
         int y0 = ((wave[i].first  * ch) >> 8) + offset_y;
         int y1 = ((wave[i].second * ch) >> 8) + offset_y;
         if (y0 < 0) { y0 = 0; }
-        if (y1 > ch) { y1 = ch; }
+        if (y1 > clip_h) { y1 = clip_h; }
         for (int y = y0; y < y1 && y < ye; ++y) { buf[y * wid].raw |= __builtin_bswap16(0xC600); }
         ++buf;
       }
@@ -3573,7 +3679,6 @@ void gui_t::init(void)
     // disp_buf[i].createSprite(disp_buf_width, disp_height);
     disp_buf[i].setFont(&fonts::efontJA_16_b);
   }
-  _draw_param.resetClipRect();
   uint32_t msec = M5.millis();
   _draw_param.prev_msec = msec;
   _draw_param.current_msec = msec;
@@ -3637,6 +3742,7 @@ bool gui_t::update(void)
 
   auto param = &_draw_param;
   param->resetInvalidatedRect();
+  param->is_menu_mode = (system_registry->runtime_info.getCurrentMode() == def::playmode::menu_mode);
   uint32_t msec = M5.millis();
   uint32_t prev_msec = param->current_msec;
   int diff = msec - prev_msec;

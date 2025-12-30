@@ -157,7 +157,7 @@ public:
                                 : 0;
               // インスタコード連携モードでない場合は、ノートによる制御のためのコマンドを取得する
               if (!me->_flg_instachord_link) {
-                command_param_array = system_registry->command_mapping_midinote->getCommandParamArray(message.data[0]);
+                command_param_array = system_registry->command_mapping_midinote.getCommandParamArray(message.data[0]);
                 if (!command_param_array.empty() && velocity) {
                   system_registry->operator_command.addQueue( { def::command::set_velocity, velocity } );
                 }
@@ -337,7 +337,7 @@ void task_midi_t::start(void)
     config.pin_rx = GPIO_NUM_NC;
     in_uart_midi_transport.setConfig(config);
     in_uart_midi_subtask.start();
-    // in_uart_midi_transport.begin();
+    in_uart_midi_transport.begin();
     in_uart_midi_transport.setUseTxRx(true, false);
 
     // 外部PortC用MIDI
@@ -345,7 +345,7 @@ void task_midi_t::start(void)
     config.pin_tx = M5.getPin(m5::pin_name_t::port_c_txd);
     config.pin_rx = M5.getPin(m5::pin_name_t::port_c_rxd);
     portc_midi_transport.setConfig(config);
-    // portc_midi_transport.begin();
+    portc_midi_transport.begin();
     // オン・オフはsystem_registryで設定する
   }
 #ifdef MIDI_TRANSPORT_BLE_HPP

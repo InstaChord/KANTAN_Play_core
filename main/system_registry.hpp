@@ -74,7 +74,7 @@ public:
 #if __has_include (<freertos/FreeRTOS.h>)
         void setNotifyTaskHandle(TaskHandle_t handle);
 protected:
-        void _execNotify(void) const { if (_task_handle != nullptr) { xTaskNotify(_task_handle, true, eNotifyAction::eSetValueWithOverwrite); } }
+        void _execNotify(void) const { if (_task_handle != nullptr) { xTaskNotify(_task_handle, (uint32_t)this, eNotifyAction::eSetValueWithOverwrite); } }
         TaskHandle_t _task_handle = nullptr;
 #else
 protected:
@@ -519,7 +519,7 @@ protected:
     };
 
     struct reg_task_status_t : public registry_t {
-        reg_task_status_t(void) : registry_t(64, 4, DATA_SIZE_32) {}
+        reg_task_status_t(void) : registry_t(64, 0, DATA_SIZE_32) {}
         enum bitindex_t : uint32_t {
             TASK_SPI,
             TASK_I2S,
@@ -1495,11 +1495,10 @@ protected:
     reg_external_input_t   external_input;      // 外部機器のボタン類の操作状態
 
     control_mapping_t      control_mapping[2];  // コントロールマッピング設定 (0:本体デフォルト, 1:ソングデータ)
-    control_mapping_t*     current_mapping = &control_mapping[0];
 
-    reg_command_mapping_t* command_mapping_internal = &control_mapping[0].internal;
-    reg_command_mapping_t* command_mapping_external = &control_mapping[0].external;
-    reg_command_mapping_t* command_mapping_midinote = &control_mapping[0].midinote;
+    reg_command_mapping_t command_mapping_internal { def::hw::max_main_button };
+    reg_command_mapping_t command_mapping_external { def::hw::max_button_mask };
+    reg_command_mapping_t command_mapping_midinote { def::midi::max_note };
 
     reg_command_mapping_t command_mapping_current { def::hw::max_button_mask };      // 現在のボタンマッピングテーブル
     reg_command_mapping_t command_mapping_port_b { 4 };     // 外部機器ボタンのマッピングテーブル
