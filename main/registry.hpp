@@ -15,6 +15,8 @@
 
 namespace kanplay_ns {
 //-------------------------------------------------------------------------
+uint32_t calc_crc32(const void *data, size_t length, uint32_t crc_init);
+//-------------------------------------------------------------------------
 class registry_base_t {
 public:
   enum data_size_t : uint8_t {
@@ -27,7 +29,7 @@ public:
     uint32_t value = 0;
     uint16_t index = 0;
     data_size_t data_size = DATA_NONE;
-    uint8_t seq = 0;
+    uint8_t uid = 0;
   };
 
   typedef uint32_t history_code_t;
@@ -36,9 +38,10 @@ public:
 
   virtual void init(bool psram = false);
 
-  virtual void set8(uint16_t index, uint8_t value, bool force_notify = false);
-  virtual void set16(uint16_t index, uint16_t value, bool force_notify = false);
-  virtual void set32(uint16_t index, uint32_t value, bool force_notify = false);
+  virtual bool set8(uint16_t index, uint8_t value, bool force_notify = false);
+  virtual bool set16(uint16_t index, uint16_t value, bool force_notify = false);
+  virtual bool set32(uint16_t index, uint32_t value, bool force_notify = false);
+  virtual uint32_t crc32(uint32_t crc_init = 0) const { return crc_init; }
 
   const history_t* getHistory(history_code_t &code);
   history_code_t getHistoryCode(void) const { return _history_code; }
@@ -51,7 +54,7 @@ protected:
   void _addHistory(uint16_t index, uint32_t value, data_size_t data_size);
 #if __has_include (<freertos/freertos.h>)
   TaskHandle_t _task_handle = nullptr;
-  void _execNotify(void) const { if (_task_handle != nullptr) { xTaskNotify(_task_handle, true, eNotifyAction::eSetValueWithOverwrite); } }
+  void _execNotify(void) const { if (_task_handle != nullptr) { xTaskNotify(_task_handle, (uint32_t)this, eNotifyAction::eSetValueWithOverwrite); } }
 #else
   void _execNotify(void) const {}
 #endif
@@ -67,14 +70,16 @@ public:
 
   void init(bool psram = false) override;
 
-  void set8(uint16_t index, uint8_t value, bool force_notify = false) override;
-  void set16(uint16_t index, uint16_t value, bool force_notify = false) override;
-  void set32(uint16_t index, uint32_t value, bool force_notify = false) override;
+  bool set8(uint16_t index, uint8_t value, bool force_notify = false) override;
+  bool set16(uint16_t index, uint16_t value, bool force_notify = false) override;
+  bool set32(uint16_t index, uint32_t value, bool force_notify = false) override;
   uint8_t get8(uint16_t index) const;
   uint16_t get16(uint16_t index) const;
   uint32_t get32(uint16_t index) const;
-  void* getBuffer(uint16_t index) const { return &_reg_data_8[index]; }
+  void* getBuffer(uint16_t index = 0) const { return &_reg_data_8[index]; }
   void assign(const registry_t &src);
+  size_t size(void) const { return _registry_size; }
+  uint32_t crc32(uint32_t crc_init = 0) const override;
 
   // 比較オペレータ
   bool operator==(const registry_t &rhs) const;
@@ -102,21 +107,22 @@ public:
   // constexpr registry_map_t<T>(void)
   // : registry_base_t { 0 } {};
 
-  void set(uint16_t index, T value, bool force_notify = false)
+  bool set(uint16_t index, T value, bool notify = false)
   {
     auto current = get(index);
     if (current != value) {
-      force_notify = true;
+      notify = true;
       if (value == _default_value) {
         _data.erase(index);
       } else {
         _data[index] = value;
       }
     }
-    if (force_notify) {
+    if (notify) {
       _addHistory(index, 0, data_size_t::DATA_SIZE_8);
       _execNotify();
     }
+    return notify;
   }
   const T& get(uint16_t index) const
   {
@@ -134,6 +140,13 @@ public:
     }
     _execNotify();
   }
+  uint32_t crc32(uint32_t crc) const override {
+    for (const auto& pair : _data) {
+      crc = calc_crc32( reinterpret_cast<const uint8_t*>(&pair), sizeof(pair), crc);
+    }
+    return crc;
+  }
+
 
   // 比較オペレータ
   bool operator==(const registry_map_t<T> &rhs) const { return _data == rhs._data; }
@@ -151,7 +164,7 @@ public:
   : registry_base_t { history_count }
   , _default_value { default_value } {};
 
-  void set8(uint16_t index, uint8_t value, bool force_notify = false);
+  bool set8(uint16_t index, uint8_t value, bool force_notify = false);
   uint8_t get8(uint16_t index) const;
   void assign(const registry_map8_t &src);
 
@@ -170,7 +183,7 @@ public:
   : registry_base_t { history_count }
   , _default_value { default_value } {};
 
-  void set32(uint16_t index, uint32_t value, bool force_notify = false);
+  bool set32(uint16_t index, uint32_t value, bool notify = false);
   uint32_t get32(uint16_t index) const;
   void assign(const registry_map32_t &src);
 

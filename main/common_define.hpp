@@ -24,6 +24,13 @@ namespace def::lang {
   };
 };
 //-------------------------------------------------------------------------
+namespace def::mapping {
+  enum class target_t : uint8_t {
+    device = 0,
+    song = 1,
+  };
+}
+//-------------------------------------------------------------------------
 class text_t {
 public:
   virtual const char* get(void) const = 0;
@@ -68,14 +75,158 @@ public:
 };
 
 //-------------------------------------------------------------------------
+
+enum semitone_t : uint8_t {
+  semitone_none = 0,
+  semitone_flat = 1,
+  semitone_sharp = 2,
+  semitone_nop = 3,
+};
+
+struct degree_param_t {
+  union {
+    struct {
+      uint8_t degree : 3;
+      uint8_t minor_swap : 1;
+      uint8_t semitone : 2;
+      uint8_t resereve : 2;
+    };
+    uint8_t raw;
+  };
+  constexpr degree_param_t(uint8_t degree, bool swap, semitone_t semi)
+  : degree { degree }
+  , minor_swap { swap }
+  , semitone { (uint8_t)semi }
+  {}
+  constexpr degree_param_t() noexcept : raw(0) {}
+  constexpr degree_param_t(uint8_t value) noexcept : raw(value) {}
+  constexpr degree_param_t(const degree_param_t &src) noexcept : raw(src.raw) {}
+  constexpr degree_param_t& operator=(const degree_param_t &src) noexcept {
+    raw = src.raw;
+    return *this;
+  }
+
+  constexpr bool operator== (const degree_param_t &src) const { return raw == src.raw; }
+  constexpr bool operator!= (const degree_param_t &src) const { return raw != src.raw; }
+  constexpr operator uint8_t(void) const { return raw; }
+  constexpr uint8_t getDegree(void) const { return degree; }
+  constexpr bool getMinorSwap(void) const { return minor_swap; }
+  constexpr semitone_t getSemitone(void) const { return (semitone_t)semitone; }
+  constexpr void setSemitone(semitone_t value) { semitone = (uint8_t)value; }
+  constexpr int getSemitoneShift(void) const {
+    switch (semitone) {
+      case semitone_flat:  return -1;
+      case semitone_sharp: return  1;
+      default:             return  0;
+    }
+  }
+  constexpr void setDegree(uint8_t value) { degree = value; }
+  constexpr void setMinorSwap(bool swap) { minor_swap = swap; }
+  constexpr void setSemitoneShift(int value) {
+    semitone = value < 0 ? (uint8_t)semitone_flat : (value > 0 ? (uint8_t)semitone_sharp : (uint8_t)semitone_none);
+  }
+};
+
+constexpr degree_param_t make_degree(uint8_t degree, bool swap = false, semitone_t semi = semitone_none)
+{
+  return degree | (swap << 3) | ((uint8_t)semi << 4);
+}
+
+// シーケンス演奏の１ステップ情報
+struct sequence_chord_desc_t {
+  union {
+    uint8_t part_bits;
+    struct {
+      uint8_t part1_enable : 1;
+      uint8_t part2_enable : 1;
+      uint8_t part3_enable : 1;
+      uint8_t part4_enable : 1;
+      uint8_t part5_enable : 1;
+      uint8_t part6_enable : 1;
+      uint8_t _reserved : 2;
+    };
+  };
+  union {
+    uint8_t mod_slot;
+    struct {
+      uint8_t slot_index : 4;
+      uint8_t modifier_bits : 4;
+    };
+  };
+  degree_param_t main_degree;
+  degree_param_t bass_degree;
+
+  constexpr sequence_chord_desc_t(void) : part_bits{0}, mod_slot{0}, main_degree{0}, bass_degree{0} {}
+  constexpr sequence_chord_desc_t(const sequence_chord_desc_t &src) noexcept : part_bits(src.part_bits), mod_slot(src.mod_slot), main_degree(src.main_degree), bass_degree(src.bass_degree) {}
+  constexpr sequence_chord_desc_t& operator=(const sequence_chord_desc_t &src) noexcept {
+    *(uint32_t*)this = *(uint32_t*)&src;
+    return *this;
+  }
+
+  constexpr uint32_t toUint32(void) const { return *(uint32_t*)this; }
+  constexpr operator uint32_t(void) const { return *(uint32_t*)this; }
+  constexpr bool empty(void) const { return 0 == (*(uint32_t*)this); }
+
+  constexpr bool operator== (const sequence_chord_desc_t &src) const { return toUint32() == src.toUint32(); }
+  constexpr bool operator!= (const sequence_chord_desc_t &src) const { return toUint32() != src.toUint32(); }
+
+  bool getMinorSwap(void) const { return main_degree.getMinorSwap(); }
+  void setMinorSwap(bool swap) { main_degree.setMinorSwap(swap); }
+
+  int getSemitoneShift(void) const { return main_degree.getSemitoneShift(); }
+  void setSemitoneShift(int value) { main_degree.setSemitoneShift(value); }
+
+  uint8_t getDegree(void) const { return main_degree.getDegree(); }
+  void setDegree(uint8_t value) { main_degree.setDegree(value); }
+
+  uint8_t getBassDegree(void) const { return bass_degree.getDegree(); }
+  void setBassDegree(uint8_t value) { bass_degree.setDegree(value); }
+
+  int getBassSemitoneShift(void) const { return bass_degree.getSemitoneShift(); }
+  void setBassSemitoneShift(int value) { bass_degree.setSemitoneShift(value); }
+
+  KANTANMusic_Modifier getModifier(void) const { return KANTANMusic_Modifier(modifier_bits); }
+  void setModifier(KANTANMusic_Modifier modifier) { modifier_bits = modifier; }
+
+  uint8_t getPartBits(void) const { return part_bits; }
+
+  bool getPartEnable(uint8_t part_index) const {
+    switch (part_index) {
+      case 0: return part1_enable;
+      case 1: return part2_enable;
+      case 2: return part3_enable;
+      case 3: return part4_enable;
+      case 4: return part5_enable;
+      case 5: return part6_enable;
+      default: return false;
+    }
+  }
+  void setPartEnable(uint8_t part_index, bool enable) {
+    switch (part_index) {
+      case 0: part1_enable = enable; break;
+      case 1: part2_enable = enable; break;
+      case 2: part3_enable = enable; break;
+      case 3: part4_enable = enable; break;
+      case 4: part5_enable = enable; break;
+      case 5: part6_enable = enable; break;
+    }
+  }
+  void clearPartEnable(void) { part_bits = 0; }
+
+  uint8_t getSlotIndex(void) const { return slot_index; }
+  void setSlotIndex(uint8_t index) { slot_index = index; }
+};
+
+//-------------------------------------------------------------------------
 namespace def {
 
   enum menu_category_t : uint8_t {
     menu_none = 0,
     menu_system = 1,
     menu_part,
-    menu_slot,
-    menu_file,
+    menu_seqmode,
+    menu_seqedit,
+    menu_seqplay,
   };
   enum notify_type_t : uint8_t {
     NOTIFY_NONE,
@@ -88,10 +239,15 @@ namespace def {
     NOTIFY_PASTE_PART_SETTING,
     NOTIFY_CLEAR_ALL_NOTES,
     NOTIFY_ALL_RESET,
+    NOTIFY_CLEAR_AFTER_CURSOR,
+    NOTIFY_COPY_CONTROL_MAPPING,
+    NOTIFY_DELETE_CONTROL_MAPPING,
+    NOTIFY_SEQ_CURSOR_MOVE,
     NOTIFY_DEVELOPER_MODE,
     MESSAGE_NEED_RESTART,
+    NOTIFY_MAX,
   };
-  static constexpr const localize_text_array_t notify_name_array = { 12, (const localize_text_t[]){
+  static constexpr const localize_text_array_t notify_name_array = { NOTIFY_MAX, (const localize_text_t[]){
     { "-"                 , nullptr },
     { "Storage Open"      , nullptr },
     { "File Load"         , nullptr },
@@ -102,6 +258,10 @@ namespace def {
     { "Paste Part"        , nullptr },
     { "Clear all notes"   , nullptr },
     { "All Reset"         , nullptr },
+    { "Clear After Cursor", nullptr },
+    { "Copy Control Mapping", nullptr },
+    { "Delete Control Mapping", nullptr },
+    { "Cursor Move"       , nullptr },
     { "Developer"         , nullptr },
     { "Please restart now", nullptr },
   }};
@@ -165,22 +325,39 @@ Button Index mapping
       ENC3_UP   = 0x80000000,
     };
   };
-  // かんぷれアプリの演奏モード
-  namespace playmode {
-    enum playmode_t : uint8_t {
-      unknown = 0,
-      chord_mode,       // コード演奏モード
-      note_mode,        // ノート演奏モード
-      drum_mode,        // ドラム演奏モード
-      chord_edit_mode,  // コード編集モード (厳密には演奏モードではないが処理の都合上ここに含める)
-      menu_mode,        // メニュー表示モード(厳密には演奏モードではないが処理の都合上ここに含める)
-      playmode_max,
-    };
 
-    static constexpr const char* playmode_name_table[] = {
-      "-", "Chord", "Note", "Drum", "ChordEdit",
+  // GUIの表示状態
+  enum class gui_mode_t : uint8_t {
+    gm_unknown = 0,
+    gm_perform_chord,  // 通常の演奏
+    gm_perform_note,   // ノート演奏
+    gm_perform_drum,   // ドラム演奏
+    gm_song_play,      // ソング演奏 (ガイドプレイ・オートソング)
+    gm_song_recording, // ソングレコーディング
+    gm_part_edit,      // パート編集
+    gm_menu,           // メニュー表示モード
+    gm_max,
+  };
+
+  // 演奏スタイル
+  enum class perform_style_t : uint8_t {
+    ps_unknown = 0,
+    ps_chord,
+    ps_note,
+    ps_drum,
+    ps_max,
+  };
+
+  namespace seqmode { // (Play Mode に変更？)
+    enum seqmode_t : uint8_t {
+      seq_free_play = 0,
+      seq_beat_play,
+      seq_guide_play, // シーケンスガイド表示付きの演奏
+      seq_auto_song,
+      seqmode_max,
     };
   };
+
   namespace midi {
     enum channel : uint8_t {
       channel_1 = 0, channel_2, channel_3, channel_4, channel_5, channel_6, channel_7, channel_8,
@@ -292,7 +469,7 @@ Button Index mapping
       none = 0,
       menu_function,
       slot_select,
-      play_mode_set,
+      perform_style_set,
       part_off,
       part_on,
       part_edit,
@@ -308,6 +485,7 @@ Button Index mapping
       edit_exit,
       edit_enc2_target,
       autoplay_switch,
+      recording_control,
       note_scale_set, note_scale_ud,
       sound_effect,
       sub_button,
@@ -327,6 +505,8 @@ Button Index mapping
       menu_open,
       internal_button,        // メインボタンへのマッピング (WebSocket等で利用)
       play_control,
+      sequence_mode_set,
+      sequence_step_ud,
       command_max,
     };
 
@@ -334,7 +514,7 @@ Button Index mapping
       (const char*[]){ nullptr, },    // none
       (const char*[]){ "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "Back", "OK", "Down", "Up", "Exit" }, // menu_function
       (const char*[]){ "-", "Slot 1", "Slot 2", "Slot 3", "Slot 4", "Slot 5", "Slot 6", "Slot 7", "Slot 8", }, // slot_select
-      (const char*[]){ "-", "Chord", "Note", "Drum", "ChordEdit", },                  // play_mode_set
+      (const char*[]){ "-", "Chord", "Note", "Drum", },                               // perform_style_set
       (const char*[]){ "-", "1 off", "2 off", "3 off", "4 off", "5 off", "6 off", },  // part_off
       (const char*[]){ "-", "1 ON", "2 ON", "3 ON", "4 ON", "5 ON", "6 ON", },        // part_on
       (const char*[]){ "-", "1 Edt", "2 Edt", "3 Edt", "4 Edt", "5 Edt", "6 Edt", },  // part_edit
@@ -350,6 +530,7 @@ Button Index mapping
       (const char*[]){ "-", "Exit", "Save" },            // edit_exit
       (const char*[]){ "-", "Vol %", "Oct", "Voicing", "Velo %", "Tone", "Anchor", "LoopLen", "Stroke" },   // edit_enc2_target
       (const char*[]){ "-", "Auto", "Play", "Stop", "Pause" },  // autoplay_switch
+      (const char*[]){ "Stop", "Rec", },  // recording_control
       (const char*[]){ "-", "Penta", "Major", "Chroma", "Blues", "Japan", }, // note_scale_set
     };
     enum menu_function_t : uint8_t {
@@ -365,7 +546,10 @@ Button Index mapping
       part_vol = 1, position, voicing, velocity, program, banlift, endpoint, displacement,
     };
     enum autoplay_switch_t : uint8_t {
-      autoplay_off = 0, autoplay_toggle, autoplay_start, autoplay_stop, autoplay_pause,
+      autoplay_off = 0, autoplay_toggle, autoplay_start, autoplay_stop, autoplay_pause, autoplay_beat,
+    };
+    enum recording_control_t : uint8_t {
+      rec_stop = 0, rec_start,
     };
     enum sound_effect_t : uint8_t {
       single = 1, testplay,
@@ -458,8 +642,7 @@ Button Index mapping
       sc_boot = 0,
       sc_power_off,
       sc_reset,
-      sc_save_settings,
-      sc_save_resume,
+      sc_save,
       sc_erase_nvs,
     };
 
@@ -595,10 +778,34 @@ Button Index mapping
       { chord_degree, 4 }, { chord_degree  , 5 }, {   chord_degree, 6 }, { chord_modifier  , KANTANMusic_Modifier_7  } , { chord_modifier, KANTANMusic_Modifier_M7   },
       { chord_degree, 7 }, { chord_semitone, 1 }, { chord_semitone, 2 }, { chord_modifier  , KANTANMusic_Modifier_dim} , { chord_modifier, KANTANMusic_Modifier_sus4 },
       { sub_button  , 1 }, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
-      { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
+      { menu_open, menu_system }, { menu_open, menu_seqmode }, // SIDE_1, SIDE_2 右側面ボタンでモード切替メニュー表示
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
       { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { menu_open, menu_system },  // ENC2_DOWN, ENC2_UP, ENC2_PUSH
+      { master_key_ud, -1}, { master_key_ud,  1 }, // ENC3_DOWN, ENC3_UP
+    };
+    // シーケンス編集モードのボタン-コマンドマッピング
+    static constexpr const command_param_array_t command_mapping_sequence_edit_table[] = {
+      { chord_degree, 1 }, { chord_degree  , 2 }, {   chord_degree, 3 }, { chord_minor_swap, 1                       } , { chord_modifier, KANTANMusic_Modifier_Add9 },
+      { chord_degree, 4 }, { chord_degree  , 5 }, {   chord_degree, 6 }, { chord_modifier  , KANTANMusic_Modifier_7  } , { chord_modifier, KANTANMusic_Modifier_M7   },
+      { chord_degree, 7 }, { chord_semitone, 1 }, { chord_semitone, 2 }, { chord_modifier  , KANTANMusic_Modifier_dim} , { chord_modifier, KANTANMusic_Modifier_sus4 },
+      { sub_button  , 1 }, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
+      { menu_open, menu_system }, { menu_open, menu_seqmode }, // SIDE_1, SIDE_2 右側面ボタンでモード切替メニュー表示
+      { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
+      { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
+      { sequence_step_ud, -1 }, { sequence_step_ud, 1 }, { menu_open, menu_seqedit },  // ENC2_DOWN, ENC2_UP, ENC2_PUSH
+      { master_key_ud, -1}, { master_key_ud,  1 }, // ENC3_DOWN, ENC3_UP
+    };
+    // シーケンス演奏モードのボタン-コマンドマッピング
+    static constexpr const command_param_array_t command_mapping_sequence_play_table[] = {
+      { chord_degree, 1 }, { chord_degree  , 2 }, {   chord_degree, 3 }, { chord_minor_swap, 1                       } , { chord_modifier, KANTANMusic_Modifier_Add9 },
+      { chord_degree, 4 }, { chord_degree  , 5 }, {   chord_degree, 6 }, { chord_modifier  , KANTANMusic_Modifier_7  } , { chord_modifier, KANTANMusic_Modifier_M7   },
+      { chord_degree, 7 }, { chord_semitone, 1 }, { chord_semitone, 2 }, { chord_modifier  , KANTANMusic_Modifier_dim} , { chord_modifier, KANTANMusic_Modifier_sus4 },
+      { sub_button  , 1 }, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
+      { menu_open, menu_system }, { menu_open, menu_seqmode }, // SIDE_1, SIDE_2 右側面ボタンでモード切替メニュー表示
+      { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
+      { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
+      { sequence_step_ud, -1 }, { sequence_step_ud, 1 }, { menu_open, menu_system },  // ENC2_DOWN, ENC2_UP, ENC2_PUSH
       { master_key_ud, -1}, { master_key_ud,  1 }, // ENC3_DOWN, ENC3_UP
     };
     // ノート演奏モードのボタン-コマンドマッピング
@@ -607,7 +814,7 @@ Button Index mapping
       { note_button,  6 }, { note_button,  7 }, { note_button,  8 }, { note_button,  9 }, { note_button, 10 },
       { note_button, 11 }, { note_button, 12 }, { note_button, 13 }, { note_button, 14 }, { note_button, 15 },
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
-      { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
+      { menu_open, menu_system }, { menu_open, menu_seqmode }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
       { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { menu_open, menu_system },  // ENC2_DOWN, ENC2_UP, ENC2_PUSH
@@ -619,7 +826,7 @@ Button Index mapping
       { drum_button,  6 }, { drum_button,  7 }, { drum_button,  8 }, { drum_button,  9 }, { drum_button, 10 },
       { drum_button, 11 }, { drum_button, 12 }, { drum_button, 13 }, { drum_button, 14 }, { drum_button, 15 },
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
-      { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
+      { menu_open, menu_system }, { menu_open, menu_seqmode }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
       { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { menu_open, menu_system },  // ENC2_DOWN, ENC2_UP, ENC2_PUSH
@@ -627,11 +834,11 @@ Button Index mapping
     };
     // ボタンマッピングチェンジ状態(レバー手前)でのコマンドマッピング
     static constexpr const command_param_array_t command_mapping_chord_alt1_table[] = {
-      { part_on, 4 }, { part_on, 5 }, { part_on, 6 }, { none }, { none },
+      { part_on, 4 }, { part_on, 5 }, { part_on, 6 }, { none }, { recording_control, recording_control_t::rec_start },
       { part_on, 1 }, { part_on, 2 }, { part_on, 3 }, { none }, { none },
-      { play_mode_set, playmode::chord_mode}, { play_mode_set, playmode::note_mode}, { play_mode_set, playmode::drum_mode }, { none }, { none },
+      { perform_style_set, (int)perform_style_t::ps_chord}, { perform_style_set, (int)perform_style_t::ps_note}, { perform_style_set, (int)perform_style_t::ps_drum }, { none }, { none },
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
-      { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
+      { menu_open, menu_system }, { none }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
       { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { none },   // ENC2_DOWN, ENC2_UP, ENC2_PUSH
@@ -639,11 +846,11 @@ Button Index mapping
     };
     // ボタンマッピングチェンジ状態(レバー奥)でのコマンドマッピング
     static constexpr const command_param_array_t command_mapping_chord_alt2_table[] = {
-      { part_off, 4 }, { part_off, 5 }, { part_off, 6 }, { none }, { none },
+      { part_off, 4 }, { part_off, 5 }, { part_off, 6 }, { none }, { recording_control, recording_control_t::rec_stop },
       { part_off, 1 }, { part_off, 2 }, { part_off, 3 }, { none }, { none },
-      { play_mode_set, playmode::chord_mode}, { play_mode_set, playmode::note_mode}, { play_mode_set, playmode::drum_mode }, { none }, { none },
+      { perform_style_set, (int)perform_style_t::ps_chord}, { perform_style_set, (int)perform_style_t::ps_note}, { perform_style_set, (int)perform_style_t::ps_drum }, { none }, { none },
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
-      { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
+      { menu_open, menu_system }, { none }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
       { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { none },   // ENC2_DOWN, ENC2_UP, ENC2_PUSH
@@ -653,9 +860,9 @@ Button Index mapping
     static constexpr const command_param_array_t command_mapping_chord_alt3_table[] = {
       { part_edit, 4 }, { part_edit, 5 }, { part_edit, 6 }, { none }, { none },
       { part_edit, 1 }, { part_edit, 2 }, { part_edit, 3 }, { none }, { none },
-      { play_mode_set, playmode::chord_mode}, { play_mode_set, playmode::note_mode}, { play_mode_set, playmode::drum_mode }, { none }, { none },
+      { perform_style_set, (int)perform_style_t::ps_chord}, { perform_style_set, (int)perform_style_t::ps_note}, { perform_style_set, (int)perform_style_t::ps_drum }, { none }, { none },
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
-      { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
+      { menu_open, menu_system }, { none }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
       { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { none },   // ENC2_DOWN, ENC2_UP, ENC2_PUSH
@@ -665,9 +872,9 @@ Button Index mapping
     static constexpr const command_param_array_t command_mapping_note_alt1_table[] = {
       { note_scale_set, 1 }, { note_scale_set, 2 }, { note_scale_set, 3 }, { note_scale_set, 4 }, { note_scale_set, 5 },
       { none }, { none }, { none }, { none }, { none },
-      { play_mode_set, playmode::chord_mode}, { play_mode_set, playmode::note_mode}, { play_mode_set, playmode::drum_mode }, { none }, { none },
+      { perform_style_set, (int)perform_style_t::ps_chord}, { perform_style_set, (int)perform_style_t::ps_note}, { perform_style_set, (int)perform_style_t::ps_drum }, { none }, { none },
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
-      { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
+      { menu_open, menu_system }, { none }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
       { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { none },   // ENC2_DOWN, ENC2_UP, ENC2_PUSH
@@ -677,9 +884,9 @@ Button Index mapping
     static constexpr const command_param_array_t command_mapping_drum_alt1_table[] = {
       { none }, { none }, { none }, { none }, { none },
       { none }, { none }, { none }, { none }, { none },
-      { play_mode_set, playmode::chord_mode}, { play_mode_set, playmode::note_mode}, { play_mode_set, playmode::drum_mode }, { none }, { none },
+      { perform_style_set, (int)perform_style_t::ps_chord}, { perform_style_set, (int)perform_style_t::ps_note}, { perform_style_set, (int)perform_style_t::ps_drum }, { none }, { none },
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
-      { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
+      { menu_open, menu_system }, { none }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
       { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { none },   // ENC2_DOWN, ENC2_UP, ENC2_PUSH
@@ -691,7 +898,7 @@ Button Index mapping
       { part_on, 1 }, { part_on, 2 }, { part_on, 3 }, { none }, { none },
       { none }, { none }, { none }, { none }, { none },
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
-      { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
+      { menu_open, menu_system }, { none }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
       { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { none },   // ENC2_DOWN, ENC2_UP, ENC2_PUSH
@@ -703,7 +910,7 @@ Button Index mapping
       { part_off, 1 }, { part_off, 2 }, { part_off, 3 }, { none }, { none },
       { none }, { none }, { none }, { none }, { none },
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
-      { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
+      { menu_open, menu_system }, { none }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
       { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { none },   // ENC2_DOWN, ENC2_UP, ENC2_PUSH
@@ -715,7 +922,7 @@ Button Index mapping
       { part_edit, 1 }, { part_edit, 2 }, { part_edit, 3 }, { none }, { none },
       { none }, { none }, { none }, { none }, { none },
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
-      { menu_open, menu_system }, { autoplay_switch, autoplay_toggle }, // SIDE_1, SIDE_2
+      { menu_open, menu_system }, { none }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
       { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { none },   // ENC2_DOWN, ENC2_UP, ENC2_PUSH
@@ -751,43 +958,43 @@ Button Index mapping
     };
 
     static constexpr const command_param_array_text_t button_text_table[] = {
-      "1"    , nullptr, nullptr, {                               command::chord_degree   , 1 },
-      "2"    ,  "♭"  , nullptr, { command::chord_semitone, 1 ,  command::chord_degree   , 2 },
-      "2"    , nullptr, nullptr, {                               command::chord_degree   , 2 },
-      "3"    ,  "♭"  , nullptr, { command::chord_semitone, 1 ,  command::chord_degree   , 3 },
-      "3"    , nullptr, nullptr, {                               command::chord_degree   , 3 },
-      "4"    , nullptr, nullptr, {                               command::chord_degree   , 4 },
-      "5"    ,  "♭"  , nullptr, { command::chord_semitone, 1 ,  command::chord_degree   , 5 },
-      "5"    , nullptr, nullptr, {                               command::chord_degree   , 5 },
-      "6"    ,  "♭"  , nullptr, { command::chord_semitone, 1 ,  command::chord_degree   , 6 },
-      "6"    , nullptr, nullptr, {                               command::chord_degree   , 6 },
-      "7"    ,  "♭"  , nullptr, { command::chord_semitone, 1 ,  command::chord_degree   , 7 },
-      "7"    , nullptr, nullptr, {                               command::chord_degree   , 7 },
-      "1"    , nullptr, "〜"   , {                               command::chord_minor_swap, 1, command::chord_degree, 1 },
-      "2"    ,  "♭"  , "〜"   , { command::chord_semitone, 1 ,  command::chord_minor_swap, 1, command::chord_degree, 2 },
-      "2"    , nullptr, "〜"   , {                               command::chord_minor_swap, 1, command::chord_degree, 2 },
-      "3"    ,  "♭"  , "〜"   , { command::chord_semitone, 1 ,  command::chord_minor_swap, 1, command::chord_degree, 3 },
-      "3"    , nullptr, "〜"   , {                               command::chord_minor_swap, 1, command::chord_degree, 3 },
-      "4"    , nullptr, "〜"   , {                               command::chord_minor_swap, 1, command::chord_degree, 4 },
-      "5"    ,  "♭"  , "〜"   , { command::chord_semitone, 1 ,  command::chord_minor_swap, 1, command::chord_degree, 5 },
-      "5"    , nullptr, "〜"   , {                               command::chord_minor_swap, 1, command::chord_degree, 5 },
-      "6"    ,  "♭"  , "〜"   , { command::chord_semitone, 1 ,  command::chord_minor_swap, 1, command::chord_degree, 6 },
-      "6"    , nullptr, "〜"   , {                               command::chord_minor_swap, 1, command::chord_degree, 6 },
-      "7"    ,  "♭"  , "〜"   , { command::chord_semitone, 1 ,  command::chord_minor_swap, 1, command::chord_degree, 7 },
-      "7"    , nullptr, "〜"   , {                               command::chord_minor_swap, 1, command::chord_degree, 7 },
-      "1"    , nullptr, "7"    , { command::chord_modifier, KANTANMusic_Modifier_7    ,                               command::chord_degree, 1 },
-      "1"    , nullptr, "M7"   , { command::chord_modifier, KANTANMusic_Modifier_M7   ,                               command::chord_degree, 1 },
-      "2"    , nullptr, "7"    , { command::chord_modifier, KANTANMusic_Modifier_7    ,                               command::chord_degree, 2 },
-      "3"    , nullptr, "7"    , { command::chord_modifier, KANTANMusic_Modifier_7    ,                               command::chord_degree, 3 },
-      "3"    , "〜"   , "7"    , { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_minor_swap, 1, command::chord_degree, 3 },
-      "4"    , nullptr, "7"    , { command::chord_modifier, KANTANMusic_Modifier_7    ,                               command::chord_degree, 4 },
-      "4"    , nullptr, "M7"   , { command::chord_modifier, KANTANMusic_Modifier_M7   ,                               command::chord_degree, 4 },
-      "5"    , nullptr, "7"    , { command::chord_modifier, KANTANMusic_Modifier_7    ,                               command::chord_degree, 5 },
-      "6"    , nullptr, "7"    , { command::chord_modifier, KANTANMusic_Modifier_7    ,                               command::chord_degree, 6 },
-      "7"    , nullptr, "7"    , { command::chord_modifier, KANTANMusic_Modifier_7    ,                               command::chord_degree, 7 },
-      "7"    , "〜"   , "7"    , { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_minor_swap, 1, command::chord_degree, 7 },
-      "7"    , nullptr, "m7-5" , { command::chord_modifier, KANTANMusic_Modifier_m7_5 ,                               command::chord_degree, 7 },
-      "7"    , nullptr, "dim"  , { command::chord_modifier, KANTANMusic_Modifier_dim  ,                               command::chord_degree, 7 },
+      "1"    , nullptr, nullptr, { command::chord_degree, make_degree(1, false               ) },
+      "2"    ,  "♭"  , nullptr, { command::chord_degree, make_degree(2, false, semitone_flat) },
+      "2"    , nullptr, nullptr, { command::chord_degree, make_degree(2, false               ) },
+      "3"    ,  "♭"  , nullptr, { command::chord_degree, make_degree(3, false, semitone_flat) },
+      "3"    , nullptr, nullptr, { command::chord_degree, make_degree(3, false               ) },
+      "4"    , nullptr, nullptr, { command::chord_degree, make_degree(4, false               ) },
+      "5"    ,  "♭"  , nullptr, { command::chord_degree, make_degree(5, false, semitone_flat) },
+      "5"    , nullptr, nullptr, { command::chord_degree, make_degree(5, false               ) },
+      "6"    ,  "♭"  , nullptr, { command::chord_degree, make_degree(6, false, semitone_flat) },
+      "6"    , nullptr, nullptr, { command::chord_degree, make_degree(6, false               ) },
+      "7"    ,  "♭"  , nullptr, { command::chord_degree, make_degree(7, false, semitone_flat) },
+      "7"    , nullptr, nullptr, { command::chord_degree, make_degree(7, false               ) },
+      "1"    , nullptr, "〜"   , { command::chord_degree, make_degree(1, true               ) },
+      "2"    ,  "♭"  , "〜"   , { command::chord_degree, make_degree(2, true, semitone_flat) },
+      "2"    , nullptr, "〜"   , { command::chord_degree, make_degree(2, true               ) },
+      "3"    ,  "♭"  , "〜"   , { command::chord_degree, make_degree(3, true, semitone_flat) },
+      "3"    , nullptr, "〜"   , { command::chord_degree, make_degree(3, true               ) },
+      "4"    , nullptr, "〜"   , { command::chord_degree, make_degree(4, true               ) },
+      "5"    ,  "♭"  , "〜"   , { command::chord_degree, make_degree(5, true, semitone_flat) },
+      "5"    , nullptr, "〜"   , { command::chord_degree, make_degree(5, true               ) },
+      "6"    ,  "♭"  , "〜"   , { command::chord_degree, make_degree(6, true, semitone_flat) },
+      "6"    , nullptr, "〜"   , { command::chord_degree, make_degree(6, true               ) },
+      "7"    ,  "♭"  , "〜"   , { command::chord_degree, make_degree(7, true, semitone_flat) },
+      "7"    , nullptr, "〜"   , { command::chord_degree, make_degree(7, true               ) },
+      "1"    , nullptr, "7"    , { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(1      ) },
+      "1"    , nullptr, "M7"   , { command::chord_modifier, KANTANMusic_Modifier_M7   , command::chord_degree, make_degree(1      ) },
+      "2"    , nullptr, "7"    , { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(2      ) },
+      "3"    , nullptr, "7"    , { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(3      ) },
+      "3"    , "〜"   , "7"    , { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(3, true) },
+      "4"    , nullptr, "7"    , { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(4      ) },
+      "4"    , nullptr, "M7"   , { command::chord_modifier, KANTANMusic_Modifier_M7   , command::chord_degree, make_degree(4      ) },
+      "5"    , nullptr, "7"    , { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(5      ) },
+      "6"    , nullptr, "7"    , { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(6      ) },
+      "7"    , nullptr, "7"    , { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(7      ) },
+      "7"    , "〜"   , "7"    , { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(7, true) },
+      "7"    , nullptr, "m7-5" , { command::chord_modifier, KANTANMusic_Modifier_m7_5 , command::chord_degree, make_degree(7      ) },
+      "7"    , nullptr, "dim"  , { command::chord_modifier, KANTANMusic_Modifier_dim  , command::chord_degree, make_degree(7      ) },
       "dim"  , nullptr, nullptr, { command::chord_modifier, KANTANMusic_Modifier_dim  },
       "m7-5" , nullptr, nullptr, { command::chord_modifier, KANTANMusic_Modifier_m7_5 },
       "sus4" , nullptr, nullptr, { command::chord_modifier, KANTANMusic_Modifier_sus4 },
@@ -801,19 +1008,19 @@ Button Index mapping
       "〜"   , nullptr, nullptr, { command::chord_minor_swap, 1 },
       "♭"   , nullptr, nullptr, { command::chord_semitone  , 1 },
       "♯"   , nullptr, nullptr, { command::chord_semitone  , 2 },
-      "/1"   , nullptr, nullptr, {                                  command::chord_bass_degree, 1 },
-      "/2"   ,  "♭"  , nullptr, { command::chord_bass_semitone, 1, command::chord_bass_degree, 2 },
-      "/2"   , nullptr, nullptr, {                                  command::chord_bass_degree, 2 },
-      "/3"   ,  "♭"  , nullptr, { command::chord_bass_semitone, 1, command::chord_bass_degree, 3 },
-      "/3"   , nullptr, nullptr, {                                  command::chord_bass_degree, 3 },
-      "/4"   , nullptr, nullptr, {                                  command::chord_bass_degree, 4 },
-      "/5"   ,  "♭"  , nullptr, { command::chord_bass_semitone, 1, command::chord_bass_degree, 5 },
-      "/5"   , nullptr, nullptr, {                                  command::chord_bass_degree, 5 },
-      "/6"   ,  "♭"  , nullptr, { command::chord_bass_semitone, 1, command::chord_bass_degree, 6 },
-      "/6"   , nullptr, nullptr, {                                  command::chord_bass_degree, 6 },
-      "/7"   ,  "♭"  , nullptr, { command::chord_bass_semitone, 1, command::chord_bass_degree, 7 },
-      "/7"   , nullptr, nullptr, {                                  command::chord_bass_degree, 7 },
-      "〜"   , nullptr, "7"    , {                                  command::chord_minor_swap, 1, command::chord_modifier, KANTANMusic_Modifier_7    },
+      "/1"   , nullptr, nullptr, { command::chord_bass_degree, make_degree(1                       ) },
+      "/2"   ,  "♭"  , nullptr, { command::chord_bass_degree, make_degree(2, false, semitone_flat ) },
+      "/2"   , nullptr, nullptr, { command::chord_bass_degree, make_degree(2                       ) },
+      "/3"   ,  "♭"  , nullptr, { command::chord_bass_degree, make_degree(3, false, semitone_flat ) },
+      "/3"   , nullptr, nullptr, { command::chord_bass_degree, make_degree(3                       ) },
+      "/4"   , nullptr, nullptr, { command::chord_bass_degree, make_degree(4                       ) },
+      "/5"   ,  "♭"  , nullptr, { command::chord_bass_degree, make_degree(5, false, semitone_flat ) },
+      "/5"   , nullptr, nullptr, { command::chord_bass_degree, make_degree(5                       ) },
+      "/6"   ,  "♭"  , nullptr, { command::chord_bass_degree, make_degree(6, false, semitone_flat ) },
+      "/6"   , nullptr, nullptr, { command::chord_bass_degree, make_degree(6                       ) },
+      "/7"   ,  "♭"  , nullptr, { command::chord_bass_degree, make_degree(7, false, semitone_flat ) },
+      "/7"   , nullptr, nullptr, { command::chord_bass_degree, make_degree(7                       ) },
+      "〜"   , nullptr, "7"    , { command::chord_minor_swap, 1, command::chord_modifier, KANTANMusic_Modifier_7    },
       "♭〜" , nullptr, nullptr, { command::chord_semitone, 1, command::chord_minor_swap, 1,                                                     },
       "♭〜" , nullptr, "7"    , { command::chord_semitone, 1, command::chord_minor_swap, 1, command::chord_modifier, KANTANMusic_Modifier_7    },
       "♭"   , nullptr, "dim"  , { command::chord_semitone, 1,                               command::chord_modifier, KANTANMusic_Modifier_dim  },
@@ -829,7 +1036,7 @@ Button Index mapping
 
   namespace play {
 
-    enum auto_play_mode_t : uint8_t {
+    enum auto_play_state_t : uint8_t {
       auto_play_none,
       auto_play_waiting,
       auto_play_running,
@@ -927,6 +1134,7 @@ Button Index mapping
     static constexpr const uint8_t max_program_number = 129;  // プログラムチェンジの最大値(MIDIの規格128＋ドラム用の1)
     static constexpr const uint8_t max_cursor_x = max_arpeggio_step;    // 編集時の横方向カーソル移動範囲
     static constexpr const uint8_t max_cursor_y = max_pitch_with_drum;  // 編集時の縦方向カーソル移動範囲
+    static constexpr const uint16_t max_sequence_step = 10000;
 
     static constexpr const int16_t tempo_bpm_min = 20;  // テンポ最小値
     static constexpr const int16_t tempo_bpm_default = 120;  //テンポ初期値
@@ -955,8 +1163,8 @@ Button Index mapping
 
     static constexpr const uint32_t app_version_major = 0;
     static constexpr const uint32_t app_version_minor = 6;
-    static constexpr const uint32_t app_version_patch = 3;
-    static constexpr const char app_version_string[] = "063";
+    static constexpr const uint32_t app_version_patch = 6;
+    static constexpr const char app_version_string[] = "066";
     static constexpr const uint32_t app_version_raw = app_version_major<<16|app_version_minor<<8|app_version_patch;
 
     static constexpr const char url_manual[] = "https://kantan-play.com/core/manual/";
@@ -1015,30 +1223,22 @@ Button Index mapping
       data_song_users,
       data_song_extra,
       data_song_preset,
-      data_setting,
-      data_resume,
+      data_system,
       data_type_max,
+      data_kmap,
     };
     static constexpr const char* data_path[] = {
       "/songs/user/",
       "/songs/extra/",
       "",               // バイナリ埋め込みのためフォルダ情報なし
-      "/setting.json",
-      "/resume.json",
+      "/",
     };
-    struct file_command_info_t {
-      union {
-        uint32_t raw;
-        struct {
-          data_type_t dir_type;
-          uint8_t mem_index;
-          uint16_t file_index;
-        };
-      };
-      constexpr file_command_info_t(uint32_t raw_value = 0) : raw { raw_value } {}
-      constexpr file_command_info_t(data_type_t dir_type, uint8_t mem_index, uint16_t file_index) : dir_type { dir_type }, mem_index { mem_index }, file_index { file_index } {}
-    };
-    // static constexpr const char setting_filename[] = "setting.json";
+    static constexpr const char filename_setting[] = "setting.json";
+    static constexpr const char filename_resume[] = "resume.json";
+    static constexpr const char filename_mapping_device[] = "device.kmap"; // デバイスのマッピング情報
+    static constexpr const char filename_mapping_song[] = "song.kmap"; // ソングのマッピング情報（レジューム用に必要）
+    static constexpr const char fileext_song[] = ".json";
+    static constexpr const char fileext_kmap[] = ".kmap";
   };
 
   namespace ctrl_assign {
@@ -1051,44 +1251,44 @@ Button Index mapping
     int get_index_from_jsonname(const control_assignment_t* data, const char* name);
 
     static constexpr const control_assignment_t playbutton_table[] = {
-      { "1"            , { "1"             , nullptr               }, {                               command::chord_degree   , 1 } },
-      { "2 flat"       , { "2♭"           , nullptr               }, { command::chord_semitone, 1 ,  command::chord_degree   , 2 } },
-      { "2"            , { "2"             , nullptr               }, {                               command::chord_degree   , 2 } },
-      { "3 flat"       , { "3♭"           , nullptr               }, { command::chord_semitone, 1 ,  command::chord_degree   , 3 } },
-      { "3"            , { "3"             , nullptr               }, {                               command::chord_degree   , 3 } },
-      { "4"            , { "4"             , nullptr               }, {                               command::chord_degree   , 4 } },
-      { "5 flat"       , { "5♭"           , nullptr               }, { command::chord_semitone, 1 ,  command::chord_degree   , 5 } },
-      { "5"            , { "5"             , nullptr               }, {                               command::chord_degree   , 5 } },
-      { "6 flat"       , { "6♭"           , nullptr               }, { command::chord_semitone, 1 ,  command::chord_degree   , 6 } },
-      { "6"            , { "6"             , nullptr               }, {                               command::chord_degree   , 6 } },
-      { "7 flat"       , { "7♭"           , nullptr               }, { command::chord_semitone, 1 ,  command::chord_degree   , 7 } },
-      { "7"            , { "7"             , nullptr               }, {                               command::chord_degree   , 7 } },
-      { "1 swap"       , { "1〜"           , nullptr               }, {                               command::chord_minor_swap, 1, command::chord_degree, 1 } },
-      { "2 flat swap"  , { "2♭〜"         , nullptr               }, { command::chord_semitone, 1 ,  command::chord_minor_swap, 1, command::chord_degree, 2 } },
-      { "2 swap"       , { "2〜"           , nullptr               }, {                               command::chord_minor_swap, 1, command::chord_degree, 2 } },
-      { "3 flat swap"  , { "3♭〜"         , nullptr               }, { command::chord_semitone, 1 ,  command::chord_minor_swap, 1, command::chord_degree, 3 } },
-      { "3 swap"       , { "3〜"           , nullptr               }, {                               command::chord_minor_swap, 1, command::chord_degree, 3 } },
-      { "4 swap"       , { "4〜"           , nullptr               }, {                               command::chord_minor_swap, 1, command::chord_degree, 4 } },
-      { "5 flat swap"  , { "5♭〜"         , nullptr               }, { command::chord_semitone, 1 ,  command::chord_minor_swap, 1, command::chord_degree, 5 } },
-      { "5 swap"       , { "5〜"           , nullptr               }, {                               command::chord_minor_swap, 1, command::chord_degree, 5 } },
-      { "6 flat swap"  , { "6♭〜"         , nullptr               }, { command::chord_semitone, 1 ,  command::chord_minor_swap, 1, command::chord_degree, 6 } },
-      { "6 swap"       , { "6〜"           , nullptr               }, {                               command::chord_minor_swap, 1, command::chord_degree, 6 } },
-      { "7 flat swap"  , { "7♭〜"         , nullptr               }, { command::chord_semitone, 1 ,  command::chord_minor_swap, 1, command::chord_degree, 7 } },
-      { "7 swap"       , { "7〜"           , nullptr               }, {                               command::chord_minor_swap, 1, command::chord_degree, 7 } },
-      { "1[7]"         , { "1 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    ,                               command::chord_degree, 1 } },
-      { "1[M7]"        , { "1 [ M7 ]"      , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_M7   ,                               command::chord_degree, 1 } },
-      { "2[7]"         , { "2 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    ,                               command::chord_degree, 2 } },
-      { "3[7]"         , { "3 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    ,                               command::chord_degree, 3 } },
-      { "3 swap[7]"    , { "3〜[ 7 ]"      , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_minor_swap, 1, command::chord_degree, 3 } },
-      { "4[7]"         , { "4 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    ,                               command::chord_degree, 4 } },
-      { "4[M7]"        , { "4 [ M7 ]"      , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_M7   ,                               command::chord_degree, 4 } },
-      { "5[7]"         , { "5 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    ,                               command::chord_degree, 5 } },
-      { "5 slash 7"    , { "5/7"           , nullptr               }, { command::chord_bass_degree, 7, command::chord_degree, 5 } },
-      { "6[7]"         , { "6 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    ,                               command::chord_degree, 6 } },
-      { "7[7]"         , { "7 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    ,                               command::chord_degree, 7 } },
-      { "7 swap[7]"    , { "7〜[ 7 ]"      , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_minor_swap, 1, command::chord_degree, 7 } },
-      { "7[m7_5]"      , { "7 [ m7-5 ]"    , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_m7_5 ,                               command::chord_degree, 7 } },
-      { "7[dim]"       , { "7 [ dim ]"     , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_dim  ,                               command::chord_degree, 7 } },
+      { "1"            , { "1"             , nullptr               }, { command::chord_degree, make_degree(1, false               ) } },
+      { "2 flat"       , { "2♭"           , nullptr               }, { command::chord_degree, make_degree(2, false, semitone_flat) } },
+      { "2"            , { "2"             , nullptr               }, { command::chord_degree, make_degree(2, false               ) } },
+      { "3 flat"       , { "3♭"           , nullptr               }, { command::chord_degree, make_degree(3, false, semitone_flat) } },
+      { "3"            , { "3"             , nullptr               }, { command::chord_degree, make_degree(3, false               ) } },
+      { "4"            , { "4"             , nullptr               }, { command::chord_degree, make_degree(4, false               ) } },
+      { "5 flat"       , { "5♭"           , nullptr               }, { command::chord_degree, make_degree(5, false, semitone_flat) } },
+      { "5"            , { "5"             , nullptr               }, { command::chord_degree, make_degree(5, false               ) } },
+      { "6 flat"       , { "6♭"           , nullptr               }, { command::chord_degree, make_degree(6, false, semitone_flat) } },
+      { "6"            , { "6"             , nullptr               }, { command::chord_degree, make_degree(6, false               ) } },
+      { "7 flat"       , { "7♭"           , nullptr               }, { command::chord_degree, make_degree(7, false, semitone_flat) } },
+      { "7"            , { "7"             , nullptr               }, { command::chord_degree, make_degree(7, false               ) } },
+      { "1 swap"       , { "1〜"           , nullptr               }, { command::chord_degree, make_degree(1,  true               ) } },
+      { "2 flat swap"  , { "2♭〜"         , nullptr               }, { command::chord_degree, make_degree(2,  true, semitone_flat) } },
+      { "2 swap"       , { "2〜"           , nullptr               }, { command::chord_degree, make_degree(2,  true               ) } },
+      { "3 flat swap"  , { "3♭〜"         , nullptr               }, { command::chord_degree, make_degree(3,  true, semitone_flat) } },
+      { "3 swap"       , { "3〜"           , nullptr               }, { command::chord_degree, make_degree(3,  true               ) } },
+      { "4 swap"       , { "4〜"           , nullptr               }, { command::chord_degree, make_degree(4,  true               ) } },
+      { "5 flat swap"  , { "5♭〜"         , nullptr               }, { command::chord_degree, make_degree(5,  true, semitone_flat) } },
+      { "5 swap"       , { "5〜"           , nullptr               }, { command::chord_degree, make_degree(5,  true               ) } },
+      { "6 flat swap"  , { "6♭〜"         , nullptr               }, { command::chord_degree, make_degree(6,  true, semitone_flat) } },
+      { "6 swap"       , { "6〜"           , nullptr               }, { command::chord_degree, make_degree(6,  true               ) } },
+      { "7 flat swap"  , { "7♭〜"         , nullptr               }, { command::chord_degree, make_degree(7,  true, semitone_flat) } },
+      { "7 swap"       , { "7〜"           , nullptr               }, { command::chord_degree, make_degree(7,  true               ) } },
+      { "1[7]"         , { "1 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(1      ) } },
+      { "1[M7]"        , { "1 [ M7 ]"      , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_M7   , command::chord_degree, make_degree(1      ) } },
+      { "2[7]"         , { "2 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(2      ) } },
+      { "3[7]"         , { "3 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(3      ) } },
+      { "3 swap[7]"    , { "3〜[ 7 ]"      , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(3, true) } },
+      { "4[7]"         , { "4 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(4      ) } },
+      { "4[M7]"        , { "4 [ M7 ]"      , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_M7   , command::chord_degree, make_degree(4      ) } },
+      { "5[7]"         , { "5 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(5      ) } },
+      { "5 slash 7"    , { "5/7"           , nullptr               }, { command::chord_bass_degree, 7                      , command::chord_degree, make_degree(5      ) } },
+      { "6[7]"         , { "6 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(6      ) } },
+      { "7[7]"         , { "7 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(7      ) } },
+      { "7 swap[7]"    , { "7〜[ 7 ]"      , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(7, true) } },
+      { "7[m7_5]"      , { "7 [ m7-5 ]"    , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_m7_5 , command::chord_degree, make_degree(7      ) } },
+      { "7[dim]"       , { "7 [ dim ]"     , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_dim  , command::chord_degree, make_degree(7      ) } },
       { "[dim]"        , { "[ dim ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_dim  } },
       { "[m7_5]"       , { "[ m7-5 ]"      , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_m7_5 } },
       { "[sus4]"       , { "[ sus4 ]"      , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_sus4 } },
@@ -1102,18 +1302,18 @@ Button Index mapping
       { "swap"         , { "〜"            , nullptr               }, { command::chord_minor_swap, 1 } },
       { "flat"         , { "♭"            , nullptr               }, { command::chord_semitone  , 1 } },
       { "sharp"        , { "♯"             , nullptr               }, { command::chord_semitone  , 2 } },
-      { "slash 1"      , { "/1"            , nullptr               }, {                                  command::chord_bass_degree, 1 } },
-      { "slash 2 flat" , { "/2♭"          , nullptr               }, { command::chord_bass_semitone, 1, command::chord_bass_degree, 2 } },
-      { "slash 2"      , { "/2"            , nullptr               }, {                                  command::chord_bass_degree, 2 } },
-      { "slash 3 flat" , { "/3♭"          , nullptr               }, { command::chord_bass_semitone, 1, command::chord_bass_degree, 3 } },
-      { "slash 3"      , { "/3"            , nullptr               }, {                                  command::chord_bass_degree, 3 } },
-      { "slash 4"      , { "/4"            , nullptr               }, {                                  command::chord_bass_degree, 4 } },
-      { "slash 5 flat" , { "/5♭"          , nullptr               }, { command::chord_bass_semitone, 1, command::chord_bass_degree, 5 } },
-      { "slash 5"      , { "/5"            , nullptr               }, {                                  command::chord_bass_degree, 5 } },
-      { "slash 6 flat" , { "/6♭"          , nullptr               }, { command::chord_bass_semitone, 1, command::chord_bass_degree, 6 } },
-      { "slash 6"      , { "/6"            , nullptr               }, {                                  command::chord_bass_degree, 6 } },
-      { "slash 7 flat" , { "/7♭"          , nullptr               }, { command::chord_bass_semitone, 1, command::chord_bass_degree, 7 } },
-      { "slash 7"      , { "/7"            , nullptr               }, {                                  command::chord_bass_degree, 7 } },
+      { "slash 1"      , { "/1"            , nullptr               }, { command::chord_bass_degree, make_degree(1                       ) } },
+      { "slash 2 flat" , { "/2♭"          , nullptr               }, { command::chord_bass_degree, make_degree(2, false, semitone_flat ) } },
+      { "slash 2"      , { "/2"            , nullptr               }, { command::chord_bass_degree, make_degree(2                       ) } },
+      { "slash 3 flat" , { "/3♭"          , nullptr               }, { command::chord_bass_degree, make_degree(3, false, semitone_flat ) } },
+      { "slash 3"      , { "/3"            , nullptr               }, { command::chord_bass_degree, make_degree(3                       ) } },
+      { "slash 4"      , { "/4"            , nullptr               }, { command::chord_bass_degree, make_degree(4                       ) } },
+      { "slash 5 flat" , { "/5♭"          , nullptr               }, { command::chord_bass_degree, make_degree(5, false, semitone_flat ) } },
+      { "slash 5"      , { "/5"            , nullptr               }, { command::chord_bass_degree, make_degree(5                       ) } },
+      { "slash 6 flat" , { "/6♭"          , nullptr               }, { command::chord_bass_degree, make_degree(6, false, semitone_flat ) } },
+      { "slash 6"      , { "/6"            , nullptr               }, { command::chord_bass_degree, make_degree(6                       ) } },
+      { "slash 7 flat" , { "/7♭"          , nullptr               }, { command::chord_bass_degree, make_degree(7, false, semitone_flat ) } },
+      { "slash 7"      , { "/7"            , nullptr               }, { command::chord_bass_degree, make_degree(7                       ) } },
       { "swap[7]"      , { "〜[ 7 ]"        , nullptr              }, {                                  command::chord_minor_swap, 1, command::chord_modifier, KANTANMusic_Modifier_7    } },
       { "flat swap"    , { "♭〜"           , nullptr              }, { command::chord_semitone, 1, command::chord_minor_swap, 1,                                                     } },
       { "flat swap[7]" , { "♭〜[ 7 ]"      , nullptr              }, { command::chord_semitone, 1, command::chord_minor_swap, 1, command::chord_modifier, KANTANMusic_Modifier_7    } },
@@ -1123,6 +1323,7 @@ Button Index mapping
       { "sharp[m7_5]"  , { "♯ [ m7-5 ]"     , nullptr              }, { command::chord_semitone, 2,                               command::chord_modifier, KANTANMusic_Modifier_m7_5 } },
       { "slot -1"      , { "Slot -1"       , "スロット -1"          }, { command::slot_select_ud  , command::slot_select_ud_t::slot_prev } },
       { "slot +1"      , { "Slot +1"       , "スロット +1"          }, { command::slot_select_ud  , command::slot_select_ud_t::slot_next } },
+      { ""             , { "---"            , nullptr             }, {} },
       { nullptr        , nullptr                                   , {} },
     };
     static constexpr const control_assignment_t external_table[] = {
@@ -1163,44 +1364,44 @@ Button Index mapping
       { "wheel l"      , { "Wheel Left"    , "ジョグダイヤル左回転" },  {                               command::internal_button, 31 } },
       { "wheel r"      , { "Wheel Right"   , "ジョグダイヤル右回転" },  {                               command::internal_button, 32 } },
       { "beat"         , { "beat"          , "ビート"              }, {                                command::chord_beat     , 1 } },
-      { "1"            , { "1"             , nullptr               }, {                               command::chord_degree   , 1 } },
-      { "2 flat"       , { "2♭"           , nullptr               }, { command::chord_semitone, 1 ,  command::chord_degree   , 2 } },
-      { "2"            , { "2"             , nullptr               }, {                               command::chord_degree   , 2 } },
-      { "3 flat"       , { "3♭"           , nullptr               }, { command::chord_semitone, 1 ,  command::chord_degree   , 3 } },
-      { "3"            , { "3"             , nullptr               }, {                               command::chord_degree   , 3 } },
-      { "4"            , { "4"             , nullptr               }, {                               command::chord_degree   , 4 } },
-      { "5 flat"       , { "5♭"           , nullptr               }, { command::chord_semitone, 1 ,  command::chord_degree   , 5 } },
-      { "5"            , { "5"             , nullptr               }, {                               command::chord_degree   , 5 } },
-      { "6 flat"       , { "6♭"           , nullptr               }, { command::chord_semitone, 1 ,  command::chord_degree   , 6 } },
-      { "6"            , { "6"             , nullptr               }, {                               command::chord_degree   , 6 } },
-      { "7 flat"       , { "7♭"           , nullptr               }, { command::chord_semitone, 1 ,  command::chord_degree   , 7 } },
-      { "7"            , { "7"             , nullptr               }, {                               command::chord_degree   , 7 } },
-      { "1 swap"       , { "1〜"           , nullptr               }, {                               command::chord_minor_swap, 1, command::chord_degree, 1 } },
-      { "2 flat swap"  , { "2♭〜"         , nullptr               }, { command::chord_semitone, 1 ,  command::chord_minor_swap, 1, command::chord_degree, 2 } },
-      { "2 swap"       , { "2〜"           , nullptr               }, {                               command::chord_minor_swap, 1, command::chord_degree, 2 } },
-      { "3 flat swap"  , { "3♭〜"         , nullptr               }, { command::chord_semitone, 1 ,  command::chord_minor_swap, 1, command::chord_degree, 3 } },
-      { "3 swap"       , { "3〜"           , nullptr               }, {                               command::chord_minor_swap, 1, command::chord_degree, 3 } },
-      { "4 swap"       , { "4〜"           , nullptr               }, {                               command::chord_minor_swap, 1, command::chord_degree, 4 } },
-      { "5 flat swap"  , { "5♭〜"         , nullptr               }, { command::chord_semitone, 1 ,  command::chord_minor_swap, 1, command::chord_degree, 5 } },
-      { "5 swap"       , { "5〜"           , nullptr               }, {                               command::chord_minor_swap, 1, command::chord_degree, 5 } },
-      { "6 flat swap"  , { "6♭〜"         , nullptr               }, { command::chord_semitone, 1 ,  command::chord_minor_swap, 1, command::chord_degree, 6 } },
-      { "6 swap"       , { "6〜"           , nullptr               }, {                               command::chord_minor_swap, 1, command::chord_degree, 6 } },
-      { "7 flat swap"  , { "7♭〜"         , nullptr               }, { command::chord_semitone, 1 ,  command::chord_minor_swap, 1, command::chord_degree, 7 } },
-      { "7 swap"       , { "7〜"           , nullptr               }, {                               command::chord_minor_swap, 1, command::chord_degree, 7 } },
-      { "1[7]"         , { "1 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    ,                               command::chord_degree, 1 } },
-      { "1[M7]"        , { "1 [ M7 ]"      , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_M7   ,                               command::chord_degree, 1 } },
-      { "2[7]"         , { "2 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    ,                               command::chord_degree, 2 } },
-      { "3[7]"         , { "3 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    ,                               command::chord_degree, 3 } },
-      { "3 swap[7]"    , { "3〜[ 7 ]"      , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_minor_swap, 1, command::chord_degree, 3 } },
-      { "4[7]"         , { "4 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    ,                               command::chord_degree, 4 } },
-      { "4[M7]"        , { "4 [ M7 ]"      , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_M7   ,                               command::chord_degree, 4 } },
-      { "5[7]"         , { "5 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    ,                               command::chord_degree, 5 } },
-      { "5 slash 7"    , { "5/7"           , nullptr               }, { command::chord_bass_degree, 7, command::chord_degree, 5 } },
-      { "6[7]"         , { "6 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    ,                               command::chord_degree, 6 } },
-      { "7[7]"         , { "7 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    ,                               command::chord_degree, 7 } },
-      { "7 swap[7]"    , { "7〜[ 7 ]"      , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_minor_swap, 1, command::chord_degree, 7 } },
-      { "7[m7_5]"      , { "7 [ m7-5 ]"    , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_m7_5 ,                               command::chord_degree, 7 } },
-      { "7[dim]"       , { "7 [ dim ]"     , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_dim  ,                               command::chord_degree, 7 } },
+      { "1"            , { "1"             , nullptr               }, { command::chord_degree, make_degree(1                      ) } },
+      { "2 flat"       , { "2♭"           , nullptr               }, { command::chord_degree, make_degree(2, false, semitone_flat) } },
+      { "2"            , { "2"             , nullptr               }, { command::chord_degree, make_degree(2                      ) } },
+      { "3 flat"       , { "3♭"           , nullptr               }, { command::chord_degree, make_degree(3, false, semitone_flat) } },
+      { "3"            , { "3"             , nullptr               }, { command::chord_degree, make_degree(3                      ) } },
+      { "4"            , { "4"             , nullptr               }, { command::chord_degree, make_degree(4                      ) } },
+      { "5 flat"       , { "5♭"           , nullptr               }, { command::chord_degree, make_degree(5, false, semitone_flat) } },
+      { "5"            , { "5"             , nullptr               }, { command::chord_degree, make_degree(5                      ) } },
+      { "6 flat"       , { "6♭"           , nullptr               }, { command::chord_degree, make_degree(6, false, semitone_flat) } },
+      { "6"            , { "6"             , nullptr               }, { command::chord_degree, make_degree(6                      ) } },
+      { "7 flat"       , { "7♭"           , nullptr               }, { command::chord_degree, make_degree(7, false, semitone_flat) } },
+      { "7"            , { "7"             , nullptr               }, { command::chord_degree, make_degree(7                      ) } },
+      { "1 swap"       , { "1〜"           , nullptr               }, { command::chord_degree, make_degree(1,  true ) } },
+      { "2 flat swap"  , { "2♭〜"         , nullptr               }, { command::chord_degree, make_degree(2,  true, semitone_flat) } },
+      { "2 swap"       , { "2〜"           , nullptr               }, { command::chord_degree, make_degree(2,  true ) } },
+      { "3 flat swap"  , { "3♭〜"         , nullptr               }, { command::chord_degree, make_degree(3,  true, semitone_flat) } },
+      { "3 swap"       , { "3〜"           , nullptr               }, { command::chord_degree, make_degree(3,  true ) } },
+      { "4 swap"       , { "4〜"           , nullptr               }, { command::chord_degree, make_degree(4,  true ) } },
+      { "5 flat swap"  , { "5♭〜"         , nullptr               }, { command::chord_degree, make_degree(5,  true, semitone_flat) } },
+      { "5 swap"       , { "5〜"           , nullptr               }, { command::chord_degree, make_degree(5,  true ) } },
+      { "6 flat swap"  , { "6♭〜"         , nullptr               }, { command::chord_degree, make_degree(6,  true, semitone_flat) } },
+      { "6 swap"       , { "6〜"           , nullptr               }, { command::chord_degree, make_degree(6,  true ) } },
+      { "7 flat swap"  , { "7♭〜"         , nullptr               }, { command::chord_degree, make_degree(7,  true, semitone_flat) } },
+      { "7 swap"       , { "7〜"           , nullptr               }, { command::chord_degree, make_degree(7,  true ) } },
+      { "1[7]"         , { "1 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(1       ) } },
+      { "1[M7]"        , { "1 [ M7 ]"      , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_M7   , command::chord_degree, make_degree(1       ) } },
+      { "2[7]"         , { "2 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(2       ) } },
+      { "3[7]"         , { "3 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(3       ) } },
+      { "3 swap[7]"    , { "3〜[ 7 ]"      , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(3, true ) } },
+      { "4[7]"         , { "4 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(4       ) } },
+      { "4[M7]"        , { "4 [ M7 ]"      , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_M7   , command::chord_degree, make_degree(4       ) } },
+      { "5[7]"         , { "5 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(5       ) } },
+      { "5 slash 7"    , { "5/7"           , nullptr               }, { command::chord_bass_degree, 7                      , command::chord_degree, make_degree(5       ) } },
+      { "6[7]"         , { "6 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(6       ) } },
+      { "7[7]"         , { "7 [ 7 ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(7       ) } },
+      { "7 swap[7]"    , { "7〜[ 7 ]"      , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_7    , command::chord_degree, make_degree(7, true ) } },
+      { "7[m7_5]"      , { "7 [ m7-5 ]"    , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_m7_5 , command::chord_degree, make_degree(7       ) } },
+      { "7[dim]"       , { "7 [ dim ]"     , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_dim  , command::chord_degree, make_degree(7       ) } },
       { "[dim]"        , { "[ dim ]"       , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_dim  } },
       { "[m7_5]"       , { "[ m7-5 ]"      , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_m7_5 } },
       { "[sus4]"       , { "[ sus4 ]"      , nullptr               }, { command::chord_modifier, KANTANMusic_Modifier_sus4 } },
@@ -1214,18 +1415,18 @@ Button Index mapping
       { "swap"         , { "〜"            , nullptr               }, { command::chord_minor_swap, 1 } },
       { "flat"         , { "♭"            , nullptr               }, { command::chord_semitone  , 1 } },
       { "sharp"        , { "♯"             , nullptr               }, { command::chord_semitone  , 2 } },
-      { "slash 1"      , { "/1"            , nullptr               }, {                                  command::chord_bass_degree, 1 } },
-      { "slash 2 flat" , { "/2♭"          , nullptr               }, { command::chord_bass_semitone, 1, command::chord_bass_degree, 2 } },
-      { "slash 2"      , { "/2"            , nullptr               }, {                                  command::chord_bass_degree, 2 } },
-      { "slash 3 flat" , { "/3♭"          , nullptr               }, { command::chord_bass_semitone, 1, command::chord_bass_degree, 3 } },
-      { "slash 3"      , { "/3"            , nullptr               }, {                                  command::chord_bass_degree, 3 } },
-      { "slash 4"      , { "/4"            , nullptr               }, {                                  command::chord_bass_degree, 4 } },
-      { "slash 5 flat" , { "/5♭"          , nullptr               }, { command::chord_bass_semitone, 1, command::chord_bass_degree, 5 } },
-      { "slash 5"      , { "/5"            , nullptr               }, {                                  command::chord_bass_degree, 5 } },
-      { "slash 6 flat" , { "/6♭"          , nullptr               }, { command::chord_bass_semitone, 1, command::chord_bass_degree, 6 } },
-      { "slash 6"      , { "/6"            , nullptr               }, {                                  command::chord_bass_degree, 6 } },
-      { "slash 7 flat" , { "/7♭"          , nullptr               }, { command::chord_bass_semitone, 1, command::chord_bass_degree, 7 } },
-      { "slash 7"      , { "/7"            , nullptr               }, {                                  command::chord_bass_degree, 7 } },
+      { "slash 1"      , { "/1"            , nullptr               }, { command::chord_bass_degree, make_degree(1                       ) } },
+      { "slash 2 flat" , { "/2♭"          , nullptr               }, { command::chord_bass_degree, make_degree(2, false, semitone_flat ) } },
+      { "slash 2"      , { "/2"            , nullptr               }, { command::chord_bass_degree, make_degree(2                       ) } },
+      { "slash 3 flat" , { "/3♭"          , nullptr               }, { command::chord_bass_degree, make_degree(3, false, semitone_flat ) } },
+      { "slash 3"      , { "/3"            , nullptr               }, { command::chord_bass_degree, make_degree(3                       ) } },
+      { "slash 4"      , { "/4"            , nullptr               }, { command::chord_bass_degree, make_degree(4                       ) } },
+      { "slash 5 flat" , { "/5♭"          , nullptr               }, { command::chord_bass_degree, make_degree(5, false, semitone_flat ) } },
+      { "slash 5"      , { "/5"            , nullptr               }, { command::chord_bass_degree, make_degree(5                       ) } },
+      { "slash 6 flat" , { "/6♭"          , nullptr               }, { command::chord_bass_degree, make_degree(6, false, semitone_flat ) } },
+      { "slash 6"      , { "/6"            , nullptr               }, { command::chord_bass_degree, make_degree(6                       ) } },
+      { "slash 7 flat" , { "/7♭"          , nullptr               }, { command::chord_bass_degree, make_degree(7, false, semitone_flat ) } },
+      { "slash 7"      , { "/7"            , nullptr               }, { command::chord_bass_degree, make_degree(7                       ) } },
       { "swap[7]"      , { "〜[ 7 ]"        , nullptr              }, {                                  command::chord_minor_swap, 1, command::chord_modifier, KANTANMusic_Modifier_7    } },
       { "flat swap"    , { "♭〜"           , nullptr              }, { command::chord_semitone, 1, command::chord_minor_swap, 1,                                                     } },
       { "flat swap[7]" , { "♭〜[ 7 ]"      , nullptr              }, { command::chord_semitone, 1, command::chord_minor_swap, 1, command::chord_modifier, KANTANMusic_Modifier_7    } },

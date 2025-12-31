@@ -55,10 +55,10 @@ struct draw_param_t;
 struct rect_t;
 
 struct menu_item_t {
-  constexpr menu_item_t( def::menu_category_t cate, uint8_t seq, uint8_t level, const localize_text_t& title )
-  : _title { title }, _category { cate }, _seq { seq }, _level(level) {}
+  constexpr menu_item_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
+  : _title { title }, _menu_id { menu_id }, _category { cate }, _level(level) {}
   def::menu_category_t getCategory(void) const { return _category; }
-  uint8_t getSequence(void) const { return _seq; }
+  uint16_t getMenuID(void) const { return _menu_id; }
   uint8_t getLevel(void) const { return _level; }
   virtual menu_item_type_t getType(void) const = 0;//{ return menu_item_type_t::mt_unknown; }
   virtual const char* getTitleText(void) const { return _title.get(); }
@@ -103,8 +103,8 @@ protected:
   virtual bool setValue(int value) const { return (getMinValue() <= value) && (value <= getMaxValue()); }
 
   localize_text_t _title;
+  uint16_t _menu_id;    // メニューID (メニュー一覧の中での自身の通し番号)
   def::menu_category_t _category;
-  uint8_t _seq;     // シーケンス番号 (メニュー一覧の中での自身の通し番号)
   uint8_t _level;   // 自身が所属する階層の深さ
 
 };
@@ -119,12 +119,11 @@ struct menu_control_t {
   bool inputNumber(uint8_t number);
   bool inputUpDown(int updown);
 
-  menu_item_ptr getItemByLevel(uint8_t level) { return _menu_array[level ? system_registry.menu_status.getSelectIndex(level-1):0]; }
+  menu_item_ptr getItemByLevel(uint8_t level) { return _menu_array[level ? system_registry->menu_status.getSelectIndex(level-1):0]; }
 
-  // size_t getChildrenSequenceList(uint8_t* result_array, size_t size, uint8_t parent_seq);
-  int getChildrenSequenceList(std::vector<uint16_t>* index_list, uint8_t parent_index);
+  int getChildrenMenuIDList(std::vector<uint16_t>* index_list, uint16_t parent_index);
 
-  menu_item_ptr getItemBySequance(uint8_t sequence_number) { return _menu_array[sequence_number]; }
+  menu_item_ptr getItemByMenuID(uint16_t menu_id) { return _menu_array[menu_id]; }
 
 protected:
   menu_item_ptr_array _menu_array;

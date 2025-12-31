@@ -63,7 +63,7 @@ void task_port_a_t::task_func(task_port_a_t* me)
         device = device_array[++j];
       } while (device != nullptr);
       button_state |= bitmask << (group_index * 8);
-      system_registry.external_input.setPortABitmask8(group_index, button_state >> (group_index * 8));
+      system_registry->external_input.setPortABitmask8(group_index, button_state >> (group_index * 8));
     }
   }
 }

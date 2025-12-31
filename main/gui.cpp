@@ -37,11 +37,29 @@ static constexpr const int32_t main_area_width = disp_width;
 static constexpr const int32_t main_area_height = disp_height - header_height - main_btns_height - sub_btns_height;
 
 static int smooth_move(int dst, int src, int step) {
-  if (dst != src)
-  {
-    src += ((dst - src) * step + (dst < src ? 0 : 64)) >> 6;
+  static constexpr const uint8_t mul_table[] = {
+    22, 31, 38, 44, 50, 54, 59, 63, 67, 71, 74, 77, 81, 84, 87, 90, 92, 95, 98, 100, 103, 105, 108, 110, 112, 114, 117, 119, 121, 123, 125, 127, 129, 131, 133, 135, 137, 138, 140, 142, 144, 146, 147, 149, 151, 152, 154, 156, 157, 159, 161, 162, 164, 165, 167, 168, 170, 171, 173, 174, 176, 177, 179, 180, 181, 183, 184, 186, 187, 188, 190, 191, 192, 194, 195, 196, 198, 199, 200, 201, 203, 204, 205, 206, 208, 209, 210, 211, 212, 214, 215, 216, 217, 218, 220, 221, 222, 223, 224, 225, 226, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255
+  };
+  if (dst != src) {
+    if (step >= (int)(sizeof(mul_table)/sizeof(mul_table[0]))) {
+      src = dst;
+    } else {
+      int diff = abs(dst - src);
+      int mul = mul_table[step];
+      // diff = (2047 + diff * mul) >> 11;
+      diff = (255 + diff * mul) >> 8;
+      src += (dst < src) ? -(diff) : diff;
+    }
   }
   return src;
+/*/
+  if (dst != src && step > 0)
+  {
+    src += ((dst - src) * step + (dst < src ? 0 : 64)) >> 6;
+    // src += ((dst - src) * step + (dst < src ? 0 : 256)) >> 8;
+  }
+  return src;
+//*/
 }
 
 struct rect_t
@@ -135,62 +153,161 @@ static rect_t rect_or(const rect_t &a, const rect_t &b)
 
 struct draw_param_t
 {
-  static constexpr const int max_clip_rect = 23;
-  rect_t clip_rect[max_clip_rect];
+  static constexpr int16_t w_d2 = disp_width / 2;
+  static constexpr int16_t w_d3 = disp_width / 3;
+  static constexpr int16_t w_d4 = disp_width / 4;
+  static constexpr int16_t w_d5 = disp_width / 5;
+  static constexpr int16_t w_d6 = disp_width / 6;
+  static constexpr int16_t h_p = main_area_height / 4;
+  static constexpr int16_t y_0 = header_height;
+  static constexpr int16_t y_1 = y_0 + h_p;
+  static constexpr int16_t y_2 = y_1 + h_p;
+  static constexpr int16_t y_3 = y_2 + h_p;
+  static constexpr int16_t h_s = sub_btns_height / 2;
+  static constexpr int16_t y_s0 = y_0 + main_area_height;
+  static constexpr int16_t y_s1 = y_s0 + h_s;
+  static constexpr int16_t h_m = main_btns_height / 3;
+  static constexpr int16_t y_b0 = disp_height - main_btns_height;
+  static constexpr int16_t y_b1 = y_b0 + h_m;
+  static constexpr int16_t y_b2 = y_b1 + h_m;
+
+  // 部分描画のためのクリップ矩形群
+  // （DMAバッファを小さく抑えつつ描画負荷を軽くするため、メニュー時と通常時で分割テーブルを分ける）
+  // メニューモード時
+  static constexpr rect_t clip_rect_menu[] = {
+// ヘッダ部
+    {        0,   0, w_d4, y_0 }, // 60 x 24 = 1440
+    {     w_d4,   0, w_d4, y_0 },
+    { 2 * w_d4,   0, w_d4, y_0 },
+    { 3 * w_d4,   0, w_d4, y_0 },
+// メニュー部
+    {    0, y_0 + 0 * 7, disp_width, 7 }, // 240 x 7 = 1680
+    {    0, y_0 + 1 * 7, disp_width, 7 },
+    {    0, y_0 + 2 * 7, disp_width, 7 },
+    {    0, y_0 + 3 * 7, disp_width, 7 },
+
+    {    0, y_0 + 4 * 7, disp_width, 7 },
+    {    0, y_0 + 5 * 7, disp_width, 7 },
+    {    0, y_0 + 6 * 7, disp_width, 7 },
+    {    0, y_0 + 7 * 7, disp_width, 7 },
+
+    {    0, y_0 + 8 * 7, disp_width, 7 },
+    {    0, y_0 + 9 * 7, disp_width, 7 },
+    {    0, y_0 +10 * 7, disp_width, 7 },
+    {    0, y_0 +11 * 7, disp_width, 7 },
+
+    {    0, y_0 +12 * 7, disp_width, 7 },
+    {    0, y_0 +13 * 7, disp_width, 7 },
+    {    0, y_0 +14 * 7, disp_width, 7 },
+    {    0, y_0 +15 * 7, disp_width, 7 },
+
+    {    0, y_0 +16 * 7, disp_width, 7 },
+    {    0, y_0 +17 * 7, disp_width, 7 },
+    {    0, y_0 +18 * 7, disp_width, 7 },
+    {    0, y_0 +19 * 7, disp_width, 7 },
+
+    {    0, y_0 +20 * 7, disp_width, 7 },
+    {    0, y_0 +21 * 7, disp_width, 7 },
+    {    0, y_0 +22 * 7, disp_width, 7 },
+    {    0, y_0 +23 * 7, disp_width, 7 },
+
+// サブボタン部
+    { 0 * w_d4, y_s0, w_d4, h_s }, // 60 x 16 = 960
+    { 1 * w_d4, y_s0, w_d4, h_s },
+    { 2 * w_d4, y_s0, w_d4, h_s },
+    { 3 * w_d4, y_s0, w_d4, h_s },
+    { 0 * w_d4, y_s1, w_d4, h_s },
+    { 1 * w_d4, y_s1, w_d4, h_s },
+    { 2 * w_d4, y_s1, w_d4, h_s },
+    { 3 * w_d4, y_s1, w_d4, h_s },
+// メインボタン部
+    { 0       , y_b0, w_d5, h_m }, // 48 x 32 = 1536
+    { 0       , y_b1, w_d5, h_m },
+    { 0       , y_b2, w_d5, h_m },
+    { 1 * w_d5, y_b0, w_d5, h_m },
+    { 1 * w_d5, y_b1, w_d5, h_m },
+    { 1 * w_d5, y_b2, w_d5, h_m },
+    { 2 * w_d5, y_b0, w_d5, h_m },
+    { 2 * w_d5, y_b1, w_d5, h_m },
+    { 2 * w_d5, y_b2, w_d5, h_m },
+    { 3 * w_d5, y_b0, w_d5, h_m },
+    { 3 * w_d5, y_b1, w_d5, h_m },
+    { 3 * w_d5, y_b2, w_d5, h_m },
+    { 4 * w_d5, y_b0, w_d5, h_m },
+    { 4 * w_d5, y_b1, w_d5, h_m },
+    { 4 * w_d5, y_b2, w_d5, h_m },
+  };
+
+  // 通常モード時
+  static constexpr rect_t clip_rect_normal[] = {
+// ヘッダ部
+    {        0,   0, w_d4, y_0 }, // 60 x 24 = 1440
+    {     w_d4,   0, w_d4, y_0 },
+    { 2 * w_d4,   0, w_d4, y_0 },
+    { 3 * w_d4,   0, w_d4, y_0 },
+// 6個のパート
+    {        0, y_0, w_d6, h_p }, // 40 x 42 = 1680
+    {        0, y_1, w_d6, h_p },
+    {        0, y_2, w_d6, h_p },
+    {        0, y_3, w_d6, h_p },
+    { 1 * w_d6, y_0, w_d6, h_p },
+    { 1 * w_d6, y_1, w_d6, h_p },
+    { 1 * w_d6, y_2, w_d6, h_p },
+    { 1 * w_d6, y_3, w_d6, h_p },
+    { 2 * w_d6, y_0, w_d6, h_p },
+    { 2 * w_d6, y_1, w_d6, h_p },
+    { 2 * w_d6, y_2, w_d6, h_p },
+    { 2 * w_d6, y_3, w_d6, h_p },
+    { 3 * w_d6, y_0, w_d6, h_p },
+    { 3 * w_d6, y_1, w_d6, h_p },
+    { 3 * w_d6, y_2, w_d6, h_p },
+    { 3 * w_d6, y_3, w_d6, h_p },
+    { 4 * w_d6, y_0, w_d6, h_p },
+    { 4 * w_d6, y_1, w_d6, h_p },
+    { 4 * w_d6, y_2, w_d6, h_p },
+    { 4 * w_d6, y_3, w_d6, h_p },
+    { 5 * w_d6, y_0, w_d6, h_p },
+    { 5 * w_d6, y_1, w_d6, h_p },
+    { 5 * w_d6, y_2, w_d6, h_p },
+    { 5 * w_d6, y_3, w_d6, h_p },
+
+// サブボタン部
+    { 0 * w_d4, y_s0, w_d4, h_s }, // 60 x 16 = 960
+    { 1 * w_d4, y_s0, w_d4, h_s },
+    { 2 * w_d4, y_s0, w_d4, h_s },
+    { 3 * w_d4, y_s0, w_d4, h_s },
+    { 0 * w_d4, y_s1, w_d4, h_s },
+    { 1 * w_d4, y_s1, w_d4, h_s },
+    { 2 * w_d4, y_s1, w_d4, h_s },
+    { 3 * w_d4, y_s1, w_d4, h_s },
+// メインボタン部
+    { 0       , y_b0, w_d5, h_m }, // 48 x 32 = 1536
+    { 0       , y_b1, w_d5, h_m },
+    { 0       , y_b2, w_d5, h_m },
+    { 1 * w_d5, y_b0, w_d5, h_m },
+    { 1 * w_d5, y_b1, w_d5, h_m },
+    { 1 * w_d5, y_b2, w_d5, h_m },
+    { 2 * w_d5, y_b0, w_d5, h_m },
+    { 2 * w_d5, y_b1, w_d5, h_m },
+    { 2 * w_d5, y_b2, w_d5, h_m },
+    { 3 * w_d5, y_b0, w_d5, h_m },
+    { 3 * w_d5, y_b1, w_d5, h_m },
+    { 3 * w_d5, y_b2, w_d5, h_m },
+    { 4 * w_d5, y_b0, w_d5, h_m },
+    { 4 * w_d5, y_b1, w_d5, h_m },
+    { 4 * w_d5, y_b2, w_d5, h_m },
+  };
+  // static constexpr const int max_clip_rect = 33;
+  static constexpr const int max_clip_rect_normal = sizeof(clip_rect_normal) / sizeof(clip_rect_normal[0]);
+  static constexpr const int max_clip_rect_menu = sizeof(clip_rect_menu) / sizeof(clip_rect_menu[0]);
+  static constexpr const int max_clip_rect = std::max(max_clip_rect_normal, max_clip_rect_menu);
+
   rect_t invalidated_rect[max_clip_rect];
   uint32_t current_msec = 0;
   uint32_t prev_msec = 0;
   uint8_t smooth_step = 0;
   bool hasInvalidated;
-  void resetClipRect(void)
-  {
-    // 描画時の画面分割単位を設定する
-
-    // ※ ここの分割面積を変更する場合は、max_disp_buf_pixels の値も変更すること
-    // max_disp_buf_pixels の値は分割面積のうち最大のものが収まるように設定する
-
-    static constexpr const int part_width = main_area_width / 3;
-    static constexpr const int part_height = main_area_height >> 1;
-    static constexpr const int main_btn_width = 48;
-
-    static constexpr const int y0 = header_height;
-    static constexpr const int y1 = y0 + part_height;
-    static constexpr const int y2 = y1 + part_height;
-    static constexpr const int y3 = y2 + sub_btns_height;
-    static constexpr const int w0 = main_btn_width;
-
-    // ヘッダ部
-    clip_rect[0] = {               0, 0, disp_width>>1, header_height };  // 120 x 24 = 2880
-    clip_rect[1] = { disp_width >> 1, 0, disp_width>>1, header_height };
-
-    auto pw_half = part_width >> 1;
-    // ６個のパート
-    clip_rect[ 2] = {          0, y0, pw_half, part_height }; // 40 x 84 = 3360
-    clip_rect[ 3] = {    pw_half, y0, pw_half, part_height };
-    clip_rect[ 4] = {          0, y1, pw_half, part_height };
-    clip_rect[ 5] = {    pw_half, y1, pw_half, part_height };
-    clip_rect[ 6] = {2 * pw_half, y0, pw_half, part_height };
-    clip_rect[ 7] = {3 * pw_half, y0, pw_half, part_height };
-    clip_rect[ 8] = {2 * pw_half, y1, pw_half, part_height };
-    clip_rect[ 9] = {3 * pw_half, y1, pw_half, part_height };
-    clip_rect[10] = {4 * pw_half, y0, pw_half, part_height };
-    clip_rect[11] = {5 * pw_half, y0, pw_half, part_height };
-    clip_rect[12] = {4 * pw_half, y1, pw_half, part_height };
-    clip_rect[13] = {5 * pw_half, y1, pw_half, part_height };
-
-    // サブボタン部
-    clip_rect[14] = {                0, y2, disp_width >> 2, sub_btns_height }; // 60 x 32 = 1920
-    clip_rect[16] = { disp_width  >> 2, y2, disp_width >> 2, sub_btns_height };
-    clip_rect[19] = { disp_width  >> 1, y2, disp_width >> 2, sub_btns_height };
-    clip_rect[21] = { disp_width*3>> 2, y2, disp_width >> 2, sub_btns_height };
-
-    // メインボタン部
-    clip_rect[15] = { 0 * w0, y3, w0, main_btns_height }; // 48 x 96 = 4608
-    clip_rect[17] = { 1 * w0, y3, w0, main_btns_height };
-    clip_rect[18] = { 2 * w0, y3, w0, main_btns_height };
-    clip_rect[20] = { 3 * w0, y3, w0, main_btns_height };
-    clip_rect[22] = { 4 * w0, y3, w0, main_btns_height };
-  }
+  bool is_menu_mode = false;
   void resetInvalidatedRect(void)
   {
     hasInvalidated = false;
@@ -201,6 +318,8 @@ struct draw_param_t
   void addInvalidatedRect(const rect_t &rect)
   {
     if (rect.empty()) return;
+    auto &clip_rect = is_menu_mode ? clip_rect_menu : clip_rect_normal;
+    auto max_clip_rect = is_menu_mode ? max_clip_rect_menu : max_clip_rect_normal;
     for (int i = 0; i < max_clip_rect; ++i) {
       auto clipped_rect = rect_and(clip_rect[i], rect);
       if (clipped_rect.empty()) continue;
@@ -228,6 +347,63 @@ static uint32_t add_color(uint32_t base_color, uint32_t table_color)
     table_color >>= 8;
   }
   return result;
+}
+
+void image_dark_shift(M5Canvas *canvas, int32_t x, int32_t y, int32_t w, int32_t h, uint8_t shift = 1)
+{
+  auto canvas_width = canvas->width();
+  auto canvas_height = canvas->height();
+  if (x < 0) { w += x; x = 0; }
+  if (y < 0) { h += y; y = 0; }
+  if (w > canvas_width - x) {  w = canvas_width - x; }
+  if (h > canvas_height - y) {  h = canvas_height - y; }
+  if (w <= 0 || h <= 0) return;
+
+  // RGB565 の各色ビットを指定ビット分シフトするためのマスク
+  static constexpr const uint16_t masks[] = {
+    0x7BEF, // shift 1
+    0x39E7, // shift 2
+    0x18E3, // shift 3
+    0x0861, // shift 4
+    0x0020, // shift 5
+  };
+  uint16_t mask = masks[shift - 1];
+
+  auto framebuffer = (m5gfx::swap565_t*)(canvas->getBuffer());
+  framebuffer += x + canvas_width * y;
+  for (int j = 0; j < h; ++j) {
+    auto buf = framebuffer;
+    framebuffer += canvas_width;
+    for (int i = 0; i < w; ++i) {
+      auto raw = __builtin_bswap16(buf[0].raw);
+      raw = ((raw >> shift) & mask);
+      buf[0].raw = __builtin_bswap16(raw);
+      ++buf;
+    }
+  }
+}
+
+void image_color_or(M5Canvas *canvas, int32_t x, int32_t y, int32_t w, int32_t h, uint16_t color)
+{
+  auto canvas_width = canvas->width();
+  auto canvas_height = canvas->height();
+  if (x < 0) { w += x; x = 0; }
+  if (y < 0) { h += y; y = 0; }
+  if (w > canvas_width - x) {  w = canvas_width - x; }
+  if (h > canvas_height - y) {  h = canvas_height - y; }
+  if (w <= 0 || h <= 0) return;
+
+  color = __builtin_bswap16(color);
+  auto framebuffer = (m5gfx::swap565_t*)(canvas->getBuffer());
+  framebuffer += x + canvas_width * y;
+  for (int j = 0; j < h; ++j) {
+    auto buf = framebuffer;
+    framebuffer += canvas_width;
+    for (int i = 0; i < w; ++i) {
+      buf[0].raw |= color;
+      ++buf;
+    }
+  }
 }
 
 struct ui_base_t
@@ -334,6 +510,7 @@ void ui_base_t::draw(draw_param_t* param, M5Canvas* canvas, int32_t offset_x,
 #if defined ( DEBUG_GUI )
   canvas->drawRect(rect.x, rect.y, rect.w, rect.h, rand());
 #endif
+  canvas->clearClipRect();
 }
 
 void ui_base_t::update(draw_param_t* param, int offset_x, int offset_y) {
@@ -370,6 +547,10 @@ struct ui_container_t : public ui_base_t {
     return nullptr;
   }
 
+  void shrink_to_fit(void) {
+    _ui_child.shrink_to_fit();
+  }
+
 protected:
   std::vector<ui_base_t*> _ui_child;
 
@@ -392,9 +573,9 @@ static ui_background_t ui_background;
 struct ui_timer_popup_t : public ui_base_t
 {
 protected:
-  int32_t _remain_time = 0;
   rect_t _show_rect;
   rect_t _hide_rect;
+  int16_t _remain_time = 0;
 public:
   void setShowRect(const rect_t &rect) {
     _show_rect = rect;
@@ -409,15 +590,16 @@ public:
 
   // 時間経過を管理し表示状態を変更する関数
   void procTime(int step) {
-    if (step >= 0) {
+    if (step < 0) {
+      if (_remain_time >= 0) {
+        _remain_time += step;
+        if (_remain_time < 0) {
+          setTargetRect(_hide_rect);
+        }
+      }
+    } else if (step) {
       _remain_time = step;
       setTargetRect(_show_rect);
-    } else
-    if (_remain_time >= 0) {
-      _remain_time += step;
-      if (_remain_time < 0) {
-        setTargetRect(_hide_rect);
-      }
     }
   }
   void close(void) {
@@ -439,7 +621,7 @@ protected:
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     bool updated = false;
-    if (system_registry.popup_notify.getPopupHistory(_history_code, _notify_type, _category))
+    if (system_registry->popup_notify.getPopupHistory(_history_code, _notify_type, _category))
     {
       auto text = def::notify_name_array.at(_notify_type);
       const char* t = text->get();
@@ -480,6 +662,7 @@ public:
     int y = offset_y + (_client_rect.h >> 1);
 // M5_LOGD("x:%d y:%d offset_x:%d offset_y:%d", x, y, offset_x, offset_y);
     canvas->fillRect(offset_x, offset_y, _client_rect.w, _client_rect.h, 0);
+    // image_dark_shift(canvas, offset_x, offset_y, _client_rect.w, _client_rect.h, 2);
     canvas->drawRect(offset_x+2, offset_y+2, _client_rect.w-4, _client_rect.h-4, 0xFFFFFFu);
 
     canvas->setTextDatum(m5gfx::datum_t::middle_center);
@@ -502,7 +685,7 @@ public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     bool updated = _client_rect != _target_rect;
     ui_base_t::update_impl(param, offset_x, offset_y);
-    def::qrcode_type_t qr_type = system_registry.popup_qr.getQRCodeType();
+    def::qrcode_type_t qr_type = system_registry->popup_qr.getQRCodeType();
     if (_qr_type != qr_type) {
       if (!_target_rect.empty()) {
         int x = disp_width >> 1;
@@ -572,7 +755,7 @@ protected:
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     ui_base_t::update_impl(param, offset_x, offset_y);
-    auto volume = system_registry.user_setting.getMasterVolume();
+    auto volume = system_registry->user_setting.getMasterVolume();
     if (_volume != volume) {
       _volume = volume;
       param->addInvalidatedRect({offset_x, offset_y, _client_rect.w, _client_rect.h});
@@ -604,8 +787,8 @@ protected:
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     ui_base_t::update_impl(param, offset_x, offset_y);
-    auto battery = system_registry.runtime_info.getBatteryLevel();
-    auto is_charging = system_registry.runtime_info.getBatteryCharging();
+    auto battery = system_registry->runtime_info.getBatteryLevel();
+    auto is_charging = system_registry->runtime_info.getBatteryCharging();
 
     if (_is_charging != is_charging || _battery != battery) {
       _is_charging = is_charging;
@@ -640,7 +823,7 @@ protected:
     def::command::wifi_sta_info_t _wifi_status = (def::command::wifi_sta_info_t)0xFF;
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
-    auto wifi_status = system_registry.runtime_info.getWiFiSTAInfo();
+    auto wifi_status = system_registry->runtime_info.getWiFiSTAInfo();
 
     if (_wifi_status != wifi_status) {
       _wifi_status = wifi_status;
@@ -717,7 +900,7 @@ protected:
     def::command::wifi_ap_info_t _wifi_status = (def::command::wifi_ap_info_t)0xFF;
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
-    auto wifi_status = system_registry.runtime_info.getWiFiAPInfo();
+    auto wifi_status = system_registry->runtime_info.getWiFiAPInfo();
     if (_wifi_status != wifi_status) {
       _wifi_status = wifi_status;
       int w = (wifi_status == def::command::wifi_ap_info_t::wai_off)
@@ -812,9 +995,9 @@ public:
     bool updated = false;
 
     def::command::midiport_info_t info[3];
-    info[0] = system_registry.runtime_info.getMidiPortStatePC();
-    info[1] = system_registry.runtime_info.getMidiPortStateBLE();
-    info[2] = system_registry.runtime_info.getMidiPortStateUSB();
+    info[0] = system_registry->runtime_info.getMidiPortStatePC();
+    info[1] = system_registry->runtime_info.getMidiPortStateBLE();
+    info[2] = system_registry->runtime_info.getMidiPortStateUSB();
 
     bool visible = false;
     for (int i = 0; i < 3; ++i) {
@@ -846,14 +1029,14 @@ public:
       }
     }
     uint8_t tx_couunt[3] = {
-      system_registry.runtime_info.getMidiTxCountPC(),
-      system_registry.runtime_info.getMidiTxCountBLE(),
-      system_registry.runtime_info.getMidiTxCountUSB(),
+      system_registry->runtime_info.getMidiTxCountPC(),
+      system_registry->runtime_info.getMidiTxCountBLE(),
+      system_registry->runtime_info.getMidiTxCountUSB(),
     };
     uint8_t rx_couunt[3] = {
-      system_registry.runtime_info.getMidiRxCountPC(),
-      system_registry.runtime_info.getMidiRxCountBLE(),
-      system_registry.runtime_info.getMidiRxCountUSB(),
+      system_registry->runtime_info.getMidiRxCountPC(),
+      system_registry->runtime_info.getMidiRxCountBLE(),
+      system_registry->runtime_info.getMidiRxCountUSB(),
     };
 
     // 通信カウンタのドット移動増分を求める
@@ -913,16 +1096,16 @@ public:
 };
 static ui_midiport_info_t ui_midiport_info;
 
-struct ui_icon_sequance_play_t : public ui_base_t
+struct ui_icon_auto_play_t : public ui_base_t
 {
 protected:
-  def::play::auto_play_mode_t _autoplay_style;
+  def::play::auto_play_state_t _autoplay_state;
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
-    auto mode = system_registry.runtime_info.getChordAutoplayState();
-    if (_autoplay_style != mode) {
-      _autoplay_style = mode;
-      if (mode == def::play::auto_play_mode_t::auto_play_none) {
+    auto mode = system_registry->runtime_info.getGuiAutoplayState();
+    if (_autoplay_state != mode) {
+      _autoplay_state = mode;
+      if (mode == def::play::auto_play_state_t::auto_play_none) {
         _target_rect.w = 0;
       } else {
         _target_rect.w = 11;
@@ -943,20 +1126,19 @@ public:
 
     x = x + (w >> 1);
     y = y + (h >> 1);
-    switch (_autoplay_style) {
+    switch (_autoplay_state) {
     default:
       canvas->fillTriangle(x - 5, y - 5, x - 5, y + 5, x + 5, y, TFT_GREEN);
       break;
-    case def::play::auto_play_mode_t::auto_play_waiting:
+    case def::play::auto_play_state_t::auto_play_none:
+    case def::play::auto_play_state_t::auto_play_waiting:
       canvas->fillRect(x - 5, y - 5, 11, 11, TFT_DARKGRAY);
       break;
-    case def::play::auto_play_mode_t::auto_play_paused:
+    case def::play::auto_play_state_t::auto_play_paused:
       canvas->fillRect(x - 5, y - 5,  3, 11, TFT_DARKGRAY);
       canvas->fillRect(x + 5, y - 5, -3, 11, TFT_DARKGRAY);
       break;
-    case def::play::auto_play_mode_t::auto_play_none:
-      break;
-    case def::play::auto_play_mode_t::auto_play_beatmode:
+    case def::play::auto_play_state_t::auto_play_beatmode:
       canvas->drawFastHLine(x - 4, y,  2, TFT_YELLOW);
       canvas->drawFastHLine(x + 3, y,  2, TFT_YELLOW);
       canvas->drawLine(x - 3, y    , x - 1, y - 6, TFT_YELLOW);
@@ -966,7 +1148,7 @@ public:
     }
   }
 };
-static ui_icon_sequance_play_t ui_icon_sequance_play;
+static ui_icon_auto_play_t ui_icon_auto_play;
 
 struct ui_song_modified_t : public ui_base_t
 {
@@ -974,7 +1156,7 @@ protected:
   bool _modified = false;
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
-    auto modified = system_registry.runtime_info.getSongModified();
+    auto modified = system_registry->runtime_info.getSongModified();
     if (_modified != modified) {
       _modified = modified;
       if (!modified) {
@@ -1017,8 +1199,8 @@ protected:
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     ui_base_t::update_impl(param, offset_x, offset_y);
-    auto master_key = system_registry.runtime_info.getMasterKey();
-    int slot_key = system_registry.current_slot->slot_info.getKeyOffset();
+    auto master_key = system_registry->runtime_info.getMasterKey();
+    int slot_key = system_registry->current_slot->slot_info.getKeyOffset();
     if (_master_key != master_key || _slot_key != slot_key) {
       _master_key = master_key;
       _slot_key = slot_key;
@@ -1055,10 +1237,10 @@ public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     bool updated = false;
 
-    if (system_registry.runtime_info.getCurrentMode() == def::playmode::menu_mode) {
+    if (system_registry->runtime_info.getGuiMode() == def::gui_mode_t::gm_menu) {
       close();
     } else {
-      auto master_key = system_registry.runtime_info.getMasterKey();
+      auto master_key = system_registry->runtime_info.getMasterKey();
       if (_master_key != master_key) {
         updated = true;
         _master_key = master_key;
@@ -1136,7 +1318,7 @@ struct ui_main_buttons_t : public ui_base_t
     uint32_t _text_color[def::hw::max_main_button] = { 0, };
     uint8_t _text_width[def::hw::max_main_button] = { 0, };
     uint32_t _btn_bitmask = 0x00;
-    uint8_t _play_mode = 0x80;
+    def::gui_mode_t _gui_mode = def::gui_mode_t::gm_unknown;
     uint8_t _master_key = 0x80;
     uint8_t _minor_swap = 0x80;
     int8_t _semitone = 0x80;
@@ -1150,17 +1332,17 @@ struct ui_main_buttons_t : public ui_base_t
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     ui_base_t::update_impl(param, offset_x, offset_y);
     bool flg_update = false;
-    uint8_t play_mode = system_registry.runtime_info.getCurrentMode();
-    uint8_t master_key = system_registry.runtime_info.getMasterKey();
-    uint8_t minor_swap = system_registry.chord_play.getChordMinorSwap();
-    int8_t semitone = system_registry.chord_play.getChordSemitone();
-    uint8_t modifier = system_registry.chord_play.getChordModifier();
-    int8_t offset_key = system_registry.current_slot->slot_info.getKeyOffset();
+    def::gui_mode_t gui_mode = system_registry->runtime_info.getGuiMode();
+    uint8_t master_key = system_registry->runtime_info.getMasterKey();
+    uint8_t minor_swap = system_registry->chord_play.getChordMinorSwap();
+    int8_t semitone = system_registry->chord_play.getChordSemitoneShift();
+    uint8_t modifier = system_registry->chord_play.getChordModifier();
+    int8_t offset_key = system_registry->current_slot->slot_info.getKeyOffset();
 
-    uint8_t note_scale = system_registry.current_slot->slot_info.getNoteScale();
-    auto mapping_history_code = system_registry.command_mapping_current.getHistoryCode();
-    auto working_command_change_count = system_registry.working_command.getChangeCounter();
-    if (_play_mode != play_mode
+    uint8_t note_scale = system_registry->runtime_info.getNoteScale();
+    auto mapping_history_code = system_registry->command_mapping_current.getHistoryCode();
+    auto working_command_change_count = system_registry->working_command.getChangeCounter();
+    if (_gui_mode != gui_mode
      || _master_key != master_key
      || _minor_swap != minor_swap
      || _semitone != semitone
@@ -1169,7 +1351,7 @@ struct ui_main_buttons_t : public ui_base_t
      || _note_scale != note_scale
      || _mapping_history_code != mapping_history_code
      ) {
-      _play_mode = play_mode;
+      _gui_mode = gui_mode;
       _master_key = master_key;
       _minor_swap = minor_swap;
       _semitone = semitone;
@@ -1181,14 +1363,14 @@ struct ui_main_buttons_t : public ui_base_t
       param->addInvalidatedRect({offset_x, offset_y, _client_rect.w, _client_rect.h});
     }
     uint32_t prev_bitmask = _btn_bitmask;
-    _btn_bitmask = 0x7FFF & system_registry.internal_input.getButtonBitmask();
+    _btn_bitmask = 0x7FFF & system_registry->internal_input.getButtonBitmask();
     uint32_t xor_bitmask = prev_bitmask ^ _btn_bitmask;
     if (xor_bitmask) {
       flg_update = true;
     }
     _gfx->setTextSize(1, 2);
     for (int i = 0; i < def::hw::max_main_button; ++i) {
-      uint32_t color = system_registry.rgbled_control.getColor(i);
+      uint32_t color = system_registry->rgbled_control.getColor(i);
       if (_btns_color[i] != color || xor_bitmask & (1 << i)) {
         _btns_color[i] = color;
         param->addInvalidatedRect(getButtonRect(i, offset_x, offset_y));
@@ -1205,22 +1387,22 @@ struct ui_main_buttons_t : public ui_base_t
         _text_upper[i] = "";
         _text_lower[i] = "";
 
-        auto cp_pair = system_registry.command_mapping_current.getCommandParamArray(i);
+        auto cp_pair = system_registry->command_mapping_current.getCommandParamArray(i);
         def::command::command_param_t command_param;
         int pindex = 0;
         bool hit = true;
         for (int j = 0; cp_pair.array[j].command != def::command::none; ++j) {
           pindex = j;
           command_param = cp_pair.array[j];
-          hit &= system_registry.working_command.check(command_param);
+          hit &= system_registry->working_command.check(command_param);
         }
         auto command = command_param.command;
-        uint32_t text_color = system_registry.color_setting.getButtonPressedTextColor();
+        uint32_t text_color = system_registry->color_setting.getButtonPressedTextColor();
         if ((_btn_bitmask & (1 << i)) == 0) {
           if (hit) {
-            text_color = system_registry.color_setting.getButtonWorkingTextColor();
+            text_color = system_registry->color_setting.getButtonWorkingTextColor();
           } else {
-            text_color = system_registry.color_setting.getButtonDefaultTextColor();
+            text_color = system_registry->color_setting.getButtonDefaultTextColor();
           }
         }
         _text_color[i] = text_color;
@@ -1242,6 +1424,7 @@ struct ui_main_buttons_t : public ui_base_t
             break;
           }
         }
+        // 単発コマンドの場合の表示
         if (pindex == 0) {
           switch (command) {
           default:
@@ -1250,7 +1433,7 @@ struct ui_main_buttons_t : public ui_base_t
           case def::command::drum_button:
             { // ドラムモードボタンの場合の表示名処理
               uint8_t drum_index = command_param.param - 1;
-              uint8_t note = system_registry.drum_mapping.get8(drum_index);
+              uint8_t note = system_registry->drum_mapping.get8(drum_index);
               name = def::midi::drum_name_tbl[note];
             }
             break;
@@ -1276,12 +1459,12 @@ struct ui_main_buttons_t : public ui_base_t
               // 7とM7の同時押し時に6に表示を変換する
               auto table = def::command::command_name_table[command];
               if (command_param.param == KANTANMusic_Modifier_7) {
-                if (system_registry.working_command.check( { def::command::chord_modifier, KANTANMusic_Modifier_M7 } )) {
+                if (system_registry->working_command.check( { def::command::chord_modifier, KANTANMusic_Modifier_M7 } )) {
                   name = table[KANTANMusic_Modifier_6];
                 }
               }
               if (command_param.param == KANTANMusic_Modifier_M7) {
-                if (system_registry.working_command.check( { def::command::chord_modifier, KANTANMusic_Modifier_7 } )) {
+                if (system_registry->working_command.check( { def::command::chord_modifier, KANTANMusic_Modifier_7 } )) {
                   name = table[KANTANMusic_Modifier_6];
                 }
               }
@@ -1291,50 +1474,53 @@ struct ui_main_buttons_t : public ui_base_t
 
           case def::command::chord_degree:
             {
-              // 各キーに対して画面の表示をフラットに統一するかシャープに統一するかの分岐テーブル (0=flat / 1=sharp)
-              static constexpr const uint8_t note_flat_sharp_tbl[12] =
-              { 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, };
+              auto degree_param = (degree_param_t)command_param.param;
+              int degree = degree_param.getDegree();
+              if (degree_param.raw == degree) {
+                // 各キーに対して画面の表示をフラットに統一するかシャープに統一するかの分岐テーブル (0=flat / 1=sharp)
+                static constexpr const uint8_t note_flat_sharp_tbl[12] =
+                { 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, };
+  
+                // 各演奏ボタンに対してマイナー符号を付与するか分岐 (0=メジャー / 1=マイナー)
+                static constexpr const uint8_t button_minor_tbl[7] =
+                { 0, 1, 1, 0, 0, 1, 1, };
 
-              // 各演奏ボタンに対してマイナー符号を付与するか分岐 (0=メジャー / 1=マイナー)
-              static constexpr const uint8_t button_minor_tbl[7] =
-              { 0, 1, 1, 0, 0, 1, 1, };
-
-              KANTANMusic_GetMidiNoteNumberOptions options;
-              KANTANMusic_GetMidiNoteNumber_SetDefaultOptions(&options);
-
-              options.minor_swap = _minor_swap;
-              options.semitone_shift = _semitone;
-
-              uint8_t note = KANTANMusic_GetMidiNoteNumber
-                ( 1
-                , command_param.param
-                , slot_key
-                , &options
-                );
-              note %= 12;
-              bool is_minor = false;
-              // 以下の3つの修飾子の場合はメジャー・マイナーの概念がないのでマイナー表示をしない
-              if (_modifier == KANTANMusic_Modifier_dim
-              || _modifier == KANTANMusic_Modifier_sus4
-              || _modifier == KANTANMusic_Modifier_aug) {
-                is_minor = false;
+                KANTANMusic_GetMidiNoteNumberOptions options;
+                KANTANMusic_GetMidiNoteNumber_SetDefaultOptions(&options);
+                options.minor_swap = _minor_swap | degree_param.getMinorSwap();
+                int ss = _semitone + degree_param.getSemitoneShift();
+                options.semitone_shift = ss < 0 ? -1 : (ss == 0 ? 0 : 1);
+                uint8_t note = KANTANMusic_GetMidiNoteNumber
+                  ( 1
+                  , degree
+                  , slot_key
+                  , &options
+                  );
+                note %= 12;
+                bool is_minor = false;
+                // 以下の3つの修飾子の場合はメジャー・マイナーの概念がないのでマイナー表示をしない
+                if (_modifier == KANTANMusic_Modifier_dim
+                || _modifier == KANTANMusic_Modifier_sus4
+                || _modifier == KANTANMusic_Modifier_aug) {
+                  is_minor = false;
+                }
+                else
+                if (_semitone == 0) {
+                  is_minor = button_minor_tbl[degree - 1];
+                  if (_minor_swap) { is_minor = !is_minor; }
+                }
+  
+                auto notename = def::app::note_name_table[note];
+                /// 12個の音階に対して半音部分を♭に置き換えるか判定処理
+                if (notename[1] != 0x00) {
+                  bool sharp = note_flat_sharp_tbl[_master_key];
+                  notename = def::app::note_name_table[note + (sharp ? -1 : 1)];
+                  _text_upper[i] = sharp ? "♯" : "♭";
+                }
+                _text_lower[i] = (is_minor) ? "m" : " ";
+                snprintf(_text[i], sizeof(_text[i]), "%d %s", degree, notename);
+                name = nullptr;
               }
-              else
-              if (_semitone == 0) {
-                is_minor = button_minor_tbl[command_param.param - 1];
-                if (_minor_swap) { is_minor = !is_minor; }
-              }
-
-              auto notename = def::app::note_name_table[note];
-              /// 12個の音階に対して半音部分を♭に置き換えるか判定処理
-              if (notename[1] != 0x00) {
-                bool sharp = note_flat_sharp_tbl[_master_key];
-                notename = def::app::note_name_table[note + (sharp ? -1 : 1)];
-                _text_upper[i] = sharp ? "♯" : "♭";
-              }
-              _text_lower[i] = (is_minor) ? "m" : " ";
-              snprintf(_text[i], sizeof(_text[i]), "%d %s", command_param.param, notename);
-              name = nullptr;
             }
             break;
           }
@@ -1479,27 +1665,27 @@ struct ui_sub_buttons_t : public ui_base_t
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     ui_base_t::update_impl(param, offset_x, offset_y);
     bool flg_update = false;
-    auto history_code = system_registry.sub_button.getHistoryCode();
+    auto history_code = system_registry->sub_button.getHistoryCode();
     if (_sub_button_history_code != history_code
      ) {
       _sub_button_history_code = history_code;
       flg_update = true;
     }
-    // uint32_t working_command_counter = system_registry.working_command.getChangeCounter();
+    // uint32_t working_command_counter = system_registry->working_command.getChangeCounter();
     // if (_working_command_change_count != working_command_counter) {
     //   _working_command_change_count = working_command_counter;
     //   flg_update = true;
     // }
 
     uint32_t prev_bitmask = _btn_bitmask;
-    _btn_bitmask = system_registry.internal_input.getButtonBitmask() >> def::hw::max_main_button;
+    _btn_bitmask = system_registry->internal_input.getButtonBitmask() >> def::hw::max_main_button;
     uint32_t xor_bitmask = prev_bitmask ^ _btn_bitmask;
     if (xor_bitmask) {
       flg_update = true;
     }
     for (int i = 0; i < max_button; ++i) {
-      // uint32_t color = system_registry.rgbled_control.getColor(i + def::hw::max_main_button);
-      uint32_t color = system_registry.sub_button.getSubButtonColor(i);
+      // uint32_t color = system_registry->rgbled_control.getColor(i + def::hw::max_main_button);
+      uint32_t color = system_registry->sub_button.getSubButtonColor(i);
       if (_btns_color[i] != color || xor_bitmask & (1 << i)) {
         _btns_color[i] = color;
         param->addInvalidatedRect(getButtonRect(i, offset_x, offset_y));
@@ -1508,23 +1694,23 @@ struct ui_sub_buttons_t : public ui_base_t
     if (flg_update) {
       param->addInvalidatedRect({offset_x, offset_y, _client_rect.w, _client_rect.h});
       for (int i = 0; i < max_button; ++i) {
-        _text_color[i] = system_registry.color_setting.getButtonPressedTextColor();
+        _text_color[i] = system_registry->color_setting.getButtonPressedTextColor();
         _text[i][0] = 0;
 
-        auto pair = system_registry.sub_button.getCommandParamArray(i);
+        auto pair = system_registry->sub_button.getCommandParamArray(i);
         auto command_param = pair.array[0];
 
-        bool sub_button_swap = system_registry.runtime_info.getSubButtonSwap();
+        bool sub_button_swap = system_registry->runtime_info.getSubButtonSwap();
         bool is_pressed = _btn_bitmask & (1 << (i % def::hw::max_sub_button));
         if (!is_pressed) {
-          uint32_t color = system_registry.color_setting.getButtonDefaultTextColor();
+          uint32_t color = system_registry->color_setting.getButtonDefaultTextColor();
 
           if (sub_button_swap == (bool)(i < def::hw::max_sub_button)) {
             color = (color >> 1) & 0x7F7F7F;
           }
 
-          if (system_registry.working_command.check(command_param)) {
-            color = system_registry.color_setting.getButtonWorkingTextColor();
+          if (system_registry->working_command.check(command_param)) {
+            color = system_registry->color_setting.getButtonWorkingTextColor();
           }
           _text_color[i] = color;
         }
@@ -1536,7 +1722,7 @@ struct ui_sub_buttons_t : public ui_base_t
         case def::command::command_t::sub_button:
           {
             uint8_t sub_button_index = param - 1;
-            command_raw = (def::command::command_t)system_registry.sub_button.getCommandParamArray(sub_button_index);
+            command_raw = (def::command::command_t)system_registry->sub_button.getCommandParamArray(sub_button_index);
             command = def::command::trimFlag(command_raw);
             param = def::command::getParam(command_raw);
             break;
@@ -1625,7 +1811,7 @@ protected:
   registry_t::history_code_t _arpeggio_history_code;
   uint8_t _slot_index;
   uint8_t _hit_effect_index;
-  bool _isEnabled;
+  bool _isEnabled; // パートが有効かどうか
   bool _isEmpty;   // ベロシティパターンが空欄かどうか
   bool _isDetailMode;
   bool _need_draw = true;
@@ -1638,14 +1824,14 @@ public:
   static constexpr const uint8_t icon_height = 64;
 
   void update_inner(draw_param_t *param, int offset_x, int offset_y) {
-    auto part = &system_registry.current_slot->chord_part[_part_index];
+    auto part = &system_registry->current_slot->chord_part[_part_index];
     auto partinfo = &part->part_info;
     // auto partinfo = &param->multipart->channel_info_list[part_index];
 
     // partinfoに変更があれば再描画対象とする
     auto partinfo_history_code = partinfo->getHistoryCode();
     auto arpeggio_history_code = part->arpeggio.getHistoryCode();
-    auto slot_index = system_registry.runtime_info.getPlaySlot();
+    auto slot_index = system_registry->runtime_info.getPlaySlot();
     bool flg_update = (_partinfo_history_code != partinfo_history_code
                     || _arpeggio_history_code != arpeggio_history_code
                    || _slot_index != slot_index);
@@ -1653,10 +1839,10 @@ public:
       _partinfo_history_code = partinfo_history_code;
       _arpeggio_history_code = arpeggio_history_code;
       _slot_index = slot_index;
-      _isEmpty = system_registry.current_slot->chord_part[_part_index].arpeggio.isEmpty();
+      _isEmpty = system_registry->current_slot->chord_part[_part_index].arpeggio.isEmpty();
     }
 
-    int highlight_target = system_registry.chord_play.getPartStep(_part_index);
+    int highlight_target = system_registry->chord_play.getPartStep(_part_index);
     if (highlight_target < 0) { highlight_target = 0; }
     highlight_target <<= 8;
     if (x_highlight_256 != highlight_target) {
@@ -1693,27 +1879,36 @@ public:
       flg_update = true;
     }
     _backcolor = (isEnabled)
-                ? system_registry.color_setting.getEnablePartColor()
-                : system_registry.color_setting.getDisablePartColor();
-    auto color = system_registry.color_setting.getArpeggioNoteForeColor();
+                ? system_registry->color_setting.getEnablePartColor()
+                : system_registry->color_setting.getDisablePartColor();
+    auto color = system_registry->color_setting.getArpeggioNoteForeColor();
     // auto color = param->color_set->arpeggio_note_fore;
     if (!isEnabled) { color = (color >> 1) & 0x7F7F7Fu; }
 
+    auto effect_remain = _effect_remain;
     if (_isDetailMode) {
-      _effect_remain = 0;
+      effect_remain = 0;
     } else {
-      auto hit_effect_index = system_registry.runtime_info.getPartEffect(_part_index);
+      auto hit_effect_index = system_registry->runtime_info.getPartEffect(_part_index);
       if (_hit_effect_index != hit_effect_index) {
         _hit_effect_index = hit_effect_index;
-        _effect_remain = 127;
+        if (effect_remain == 0) {
+          flg_update = true;
+        }
+        effect_remain = 127;
       }
-      if (_effect_remain) {
-        _effect_remain -= param->smooth_step;
-        if (_effect_remain < 0) { _effect_remain = 0; }
-        color = add_color(color, (_effect_remain * 0x010100u) | (uint8_t)(-_effect_remain));
-        flg_update = true;
+      if (effect_remain) {
+        effect_remain -= param->smooth_step;
+        if (effect_remain <= 0) {
+          effect_remain = 0;
+          flg_update = true;
+        }
+      }
+      if (flg_update) {
+        color = add_color(color, (effect_remain * 0x010100u) | (uint8_t)(-effect_remain));
       }
     }
+    _effect_remain = effect_remain;
     _color_hit = color;
 
     if (flg_update) {
@@ -1722,9 +1917,11 @@ public:
   }
 
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
-    _isDetailMode = system_registry.user_setting.getGuiDetailMode();
-    if (system_registry.runtime_info.getPlayMode() == def::playmode::chord_mode) {
-      ui_base_t::update_impl(param, offset_x, offset_y);
+    ui_base_t::update_impl(param, offset_x, offset_y);
+    if (_parent->getClientRect().empty()) { return; }
+    if (_need_draw == false) { return; }
+    if (system_registry->runtime_info.getGuiMode() != def::gui_mode_t::gm_part_edit) {
+      _isDetailMode = system_registry->user_setting.getGuiDetailMode();
       update_inner(param, offset_x, offset_y);
     }
   }
@@ -1732,7 +1929,7 @@ public:
   void fill_background(draw_param_t *param, M5Canvas *canvas, int32_t offset_x,
                           int32_t offset_y, const rect_t *clip_rect)
   {
-    auto partinfo = &system_registry.current_slot->chord_part[_part_index].part_info;
+    auto partinfo = &system_registry->current_slot->chord_part[_part_index].part_info;
     // auto partinfo = &param->multipart->channel_info_list[part_index];
     bool isEnabled = _isEnabled;
     canvas->setColor(_backcolor);
@@ -1744,6 +1941,9 @@ public:
     canvas->setColor(0x000033u);
     canvas->writeFastHLine(offset_x, offset_y+_client_rect.h-1, _client_rect.w-1);
     canvas->writeFastVLine(offset_x+_client_rect.w-1, offset_y+1, _client_rect.h-2);
+
+    int y = offset_y + getY((7 << 8) + 128)-2;
+    if (y + 16 > clip_rect->top() && y < clip_rect->bottom())
     {/// 楽器名の表示
       auto name = def::midi::program_name_table.at(partinfo->getTone())->get();
       // auto name = draw_param_t::program_name_tbl[partinfo->program_number];
@@ -1755,17 +1955,14 @@ public:
       canvas->setTextSize(fx, fy);
       canvas->setTextDatum(m5gfx::textdatum_t::top_center);
       canvas->setTextColor(isEnabled ? 0xFFFFFFu : 0x7F7F7Fu);
-      {
-        int y = offset_y + getY((7 << 8) + 128)-2;
-        canvas->drawString(name, offset_x + 1 + (_client_rect.w >> 1), y);
-      }
+      canvas->drawString(name, offset_x + 1 + (_client_rect.w >> 1), y);
     }
   }
 
   void draw_easymode(draw_param_t *param, M5Canvas *canvas, int32_t offset_x,
                           int32_t offset_y, const rect_t *clip_rect)
   {
-    auto partinfo = &system_registry.current_slot->chord_part[_part_index].part_info;
+    auto partinfo = &system_registry->current_slot->chord_part[_part_index].part_info;
     // auto partinfo = &param->multipart->channel_info_list[part_index];
     int x = offset_x + ((_client_rect.w - 64) >> 1);
     int y = offset_y + ((_client_rect.h - 64) >> 1) - getY(128);
@@ -1800,33 +1997,35 @@ public:
   void draw_normalmode(draw_param_t *param, M5Canvas *canvas, int32_t offset_x,
                           int32_t offset_y, const rect_t *clip_rect)
   {
-    auto partinfo = &system_registry.current_slot->chord_part[_part_index].part_info;
+    auto partinfo = &system_registry->current_slot->chord_part[_part_index].part_info;
     // auto partinfo = &param->multipart->channel_info_list[part_index];
 
-    bool clear_confirm = system_registry.chord_play.getConfirm_AllClear();
+    bool clear_confirm = system_registry->chord_play.getConfirm_AllClear();
 
     bool isEnabled = partinfo->getEnabled();
 
     int r = (std::min(_client_rect.w , _client_rect.h) + 12) / 24;
     { // 背景ドット描画
-      canvas->setColor(system_registry.color_setting.getArpeggioNoteBackColor());
+      canvas->setColor(system_registry->color_setting.getArpeggioNoteBackColor());
       // canvas->setColor(param->color_set->arpeggio_note_back);
+      const int dr = r >> 1;
       for (int j = 0; j < def::app::max_arpeggio_step; j += 2)
       // for (int j = 0; j < arpeggio_step_number_max; j += 2)
       {
-        int x = getX(j << 8);
-        if (x < 0) { continue; }
-        if (x > _client_rect.w) { break; }
-        x += offset_x;
+        int x = offset_x + getX(j << 8);
+        if (x+dr < clip_rect->left()) { continue; }
+        if (x-dr > clip_rect->right()) { break; }
         for (int i = 7; i > 0; --i) {
           int y = offset_y + getY(i << 8);
-          canvas->fillCircle(x, y, r >> 1);
+          if (y-dr > clip_rect->bottom()) { continue; }
+          if (y+dr < clip_rect->top()) { break; }
+          canvas->fillCircle(x, y, dr);
         }
       }
     }
 
     {
-      auto color = system_registry.color_setting.getArpeggioStepColor();
+      auto color = system_registry->color_setting.getArpeggioStepColor();
       if (!isEnabled) { color = (color >> 1) & 0x7F7F7Fu; }
       auto rect = getHighlightRect(offset_x, offset_y);
       canvas->fillRect(rect.x, rect.y, rect.w, rect.h, color);
@@ -1841,6 +2040,8 @@ public:
     if (je >= def::app::max_arpeggio_step) { je = def::app::max_arpeggio_step - 1; }
     for (; j <= je; ++j) {
       int x = getX(j << 8) + offset_x;
+      if (x + r < clip_rect->left()) { continue; }
+      if (x - r > clip_rect->right()) { break; }
 
       {
         int y = offset_y + getY(0);
@@ -1870,14 +2071,14 @@ public:
         // canvas->drawNumber(j+1, x+4, y+1);
       }
 
-      bool highlight = (j == system_registry.chord_play.getPartStep(_part_index));
+      bool highlight = (j == system_registry->chord_play.getPartStep(_part_index));
       // bool highlight = (j == partinfo->current_step);
       int lighting = (isEnabled ? 1 : 0) + (highlight ? 0 : -1);
 
       if (!partinfo->isDrumPart())
       {
         int y = offset_y + getY(7 << 8);
-        auto style = system_registry.current_slot->chord_part[_part_index].arpeggio.getStyle(j);
+        auto style = system_registry->current_slot->chord_part[_part_index].arpeggio.getStyle(j);
         // auto style = partinfo->arpeggio_pattern.step[j].arpeggio_style;
         static constexpr const uint32_t style_color_tbl[] = {
           0x339933u,  // arpeggio_pattern_t::arpeggio_style_t::same_time
@@ -1916,8 +2117,8 @@ public:
         default: break;
         }
       }
-      uint32_t fore_color = system_registry.color_setting.getArpeggioNoteForeColor();
-      uint32_t back_color = system_registry.color_setting.getArpeggioNoteBackColor();
+      uint32_t fore_color = system_registry->color_setting.getArpeggioNoteForeColor();
+      uint32_t back_color = system_registry->color_setting.getArpeggioNoteBackColor();
       // uint32_t fore_color = param->color_set->arpeggio_note_fore;
       // uint32_t back_color = param->color_set->arpeggio_note_back;
       if (lighting) {
@@ -1928,10 +2129,13 @@ public:
       // auto step = &(partinfo->arpeggio_pattern.step[j]);
       canvas->setColor(fore_color);
       for (int i = 5 + partinfo->isDrumPart(); i >= 0; --i) {
-        auto v = system_registry.current_slot->chord_part[_part_index].arpeggio.getVelocity(j, i);
-        // auto v = step->velocity[i];
+        int y = offset_y + getY((i + 1) << 8);
+
+        if (y - r > clip_rect->bottom()) { continue; }
+        if (y + r < clip_rect->top()) { break; }
+
+        auto v = system_registry->current_slot->chord_part[_part_index].arpeggio.getVelocity(j, i);
         if (v) {
-          int y = offset_y + getY((i + 1) << 8);
           if (v < 0) {
             if (!clear_confirm) {
               canvas->fillRect(x - (r >> 1), y - (r >> 1), r, r, 0x999999u);
@@ -1995,6 +2199,7 @@ protected:
 static ui_partinfo_t ui_partinfo_list[def::app::max_chord_part];
 
 static void setPartInfoNeedDraw(bool need_draw) {
+M5_LOGD("setPartInfoNeedDraw(%d)\n", need_draw);
   for (int i = 0; i < def::app::max_chord_part; ++i) {
     ui_partinfo_list[i].setNeedDraw(need_draw);
   }
@@ -2027,17 +2232,20 @@ protected:
   bool _is_enabled = false;
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
+    if (_parent->getClientRect().empty()) { return; }
     bool visible = !_client_rect.empty();
     bool moving = _client_rect != _target_rect;
 
     ui_base_t::update_impl(param, offset_x, offset_y);
     update_inner(param, offset_x, offset_y);
     bool flg_update = false;
-    auto mode = system_registry.runtime_info.getPlayMode();
-    auto target_index = system_registry.chord_play.getEditTargetPart();
+
+    const bool is_partedit = system_registry->runtime_info.getGuiFlag_PartEdit();
+
+    auto target_index = system_registry->chord_play.getEditTargetPart();
 
     if (!moving) {
-      if (!visible && mode == def::playmode::chord_edit_mode) {
+      if (!visible && is_partedit) {
         _isDetailMode = true;
         _is_follow_highlight = true;
         _part_index = target_index;
@@ -2048,7 +2256,7 @@ public:
         _cursor_x = 0x80;
         _cursor_y = 0x80;
       } else
-      if (visible && (mode != def::playmode::chord_edit_mode || _part_index != target_index)) {
+      if (visible && (!is_partedit || _part_index != target_index)) {
         flg_update = true;
         _is_enabled = false;
         setTargetRect(ui_partinfo_list[_part_index].getTargetRect());
@@ -2062,24 +2270,24 @@ public:
         setTargetRect({0, 0, 0, 0});
         setClientRect({0, 0, 0, 0});
       }
-  }
+    }
 
   
-    auto part = &system_registry.current_slot->chord_part[_part_index];
+    auto part = &system_registry->current_slot->chord_part[_part_index];
     auto part_info = &part->part_info;
 
     if (!_target_rect.empty()) {
       // サブボタン群の表示更新があるか確認
       bool subbutton_update = false;
-      auto enc2_target = (def::command::edit_enc2_target_t)(system_registry.chord_play.getEditEnc2Target());
+      auto enc2_target = (def::command::edit_enc2_target_t)(system_registry->chord_play.getEditEnc2Target());
       if (_enc2_target != enc2_target) {
         _enc2_target = enc2_target;
         subbutton_update = true;
       }
       for (int i = 0; i < def::hw::max_sub_button; ++i) {
         auto sub_button_index = i;
-        auto pair0 = system_registry.sub_button.getCommandParamArray(sub_button_index);
-        auto pair1 = system_registry.sub_button.getCommandParamArray(sub_button_index + def::hw::max_sub_button);
+        auto pair0 = system_registry->sub_button.getCommandParamArray(sub_button_index);
+        auto pair1 = system_registry->sub_button.getCommandParamArray(sub_button_index + def::hw::max_sub_button);
         auto command_param_0 = pair0.array[0].getParam();
         auto command_param_1 = pair1.array[0].getParam();
 
@@ -2090,12 +2298,12 @@ public:
           sub_button_index = i + def::hw::max_sub_button;
         } else {
           // サブボタンのスワップを考慮
-          bool sub_button_swap = system_registry.runtime_info.getSubButtonSwap();
+          bool sub_button_swap = system_registry->runtime_info.getSubButtonSwap();
           if (sub_button_swap) {
             sub_button_index = i + def::hw::max_sub_button;
           }
         }
-        auto pair = system_registry.sub_button.getCommandParamArray(sub_button_index);
+        auto pair = system_registry->sub_button.getCommandParamArray(sub_button_index);
         auto command_param = pair.array[0];
         if (_command_param[i] != command_param) {
           _command_param[i] = command_param;
@@ -2123,7 +2331,7 @@ public:
         _voicing_name = def::play::GetVoicingName(voicing);
         subbutton_update = true;
       }
-      int velo = system_registry.runtime_info.getEditVelocity();
+      int velo = system_registry->runtime_info.getEditVelocity();
       if (_edit_velocity != velo) {
         _edit_velocity = velo;
         subbutton_update = true;
@@ -2158,9 +2366,9 @@ public:
         param->addInvalidatedRect({offset_x, offset_y, _client_rect.w, _client_rect.h});
       }
 
-      int cx = system_registry.chord_play.getPartStep(_part_index);
+      int cx = system_registry->chord_play.getPartStep(_part_index);
       if (cx < 0) { cx = 0; }
-      auto cy = system_registry.chord_play.getCursorY() + 1;
+      auto cy = system_registry->chord_play.getCursorY() + 1;
       changePage(cx >> 3);
       if (_cursor_x != cx || _cursor_y != cy || (getClientRect() != getTargetRect())) {
         _cursor_x = cx;
@@ -2220,12 +2428,12 @@ public:
       canvas->drawCircle(x, y, r + 7, invert ? TFT_RED : TFT_YELLOW);
     }
 
-    if (system_registry.chord_play.getConfirm_Paste())
+    if (system_registry->chord_play.getConfirm_Paste())
     { // コピー/ペースト(クリップボード)のパターンを描画
-      auto part = &system_registry.current_slot->chord_part[_part_index];
+      auto part = &system_registry->current_slot->chord_part[_part_index];
       auto part_info = &part->part_info;
 
-      int range_w = system_registry.chord_play.getRangeWidth();
+      int range_w = system_registry->chord_play.getRangeWidth();
       for (int j = 0; j < range_w; ++j) {
         int step = _cursor_x + j;
         int x = getX(step << 8) + offset_x;
@@ -2234,7 +2442,7 @@ public:
 
         canvas->setColor(TFT_YELLOW);
         for (int i = 5 + part_info->isDrumPart(); i >= 0; --i) {
-          auto v = system_registry.clipboard_arpeggio.getVelocity(j, i);
+          auto v = system_registry->clipboard_arpeggio.getVelocity(j, i);
           if (v) {
             int y = offset_y + getY((i + 1) << 8);
             if (v < 0) {
@@ -2247,97 +2455,98 @@ public:
       }
     }
 
-
-    const uint32_t fore_color = 0xFFFF44u;
-    const uint32_t unfocus_color = 0xCCDDEEu;
-
-    canvas->setTextSize(1);
     const int y = offset_y + getY(9 << 8);
-    for (int i = 0; i < def::hw::max_sub_button; ++i)
-    { // サブボタン機能の描画
-      auto command_param = _command_param[i];
-      auto param = command_param.getParam();
+    if (y + 8 > clip_rect->top() && y - 8 < clip_rect->bottom()) {
+      const uint32_t fore_color = 0xFFFF44u;
+      const uint32_t unfocus_color = 0xCCDDEEu;
 
-      uint32_t color = (param == _enc2_target) ? fore_color : unfocus_color;
-      canvas->setColor(color);
-      canvas->setTextColor(color);
-      canvas->setTextDatum(textdatum_t::middle_center);
+      canvas->setTextSize(1);
+      for (int i = 0; i < def::hw::max_sub_button; ++i)
+      { // サブボタン機能の描画
+        auto command_param = _command_param[i];
+        auto param = command_param.getParam();
 
-      // int x = offset_x + getX(x_scroll_current + ((i*2) << 8));
-      int left = (i * _client_rect.w) >> 2;
-      int right = ((i+1) * _client_rect.w) >> 2;
-      int x = offset_x + left;
-      int w = right - left;
-      int x1 = x + (w>>2);
-      int x2 = x + (w>>1);
-      int x3 = x + (w*3>>2);
+        uint32_t color = (param == _enc2_target) ? fore_color : unfocus_color;
+        canvas->setColor(color);
+        canvas->setTextColor(color);
+        canvas->setTextDatum(textdatum_t::middle_center);
 
-      switch (param) {
-      case def::command::edit_enc2_target_t::part_vol:
-        {
-          int v = _part_volume;
-          canvas->fillArc(x1, y, r, 0, 90, 90 + v * 36 / 10);
-          canvas->drawNumber(v, x3, y);
-        }
-        break;
+        // int x = offset_x + getX(x_scroll_current + ((i*2) << 8));
+        int left = (i * _client_rect.w) >> 2;
+        int right = ((i+1) * _client_rect.w) >> 2;
+        int x = offset_x + left;
+        int w = right - left;
+        int x1 = x + (w>>2);
+        int x2 = x + (w>>1);
+        int x3 = x + (w*3>>2);
 
-      case def::command::edit_enc2_target_t::velocity:
-        {
-          int v = _edit_velocity;
-          if (v < 0) {
-            canvas->fillRect(x1 - (r >> 1), y - (r >> 1), r, r, color);
-            canvas->drawString("mute", x3, y);
-          } else {
-            canvas->fillArc(x1, y, r, 0, 90, 90 + v * 36 / 10, color);
+        switch (param) {
+        case def::command::edit_enc2_target_t::part_vol:
+          {
+            int v = _part_volume;
+            canvas->fillArc(x1, y, r, 0, 90, 90 + v * 36 / 10);
             canvas->drawNumber(v, x3, y);
           }
+          break;
+
+        case def::command::edit_enc2_target_t::velocity:
+          {
+            int v = _edit_velocity;
+            if (v < 0) {
+              canvas->fillRect(x1 - (r >> 1), y - (r >> 1), r, r, color);
+              canvas->drawString("mute", x3, y);
+            } else {
+              canvas->fillArc(x1, y, r, 0, 90, 90 + v * 36 / 10, color);
+              canvas->drawNumber(v, x3, y);
+            }
+          }
+          break;
+
+        case def::command::edit_enc2_target_t::program:
+          {
+            // プログラムナンバーは 1~128 として表示する
+            int p = _program + 1;
+            canvas->drawNumber(p, x2, y);
+          }
+          break;
+
+        case def::command::edit_enc2_target_t::endpoint:
+          {
+            int p = (_end_point>>1) + 1;
+            canvas->drawNumber(p, x2, y);
+          }
+          break;
+
+        case def::command::edit_enc2_target_t::banlift:
+          {
+            int p = (_anchor_step>>1) + 1;
+            canvas->drawNumber(p, x2, y);
+          }
+          break;
+
+        case def::command::edit_enc2_target_t::displacement:
+          {
+            int p = _displacement;
+            canvas->drawNumber(p, x2, y);
+          }
+          break;
+
+        case def::command::edit_enc2_target_t::position:
+          {
+            int pos = _position + def::app::position_table_offset;
+            canvas->drawString(def::app::position_name_table.at(pos)->get(), x2, y);
+          }
+          break;
+
+        case def::command::edit_enc2_target_t::voicing:
+          {
+            canvas->drawString(_voicing_name, x2, y);
+          }
+          break;
+
+        default: break;
+
         }
-        break;
-
-      case def::command::edit_enc2_target_t::program:
-        {
-          // プログラムナンバーは 1~128 として表示する
-          int p = _program + 1;
-          canvas->drawNumber(p, x2, y);
-        }
-        break;
-
-      case def::command::edit_enc2_target_t::endpoint:
-        {
-          int p = (_end_point>>1) + 1;
-          canvas->drawNumber(p, x2, y);
-        }
-        break;
-
-      case def::command::edit_enc2_target_t::banlift:
-        {
-          int p = (_anchor_step>>1) + 1;
-          canvas->drawNumber(p, x2, y);
-        }
-        break;
-
-      case def::command::edit_enc2_target_t::displacement:
-        {
-          int p = _displacement;
-          canvas->drawNumber(p, x2, y);
-        }
-        break;
-
-      case def::command::edit_enc2_target_t::position:
-        {
-          int pos = _position + def::app::position_table_offset;
-          canvas->drawString(def::app::position_name_table.at(pos)->get(), x2, y);
-        }
-        break;
-
-      case def::command::edit_enc2_target_t::voicing:
-        {
-          canvas->drawString(_voicing_name, x2, y);
-        }
-        break;
-
-      default: break;
-
       }
     }
   }
@@ -2347,21 +2556,26 @@ static ui_arpeggio_edit_t ui_arpeggio_edit;
 struct ui_chord_part_container_t : public ui_container_t
 {
 protected:
-  def::playmode::playmode_t _prev_mode;
+  def::gui_mode_t _prev_mode;
 
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override
   {
-    auto mode = system_registry.runtime_info.getCurrentMode();
+    auto mode = system_registry->runtime_info.getGuiMode();
     if (_prev_mode != mode) {
+M5_LOGV("ui_chord_part_container_t::update_impl: mode changed %d -> %d", (int)_prev_mode, (int)mode);
       _prev_mode = mode;
       switch (mode) {
-      case def::playmode::chord_mode:
-      case def::playmode::chord_edit_mode:
+      default:
+      // case def::gui_mode_t::chord_edit_mode:
+      // case def::gui_mode_t::note_mode:
+      // case def::gui_mode_t::drum_mode:
+      // case def::gui_mode_t::seq_edit_mode:
+      // case def::gui_mode_t::seq_play_mode:
         setTargetRect({0, header_height, main_area_width, main_area_height}); // TODO: 仮の値
         break;
 
-      default:
-        setTargetRect({0, header_height, 0, main_area_height}); // TODO: 仮の値
+      case def::gui_mode_t::gm_menu:
+        setTargetRect({0, header_height, 0, main_area_height});
         break;
       }
     }
@@ -2369,6 +2583,197 @@ protected:
   }
 };
 static ui_chord_part_container_t ui_chord_part_container;
+
+struct ui_sequence_timeline_t : public ui_base_t
+{
+protected:
+  static constexpr const int32_t max_visible_step = 5;
+  static constexpr const int32_t step_icon_width = main_area_width / max_visible_step;
+  int16_t _current_step_index = 0;
+  int32_t _x_scroll_current = 0;
+  int32_t _x_scroll_target = 0;
+  int32_t _x_scroll_offset = 0;
+  uint8_t _offset_step = 0;
+  uint8_t _highlight_index = 0;
+  bool _no_data = false;
+  def::gui_mode_t _prev_mode = def::gui_mode_t::gm_unknown;
+
+  sequence_chord_desc_t _desc[max_visible_step + 2];
+  void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
+    auto mode = system_registry->runtime_info.getGuiMode();
+    bool visible = false;
+    switch (mode) {
+    case def::gui_mode_t::gm_song_play:
+    case def::gui_mode_t::gm_song_recording:
+      visible = true;
+      break;
+    default:
+      break;
+    }
+    bool need_init = false;
+    if (_prev_mode != mode) {
+      need_init = visible;
+      _prev_mode = mode;
+      auto r = getTargetRect();
+      if (visible) {
+        if (mode == def::gui_mode_t::gm_song_recording) {
+          _offset_step = 2;
+        } else {
+          _offset_step = 0;
+        }
+        // r.x = 0;
+        // r.w = disp_width;
+        r.y = disp_height - main_btns_height;
+        r.h = main_btns_height;
+      } else {
+        // r.x = disp_width;
+        // r.w = 0;
+        r.y = disp_height;
+        r.h = 0;
+      }
+      setTargetRect(r);
+    }
+    // 表示データが無い場合の判定
+    _no_data = (_offset_step == 0)
+            && (system_registry->current_sequence->info.getLength() == 0);
+
+    ui_base_t::update_impl(param, offset_x, offset_y);
+
+    if (_client_rect.empty()) { return; }
+
+    int32_t current_stepindex = (int32_t)system_registry->runtime_info.getSequenceStepIndex();
+    _x_scroll_target = current_stepindex * step_icon_width * 256;
+    if (need_init && visible) {
+      _x_scroll_current = _x_scroll_target;
+    } else {
+      _x_scroll_current = smooth_move(_x_scroll_target, _x_scroll_current, (param->smooth_step + 2) >> 2);
+    }
+    int32_t visible_stepindex = _x_scroll_current / (step_icon_width * 256);
+    int32_t visible_scroll = visible_stepindex * step_icon_width * 256;
+    int32_t offset = (visible_scroll - _x_scroll_current + 128) >> 8;
+    visible_stepindex -= _offset_step;
+
+    _highlight_index = current_stepindex - visible_stepindex;
+    visible_stepindex -= 1;
+
+    if (_current_step_index != visible_stepindex || _x_scroll_offset != offset || need_init) {
+      _current_step_index = visible_stepindex;
+      _x_scroll_offset = offset;
+      param->addInvalidatedRect({offset_x, offset_y, _client_rect.w, _client_rect.h});
+      for (int32_t i = 0; i < max_visible_step+2; ++i) {
+        _desc[i] = system_registry->current_sequence->getStepDescriptor(visible_stepindex + i);
+      }
+    }
+  }
+
+  void draw_impl(draw_param_t *param, M5Canvas *canvas, int32_t offset_x,
+                          int32_t offset_y, const rect_t *clip_rect) override
+  {
+    image_dark_shift(canvas, offset_x, offset_y, _client_rect.w, _client_rect.h, 2);
+
+    canvas->setTextDatum(m5gfx::textdatum_t::middle_center);
+    canvas->setTextColor(TFT_WHITE);
+    int32_t y_degree = offset_y + (main_btns_height >> 1) - 1;
+    int32_t xe = offset_x + _x_scroll_offset;
+
+    // image_dark_shift(canvas, offset_x + _offset_step * step_icon_width, offset_y, step_icon_width, main_btns_height);
+    // image_color_or(canvas, offset_x + _offset_step * step_icon_width, offset_y, step_icon_width - 1, main_btns_height, 0x4200u);
+    // image_color_or(canvas, offset_x + _offset_step * step_icon_width, offset_y, 1, main_btns_height, 0x8410u);
+    // image_color_or(canvas, offset_x + (_offset_step+1) * step_icon_width-1, offset_y, 1, main_btns_height, 0x8410u);
+    for (int32_t i = 0; i <= max_visible_step; ++i) {
+      int32_t x = xe;
+      xe += step_icon_width;
+      if (xe < clip_rect->left() || clip_rect->right() < x) {
+        continue;
+      }
+      if (i == _highlight_index) {
+        int xtmp = x < clip_rect->left() ? clip_rect->left() : x;
+        int xetmp = xe > clip_rect->right() ? clip_rect->right() : xe;
+        image_dark_shift(canvas, xtmp, offset_y, xetmp - xtmp, main_btns_height);
+        image_color_or(canvas, xtmp, offset_y, xetmp - xtmp, main_btns_height, 0x4200);
+      }
+      if (xe > clip_rect->left()) {
+        image_color_or(canvas, xe - 1, offset_y, 1, main_btns_height, 0x8410);
+      }
+      // canvas->drawFastVLine(xe - 1, offset_y, main_btns_height, TFT_LIGHTGRAY);
+
+      const auto &prev_desc = _desc[i];
+      const auto &desc = _desc[i+1];
+      const auto degree = desc.getDegree();
+   // if (degree && prev_desc != desc)
+      if (degree)
+      {
+        int32_t x_center = x + (step_icon_width >> 1);
+
+        int32_t y_mod = y_degree + (main_btns_height / 3);
+        if (y_mod+12 > clip_rect->top() && y_mod-12 < clip_rect->bottom())
+        {
+          auto modifier = desc.getModifier();
+          auto name_tbl = def::command::command_name_table[def::command::command_t::chord_modifier];
+          int32_t x_mod = x + (step_icon_width >> 1);
+          const char* mod_str = name_tbl[modifier];
+          canvas->setTextSize(1, 2);
+          canvas->drawString(mod_str, x_mod, y_mod);
+        }
+
+        if (y_degree+12 > clip_rect->top() && y_degree-12 < clip_rect->bottom()) {
+          auto x_degree = x_center;
+          auto semitone = desc.getSemitoneShift();
+          auto minor_swap = desc.getMinorSwap();
+          if (semitone || minor_swap) {
+            canvas->setTextSize(1, 1);
+            x_degree -= 8;
+            if (semitone) {
+              auto text = (semitone < 0) ? "♭" : "♯";
+              canvas->drawString(text, x_degree + 16, y_degree - 6);
+            }
+            if (minor_swap) {
+              canvas->drawString("〜", x_degree + 16, y_degree + 6);
+            }
+          }
+          canvas->setTextSize(2, 2);
+          canvas->drawNumber(degree, x_degree, y_degree);
+        }
+
+        if (prev_desc.getPartBits() != desc.getPartBits() || prev_desc.getSlotIndex() != desc.getSlotIndex())
+        {
+          uint32_t colors[] = {
+            system_registry->color_setting.getDisablePartColor(),
+            add_color(system_registry->color_setting.getEnablePartColor(), 0x404040u)
+          };
+          for (int part = 0; part < def::app::max_chord_part; ++part)
+          {
+            auto color = colors[desc.getPartEnable(part)];
+            int32_t y_part = 4 + offset_y + (part < 3 ? 0 : (main_btns_height / 10));
+            int32_t x_part = x + (part % 3) * (step_icon_width / 4) + (step_icon_width / 8);
+            canvas->fillRect( x_part, y_part, (step_icon_width / 4)-1, (main_btns_height / 10) - 1,
+                              color);
+          }
+
+          auto slotindex = desc.getSlotIndex();
+          for (int slot = 0; slot < def::app::max_slot; ++slot)
+          {
+            auto color = colors[(slot == slotindex)];
+            int32_t y_slot = 4 + (main_btns_height / 10)*2 + offset_y + (slot < 4 ? 0 : 5);
+            int32_t x_slot = x + (slot % 4) * (step_icon_width / 5) + (step_icon_width / 8);
+            canvas->fillRect( x_slot, y_slot, (step_icon_width / 5)-1, 5 - 1,
+                              color);
+          }
+        }
+      }
+    }
+    for (int i = 1; i < 3; ++i) {
+      image_color_or(canvas, offset_x, offset_y + (main_btns_height/3) * i, _client_rect.w, 1, 0x8410u);
+//      canvas->drawFastHLine(offset_x, offset_y + (main_btns_height/3) * i, _client_rect.w, TFT_DARKGRAY);
+    }
+    if (_no_data) {
+      canvas->setTextSize(2, 2);
+      canvas->drawString("No Data", offset_x + (_client_rect.w >> 1), y_degree);
+      return;
+    }
+  }
+};
+static ui_sequence_timeline_t ui_sequence_timeline;
 
 struct ui_menu_header_t : public ui_base_t
 {
@@ -2388,8 +2793,8 @@ protected:
 
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override
   {
-    auto show = system_registry.runtime_info.getCurrentMode() == def::playmode::menu_mode;
-    auto category = static_cast<def::menu_category_t>(system_registry.menu_status.getMenuCategory());
+    auto show = system_registry->runtime_info.getGuiMode() == def::gui_mode_t::gm_menu;
+    auto category = static_cast<def::menu_category_t>(system_registry->menu_status.getMenuCategory());
 
     if (_is_visible && !_is_closing && (!show || _category != category)) {
       _is_closing = true;
@@ -2409,10 +2814,10 @@ protected:
     // メニュー表示状態から非表示状態への遷移
     bool invalidated = false;
     if (show) {
-      auto code = system_registry.menu_status.getHistoryCode();
+      auto code = system_registry->menu_status.getHistoryCode();
       if (_history_code != code) {
         _history_code = code;
-        size_t level = system_registry.menu_status.getCurrentLevel();
+        size_t level = system_registry->menu_status.getCurrentLevel();
         if (_level != level) {
           _level = level;
           invalidated = true;
@@ -2471,7 +2876,7 @@ protected:
     int y = offset_y + menu_header_height - 1;
     int x = 0;
 
-    auto current_level = system_registry.menu_status.getCurrentLevel();
+    auto current_level = system_registry->menu_status.getCurrentLevel();
     canvas->setTextSize(1, 2);
     canvas->setTextDatum(m5gfx::textdatum_t::bottom_left);
     int lv = 0;
@@ -2498,9 +2903,9 @@ static ui_menu_header_t ui_menu_header;
 struct menu_drawer_t
 {
   static constexpr const int scroll_gap = 32;
-  menu_drawer_t(uint8_t menu_index, menu_item_ptr menu_item)
-  : _menu_index { menu_index }
-  , _menu_item { menu_item }
+  menu_drawer_t(uint16_t menu_index, menu_item_ptr menu_item)
+  : _menu_item { menu_item }
+  , _menu_index { menu_index }
   {}
 
   virtual void update(ui_base_t* ui, draw_param_t *param, int offset_x, int offset_y)
@@ -2567,10 +2972,10 @@ struct menu_drawer_t
       , 0x808080u);
   }
 protected:
-  uint8_t _menu_index = 0;
   menu_item_ptr _menu_item = nullptr;
   rect_t _current_focus_rect;
   rect_t _target_focus_rect;
+  uint16_t _menu_index = 0;
   int16_t _y_scroll = 0;
   int16_t _scroll_limit = 0;
 };
@@ -2584,7 +2989,7 @@ protected:
   int16_t _stored_pos = -1;
   bool _draw_index = true;
 public:
-  menu_drawer_list_t(uint8_t menu_index, menu_item_ptr menu_item)
+  menu_drawer_list_t(uint16_t menu_index, menu_item_ptr menu_item)
   : menu_drawer_t(menu_index, menu_item)
   {
     _min_value = menu_item->getMinValue();
@@ -2665,32 +3070,26 @@ protected:
   uint8_t _level;
 
 public:
-  menu_drawer_tree_t(uint8_t menu_index, menu_item_ptr menu_item)
+  menu_drawer_tree_t(uint16_t menu_index, menu_item_ptr menu_item)
   : menu_drawer_list_t(menu_index, menu_item)
   {
     _level = menu_item->getLevel();
-    std::vector<uint16_t> seq_list;
-    _childrens_count = menu_control.getChildrenSequenceList(&seq_list, menu_index);
+    std::vector<uint16_t> menu_id_list;
+    _childrens_count = menu_control.getChildrenMenuIDList(&menu_id_list, menu_index);
     for (int i = 0; i < _childrens_count; ++i) {
-      _item_array.push_back(menu_control.getItemBySequance(seq_list[i]));
+      _item_array.push_back(menu_control.getItemByMenuID(menu_id_list[i]));
     }
-/*
-uint8_t seq_list[max_children_size];
-_childrens_count = menu_control.getChildrenSequenceList(seq_list, max_children_size, menu_index);
-for (int i = 0; i < _childrens_count; ++i) {
-  _item_array[i] = menu_control.getItemBySequance(seq_list[i]);
-}
-*/
+    _item_array.shrink_to_fit();
   }
 
   void update(ui_base_t* ui, draw_param_t *param, int offset_x, int offset_y) override
   {
-    auto code = system_registry.menu_status.getHistoryCode();
+    auto code = system_registry->menu_status.getHistoryCode();
     if (_history_code != code) {
       _history_code = code;
 
-      auto focus_index = system_registry.menu_status.getSelectIndex(_level);
-      auto focus_item = menu_control.getItemBySequance(focus_index);
+      auto focus_index = system_registry->menu_status.getSelectIndex(_level);
+      auto focus_item = menu_control.getItemByMenuID(focus_index);
 
       for (int i = 0; i < _childrens_count; ++i) {
         auto item = _item_array[i];
@@ -2712,7 +3111,7 @@ struct menu_drawer_normal_t : public menu_drawer_list_t
 protected:
   size_t _count;
 public:
-  menu_drawer_normal_t(uint8_t menu_index, menu_item_ptr menu_item)
+  menu_drawer_normal_t(uint16_t menu_index, menu_item_ptr menu_item)
   : menu_drawer_list_t(menu_index, menu_item)
   {
     _count = menu_item->getSelectorCount();
@@ -2742,7 +3141,7 @@ public:
 
 struct menu_drawer_input_number_t : public menu_drawer_normal_t
 {
-  menu_drawer_input_number_t(uint8_t menu_index, menu_item_ptr menu_item)
+  menu_drawer_input_number_t(uint16_t menu_index, menu_item_ptr menu_item)
   : menu_drawer_normal_t(menu_index, menu_item)
   {}
 };
@@ -2755,7 +3154,7 @@ struct menu_drawer_qrcode_t : public menu_drawer_t
   int8_t _current_scale = 0;
   int8_t _target_scale = 0;
 public:
-  menu_drawer_qrcode_t(uint8_t menu_index, menu_item_ptr menu_item)
+  menu_drawer_qrcode_t(uint16_t menu_index, menu_item_ptr menu_item)
   : menu_drawer_t(menu_index, menu_item)
   {
     _qr_canvas.setColorDepth(1);
@@ -2798,7 +3197,7 @@ struct menu_drawer_progress_t : public menu_drawer_t
   uint16_t _value = UINT16_MAX;
   std::string _text;
 public:
-  menu_drawer_progress_t(uint8_t menu_index, menu_item_ptr menu_item)
+  menu_drawer_progress_t(uint16_t menu_index, menu_item_ptr menu_item)
   : menu_drawer_t(menu_index, menu_item)
   {}
 
@@ -2849,9 +3248,9 @@ protected:
   {
     ui_base_t::update_impl(param, offset_x, offset_y);
 
-    auto show = system_registry.runtime_info.getCurrentMode() == def::playmode::menu_mode;
-    auto category = static_cast<def::menu_category_t>(system_registry.menu_status.getMenuCategory());
-    int current_level = system_registry.menu_status.getCurrentLevel();
+    auto show = system_registry->runtime_info.getGuiMode() == def::gui_mode_t::gm_menu;
+    auto category = static_cast<def::menu_category_t>(system_registry->menu_status.getMenuCategory());
+    int current_level = system_registry->menu_status.getCurrentLevel();
 
     if ((current_level & 1) == _odd_even) {
       _level = current_level;
@@ -2874,8 +3273,8 @@ protected:
                       ?  main_area_width
                       : -main_area_width;
 
-      auto current_index = _level ? system_registry.menu_status.getSelectIndex(_level - 1) : 0;
-      auto menu_item = menu_control.getItemBySequance(current_index);
+      auto current_index = _level ? system_registry->menu_status.getSelectIndex(_level - 1) : 0;
+      auto menu_item = menu_control.getItemByMenuID(current_index);
       if (menu_item) {
         switch (menu_item->getType()) {
         default:
@@ -3031,22 +3430,37 @@ protected:
   bool _is_visible = false;
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
-    auto visible = system_registry.user_setting.getGuiWaveView();
-    visible &= system_registry.runtime_info.getCurrentMode() == def::playmode::playmode_t::chord_mode;
+    bool visible;
+    switch (system_registry->runtime_info.getGuiMode()) {
+    case def::gui_mode_t::gm_menu:
+    case def::gui_mode_t::gm_part_edit:
+    case def::gui_mode_t::gm_song_play:
+    case def::gui_mode_t::gm_song_recording:
+      visible = false;
+      break;
+    default:
+      visible = system_registry->user_setting.getGuiWaveView();
+      break;
+    }
     if (_is_visible != visible) {
-      _is_visible = visible;
-      if (_is_visible) {
+      if (visible) {
         setTargetRect({ 0, disp_height - main_btns_height, disp_width, main_btns_height });
+        _is_visible = visible;
       } else {
         setTargetRect({ 0, disp_height - (main_btns_height >> 1), disp_width, 0 });
+        if (getClientRect().empty()) {
+          _is_visible = false;
+        }
       }
     }
 
     ui_base_t::update_impl(param, offset_x, offset_y);
 
-    int start_pos = system_registry.raw_wave_pos - disp_width;
+    if (!_is_visible) { return; }
+
+    int start_pos = system_registry->raw_wave_pos - disp_width;
     if (start_pos < 0) {
-      start_pos += system_registry.raw_wave_length;
+      start_pos += system_registry->raw_wave_length;
     }
     _raw_wave_pos = start_pos;
 
@@ -3054,8 +3468,8 @@ public:
     uint8_t max_y = 0;
     int min_x = 0;
     int max_x = 0;
-    auto wave = system_registry.raw_wave;
-    const int loopend = system_registry.raw_wave_length;
+    auto wave = system_registry->raw_wave;
+    const int loopend = system_registry->raw_wave_length;
     for (int x = 0; x < loopend; ++x) {
       if (min_y > wave[x].first) {
         min_y = wave[x].first;
@@ -3069,22 +3483,22 @@ public:
     min_x -= start_pos;
     if (min_x < 0)
     {
-      min_x += system_registry.raw_wave_length;
+      min_x += system_registry->raw_wave_length;
     }
     _min_x = min_x;
 
     max_x -= start_pos;
     if (max_x < 0)
     {
-      max_x += system_registry.raw_wave_length;
+      max_x += system_registry->raw_wave_length;
     }
     _max_x = max_x;
 
     const int ch = _client_rect.h;
     int y0 = min_y < _prev_min_y ? min_y : _prev_min_y;
     int y1 = max_y > _prev_max_y ? max_y : _prev_max_y;
-    y0 = (y0 * ch + 128) >> 8;
-    y1 = (y1 * ch + 128) >> 8;
+    y0 = (y0 * ch) >> 8;
+    y1 = (y1 * ch) >> 8;
 
     _prev_min_y = (++_prev_min_y < min_y) ? _prev_min_y : min_y;
     _prev_max_y = (--_prev_max_y > max_y) ? _prev_max_y : max_y;
@@ -3092,57 +3506,56 @@ public:
     if (y0 > 0) { --y0; }
     if (y1 < ch-1) { ++y1; }
 
-    param->addInvalidatedRect({offset_x, offset_y + y0, _client_rect.w, y1 - y0 + 1});
+    param->addInvalidatedRect({offset_x, offset_y + y0, _client_rect.w, y1 - y0});
   }
   void draw_impl(draw_param_t *param, M5Canvas *canvas, int32_t offset_x,
                           int32_t offset_y, const rect_t *clip_rect) override {
-    int y_end = clip_rect->bottom() - offset_y;
-    if (y_end < 0) { return; }
-    auto wave = system_registry.raw_wave;
-    int ch = _client_rect.h;
-    int xe = clip_rect->right() - offset_x;
-    int ye = clip_rect->bottom() - offset_y;
-    int ys = clip_rect->top() - offset_y;
-    if (ys < 0) { ys = 0; }
-    const auto wid = canvas->width();
-    const auto framebuffer = (m5gfx::swap565_t*)(canvas->getBuffer());
+    if (!_is_visible || _client_rect.empty()) { return; }
 
-    const int yp = ch >> 1;
-    const int ystep = ch >> 3;
-    const int min_y = (_prev_min_y * ch + 128) >> 8;
-    const int max_y = (_prev_max_y * ch + 128) >> 8;
+    image_dark_shift(canvas, offset_x, offset_y, _client_rect.w, _client_rect.h);
 
-    // 背景を準備する
-    for (int y = ys; y < ye; ++y) {
-      uint16_t color = 0;
-      if (y == min_y || y == max_y) {
-        color = 0xC618u;
-      } else
-      if (ystep != 0)
-      {
-        if (0 == ((y - yp) % ystep)) {
-          color = 0x03F0u;
-        }
-      }
-      auto buf = framebuffer + wid * (offset_y + y);
-      for (int x = clip_rect->left() - offset_x; x < xe; ++x) {
-        auto raw = __builtin_bswap16(buf->raw);
-        raw = ((raw >> 1) & 0x7BEF) | color;
-        buf->raw = __builtin_bswap16(raw);
-        ++buf;
-      }
+    const int ch = _client_rect.h;
+    const int clip_h = clip_rect->h;
+    const int min_y = (_prev_min_y * ch) >> 8;
+    const int max_y = (_prev_max_y * ch) >> 8;
+    for (int i = 1; i < 8; ++i) {
+      int yy = (i * ch) >> 3;
+      image_color_or( canvas
+                    , offset_x
+                    , offset_y + yy
+                    , _client_rect.w, 1
+                    , 0x03F0u);
     }
-    
+    image_color_or( canvas
+                  , offset_x
+                  , offset_y + min_y
+                  , _client_rect.w, 1
+                  , 0xC618u);
+    image_color_or( canvas
+                  , offset_x
+                  , offset_y + max_y
+                  , _client_rect.w, 1
+                  , 0xC618u);
     { // 波形を描画する
-      auto buf = framebuffer + offset_y * wid;
+      const int xe = clip_rect->right() - offset_x;
+      const int ye = clip_rect->bottom() - offset_y;
+      const auto wid = canvas->width();
+      auto wave = system_registry->raw_wave;
+      auto buf = (m5gfx::swap565_t*)(canvas->getBuffer());
+      const auto raw_wave_length = system_registry->raw_wave_length;
       for (int x = -offset_x; x < xe; ++x) {
         int i = _raw_wave_pos + x;
-        if (i >= system_registry.raw_wave_length) {
-          i -= system_registry.raw_wave_length;
+        while (i >= raw_wave_length) {
+          i -= raw_wave_length;
         }
-        int y0 = (wave[i].first  * ch + 128) >> 8;
-        int y1 = (wave[i].second * ch + 128) >> 8;
-        for (int y = y0; y <= y1 && y < y_end; ++y) { buf[y * wid].raw |= __builtin_bswap16(0xC600); }
+        while (i < 0) {
+          i += raw_wave_length;
+        }
+        int y0 = ((wave[i].first  * ch) >> 8) + offset_y;
+        int y1 = ((wave[i].second * ch) >> 8) + offset_y;
+        if (y0 < 0) { y0 = 0; }
+        if (y1 > clip_h) { y1 = clip_h; }
+        for (int y = y0; y < y1 && y < ye; ++y) { buf[y * wid].raw |= __builtin_bswap16(0xC600); }
         ++buf;
       }
     }
@@ -3186,6 +3599,10 @@ void gui_t::init(void)
   ui_main_buttons.setTargetRect({ 0, disp_height - main_btns_height, disp_width, main_btns_height });
   ui_main_buttons.setClientRect({ 0, disp_height, disp_width, 0 });
 
+  // ui_sequence_timeline.setTargetRect({ disp_width, disp_height - main_btns_height, 0, main_btns_height });
+  ui_sequence_timeline.setTargetRect({ 0, disp_height, disp_width, 0 });
+  ui_sequence_timeline.setClientRect(ui_sequence_timeline.getTargetRect());
+
   ui_raw_wave.setTargetRect({ 0, disp_height - (main_btns_height >> 1), disp_width, 0 });
 
   ui_sub_buttons.setTargetRect({ 0, disp_height - main_btns_height - sub_btns_height, disp_width, sub_btns_height });
@@ -3215,8 +3632,8 @@ void gui_t::init(void)
   ui_wifi_sta_info.setClientRect(r);
   ui_wifi_ap_info.setTargetRect(r);
   ui_wifi_ap_info.setClientRect(r);
-  ui_icon_sequance_play.setTargetRect(r);
-  ui_icon_sequance_play.setClientRect(r);
+  ui_icon_auto_play.setTargetRect(r);
+  ui_icon_auto_play.setClientRect(r);
   ui_midiport_info.setTargetRect(r);
   ui_midiport_info.setClientRect(r);
 
@@ -3254,21 +3671,25 @@ void gui_t::init(void)
     }
   }
   ui_chord_part_container.addChild(&ui_arpeggio_edit);
+  ui_chord_part_container.shrink_to_fit();
 
   ui_left_icon_container.addChild(&ui_playkey_info);
   ui_left_icon_container.addChild(&ui_song_modified);
   ui_left_icon_container.addChild(&ui_filename);
+  ui_left_icon_container.shrink_to_fit();
 
-  ui_right_icon_container.addChild(&ui_icon_sequance_play);  
+  ui_right_icon_container.addChild(&ui_icon_auto_play);  
   ui_right_icon_container.addChild(&ui_midiport_info);
   ui_right_icon_container.addChild(&ui_wifi_ap_info);
   ui_right_icon_container.addChild(&ui_wifi_sta_info);
   ui_right_icon_container.addChild(&ui_battery_info);
   ui_right_icon_container.addChild(&ui_volume_info);
-//*/
+  ui_right_icon_container.shrink_to_fit();
+
   ui_background.addChild(&ui_chord_part_container);
   ui_background.addChild(&ui_main_buttons);
   ui_background.addChild(&ui_sub_buttons);
+  ui_background.addChild(&ui_sequence_timeline);
   ui_background.addChild(&ui_raw_wave);
   ui_background.addChild(&ui_left_icon_container);
   ui_background.addChild(&ui_right_icon_container);
@@ -3279,6 +3700,7 @@ void gui_t::init(void)
   ui_background.addChild(&ui_playkey_select);
   ui_background.addChild(&ui_popup_notify);
   ui_background.addChild(&ui_popup_qr);
+  ui_background.shrink_to_fit();
 
 //-------------------------------------------------------------------------
 
@@ -3290,7 +3712,6 @@ void gui_t::init(void)
     // disp_buf[i].createSprite(disp_buf_width, disp_height);
     disp_buf[i].setFont(&fonts::efontJA_16_b);
   }
-  _draw_param.resetClipRect();
   uint32_t msec = M5.millis();
   _draw_param.prev_msec = msec;
   _draw_param.current_msec = msec;
@@ -3333,7 +3754,7 @@ bool gui_t::update(void)
   // }
 
 #if defined (M5UNIFIED_PC_BUILD)
-  M5.delay(13);
+  M5.delay(8);
 #else
 
 #if defined ( DEBUG_GUI )
@@ -3354,19 +3775,21 @@ bool gui_t::update(void)
 
   auto param = &_draw_param;
   param->resetInvalidatedRect();
+  param->is_menu_mode = (system_registry->runtime_info.getGuiMode() == def::gui_mode_t::gm_menu);
   uint32_t msec = M5.millis();
   uint32_t prev_msec = param->current_msec;
   int diff = msec - prev_msec;
-  if (diff > 64) { diff = 64; }
-  param->prev_msec = prev_msec;
   param->current_msec = msec;
+  if (diff <= 0) { return false; }
+  if (diff > 255) { diff = 255; }
+  param->prev_msec = prev_msec;
   param->smooth_step = diff;
   // param->flg_update = false;
   ui_background.update(param, 0, 0);
   if (!param->hasInvalidated) {
   // if (!param->flg_update) {
 // static uint32_t prev_btnbitmask;
-// uint32_t btnbitmask = system_registry.internal_input.getButtonBitmask();
+// uint32_t btnbitmask = system_registry->internal_input.getButtonBitmask();
 // if (prev_btnbitmask != btnbitmask) {
 //   prev_btnbitmask = btnbitmask;
 //   _gfx->setCursor(0, 0);
@@ -3389,7 +3812,7 @@ bool gui_t::update(void)
     auto canvas = &disp_buf[disp_buf_idx];
     if (!update_rect.empty()) {
       if (suspended) {
-        system_registry.task_status.setWorking(system_registry_t::reg_task_status_t::bitindex_t::TASK_SPI);
+        system_registry->task_status.setWorking(system_registry_t::reg_task_status_t::bitindex_t::TASK_SPI);
         suspended = false;
       }
       // clip_rect.x -= x;
@@ -3421,7 +3844,7 @@ bool gui_t::update(void)
 // canvas->fillScreen(rand());
     }
     if (!suspended) {
-      system_registry.task_status.setSuspend(system_registry_t::reg_task_status_t::bitindex_t::TASK_SPI);
+      system_registry->task_status.setSuspend(system_registry_t::reg_task_status_t::bitindex_t::TASK_SPI);
       suspended = true;
     }
 
@@ -3445,7 +3868,7 @@ bool gui_t::update(void)
     }
   }
   if (suspended) {
-    system_registry.task_status.setWorking(system_registry_t::reg_task_status_t::bitindex_t::TASK_SPI);
+    system_registry->task_status.setWorking(system_registry_t::reg_task_status_t::bitindex_t::TASK_SPI);
   }
   return true;
 }
@@ -3480,10 +3903,10 @@ void gui_t::procTouchControl(const m5::touch_detail_t& td)
 
       if (td.wasHold())
       { // 長押しで編集モードに移行
-        system_registry.operator_command.addQueue( { def::command::part_edit, i+1 } );
+        system_registry->operator_command.addQueue( { def::command::part_edit, i+1 } );
       } else
       {
-        auto partinfo = &(system_registry.current_slot->chord_part[i].part_info);
+        auto partinfo = &(system_registry->current_slot->chord_part[i].part_info);
         bool next_enabled = partinfo->getEnabled();
         if (td.wasClicked()
           || td.isFlicking()

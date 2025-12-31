@@ -102,7 +102,7 @@ static esp_err_t _http_ota_event_handler(esp_http_client_event_t *evt)
         if (ota_content_length < ota_received_length) {
           ota_content_length = ota_received_length;
         }
-        system_registry.runtime_info.setWiFiOtaProgress(ota_content_length ? ota_received_length * 100 / ota_content_length : 0);
+        system_registry->runtime_info.setWiFiOtaProgress(ota_content_length ? ota_received_length * 100 / ota_content_length : 0);
         break;
     case HTTP_EVENT_ON_FINISH:
         ESP_LOGD(TAG, "HTTP_EVENT_ON_FINISH");
@@ -163,7 +163,7 @@ static def::command::wifi_ota_state_t exec_get_binary_url(const char* json_url, 
       M5_LOGV("firmware count:%d", array_size);
       if (array_size != 0) {
         const char* target_type = "release";
-        if (system_registry.runtime_info.getDeveloperMode()) {
+        if (system_registry->runtime_info.getDeveloperMode()) {
           target_type = "develop";
         }
 
@@ -208,18 +208,18 @@ static void exec_ota_inner(const char* json_url)
   auto local_response_buffer = (char*)m5gfx::heap_alloc_psram(MAX_HTTP_OUTPUT_BUFFER + 1);
   if (local_response_buffer) {
     auto state = exec_get_binary_url(json_url, local_response_buffer, MAX_HTTP_OUTPUT_BUFFER);
-    system_registry.runtime_info.setWiFiOtaProgress(state);
+    system_registry->runtime_info.setWiFiOtaProgress(state);
   
     if (state == def::command::wifi_ota_state_t::ota_update_available) {
       auto ret = exec_http_ota(local_response_buffer);
-      system_registry.wifi_control.setOperation(def::command::wifi_operation_t::wfop_disable);
+      system_registry->wifi_control.setOperation(def::command::wifi_operation_t::wfop_disable);
       if (ret == ESP_OK) {
-        system_registry.runtime_info.setWiFiOtaProgress(def::command::wifi_ota_state_t::ota_update_done);
+        system_registry->runtime_info.setWiFiOtaProgress(def::command::wifi_ota_state_t::ota_update_done);
         // M5.delay(1024);
         // OTA完了後に本体リセット
-        system_registry.operator_command.addQueue( { def::command::system_control, def::command::system_control_t::sc_reset } );
+        system_registry->operator_command.addQueue( { def::command::system_control, def::command::system_control_t::sc_reset } );
       } else {
-        system_registry.runtime_info.setWiFiOtaProgress(def::command::wifi_ota_state_t::ota_connection_error);
+        system_registry->runtime_info.setWiFiOtaProgress(def::command::wifi_ota_state_t::ota_connection_error);
         ESP_LOGE(TAG, "Firmware upgrade failed");
       }
     }

@@ -47,7 +47,7 @@ void task_port_b_t::task_func(task_port_b_t* me)
         diff = diff * 3;
         level += (diff < 0 ? diff + 1 : diff) >> 2;
         pin_level[i] = level;
-        system_registry.external_input.setPortBValue8(i, level);
+        system_registry->external_input.setPortBValue8(i, level);
       }
     }
   }

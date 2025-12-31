@@ -5,10 +5,6 @@
 
 #include "internal_kanplay.hpp"
 
-#include "internal_es8388.hpp"
-#include "internal_si5351.hpp"
-#include "internal_bmi270.hpp"
-#include "../system_registry.hpp"
 #include "../common_define.hpp"
 #include "firmware_kanplay.h"
 
@@ -18,10 +14,6 @@ namespace kanplay_ns {
 static constexpr const uint32_t i2c_freq = 800000;
 static constexpr const uint8_t i2c_addr = 0x56;
 static constexpr const uint8_t i2c_bootloader_addr = 0x54;
-
-static internal_es8388_t internal_es8388;
-static internal_si5351_t internal_si5351;
-static internal_bmi270_t internal_bmi270;
 
 static bool writeRegister8(uint8_t reg, uint8_t data)
 {
@@ -122,12 +114,12 @@ bool internal_kanplay_t::init(void)
 
   // イヤホン挿入状態のステータスを無効値で初期化。
   // 後の処理でステータスが正しく設定され、状況に合わせてAMPの出力が変更される。
-  system_registry.runtime_info.setHeadphoneEnabled(0xFF);
+  system_registry->runtime_info.setHeadphoneEnabled(0xFF);
 
   return true;
 }
 
-static uint32_t calcImuStandardDeviation(void)
+uint32_t internal_kanplay_t::calcImuStandardDeviation(void)
 {
   // 過去サンプルの加速度の平均値を求める
   int32_t avg_x = 0;
@@ -154,12 +146,12 @@ static uint32_t calcImuStandardDeviation(void)
   return sd;
 }
 
-static void updateImuVelocity(void)
+void internal_kanplay_t::updateImuVelocity(void)
 {
   if (internal_bmi270.update()) {
     // IMUの標準偏差をsystem_registryに保存
     uint32_t sd = calcImuStandardDeviation();
-    system_registry.internal_imu.setImuStandardDeviation(sd);
+    system_registry->internal_imu.setImuStandardDeviation(sd);
   }
 }
 
@@ -186,7 +178,7 @@ flg_int = true;
   if (!flg_int) {
     // I2C通信に時間が掛かる場面なのでSuspend申告してCPUクロックを下げることを許可しておく
     // (CPUクロックを高くしてもI2Cの通信時間が短くなるわけではないので)
-    system_registry.task_status.setSuspend(system_registry_t::reg_task_status_t::bitindex_t::TASK_I2C);
+    system_registry->task_status.setSuspend(system_registry_t::reg_task_status_t::bitindex_t::TASK_I2C);
 
     for (int loop = 0; loop < 3; ++loop) {
       static uint8_t proc_index = 0;
@@ -200,14 +192,14 @@ flg_int = true;
       default:
 // RGB LEDの変更指示は連続して実行するとSTM32側がハングアップすることがあるため、一度に処理しない。
         {
-          auto history = system_registry.rgbled_control.getHistory(rgbled_history_code);
+          auto history = system_registry->rgbled_control.getHistory(rgbled_history_code);
           if (history != nullptr) {
             uint32_t rgb_reg_index = history->index >> 2;
             if (rgb_reg_index < def::hw::max_rgb_led) {
               // RGB LEDは全開で点灯させない。1/4に輝度を下げる。
               // uint32_t color = (history->value >> 2) & 0x3F3F3F;
               uint32_t color = history->value;
-              uint8_t brightness = system_registry.user_setting.getLedBrightness();
+              uint8_t brightness = system_registry->user_setting.getLedBrightness();
               static constexpr const uint8_t brightness_table[] = { 21, 34, 55, 89, 144 };
               brightness = brightness_table[brightness];
               uint32_t r = (color & 0xFF) * brightness >> 8;
@@ -245,7 +237,7 @@ flg_int = true;
 #endif
     }
     // I2C通信が終わったらCPUクロックを上げる
-    system_registry.task_status.setWorking(system_registry_t::reg_task_status_t::bitindex_t::TASK_I2C);
+    system_registry->task_status.setWorking(system_registry_t::reg_task_status_t::bitindex_t::TASK_I2C);
   }
 
   static uint32_t btns = ~0u;
@@ -317,7 +309,7 @@ if (debuging_lv) {
         }
         prev_btnmask = button_bitmap;
         // エンコーダの状態を含まない状態でボタンビットマスク更新
-        system_registry.internal_input.setButtonBitmask(button_bitmap);
+        system_registry->internal_input.setButtonBitmask(button_bitmap);
       }
       // エンコーダ３は上下方向を逆転させておく
       static constexpr const uint32_t enc_mask_table[3][2] = {
@@ -332,20 +324,20 @@ if (debuging_lv) {
         int8_t diff = encoder[enc] - prev_enc[enc];
         if (diff) {
           prev_enc[enc] = encoder[enc];
-          system_registry.internal_input.setEncValue(enc, encoder[enc]);
+          system_registry->internal_input.setEncValue(enc, encoder[enc]);
           uint32_t enc_bitmap = button_bitmap + ((diff < 0) ? enc_mask_table[enc][0] : enc_mask_table[enc][1]);
           diff = abs(diff);
           do {
             // 回転量に応じてボタンビットマスクを更新 (ボタン連打操作のように扱う)
-            system_registry.internal_input.setButtonBitmask(button_bitmap);
-            system_registry.internal_input.setButtonBitmask(enc_bitmap);
+            system_registry->internal_input.setButtonBitmask(button_bitmap);
+            system_registry->internal_input.setButtonBitmask(enc_bitmap);
           } while (--diff);
         }
       }
 
       // イヤホンの接続状態を更新
-      if (system_registry.runtime_info.getHeadphoneEnabled() != reg62[0]) {
-        system_registry.runtime_info.setHeadphoneEnabled(reg62[0]);
+      if (system_registry->runtime_info.getHeadphoneEnabled() != reg62[0]) {
+        system_registry->runtime_info.setHeadphoneEnabled(reg62[0]);
         // イヤホン挿入時はAMPを無効にする
         uint8_t reg0x40[3];
         reg0x40[0] = reg62[0] ? 0 : 1; // 本体スピーカーアンプ
@@ -357,12 +349,12 @@ if (debuging_lv) {
   }
 
   {
-    auto volume = system_registry.user_setting.getMasterVolume();
+    auto volume = system_registry->user_setting.getMasterVolume();
     volume = 13 + (volume / 5);
     if (internal_es8388.getOutVolume() != volume) {
       internal_es8388.setOutVolume(volume);
     }
-    auto adcmic = system_registry.user_setting.getADCMicAmp();
+    auto adcmic = system_registry->user_setting.getADCMicAmp();
     if (internal_es8388.getInVolume() != adcmic) {
       internal_es8388.setInVolume(adcmic);
     }

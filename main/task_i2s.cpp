@@ -21,10 +21,11 @@
 namespace kanplay_ns {
 //-------------------------------------------------------------------------
 
+static constexpr const uint16_t i2s_dma_frame_num = 96;
+
 #if !defined (M5UNIFIED_PC_BUILD)
 
 static constexpr const i2s_port_t i2s_port = I2S_NUM_1;
-static constexpr const uint16_t i2s_dma_frame_num = 96;
 static constexpr const uint16_t i2s_dma_desc_num = 4;
 
 static const size_t overwrap = 0;
@@ -150,10 +151,16 @@ static esp_err_t _i2s_read(void* buf, size_t len, size_t* result, TickType_t tic
 #endif
 
 static int32_t* bufdata = nullptr;
-static constexpr const size_t buf_size = (overwrap + i2s_dma_frame_num) * sizeof(int32_t);
+static constexpr const size_t buf_size = (i2s_dma_frame_num) * sizeof(int32_t);
 
 bool task_i2s_t::start(void)
 {
+  int len = system_registry->raw_wave_length;
+  auto wav_buf = system_registry->raw_wave;
+  for (int i = 0; i < len; ++i) {
+    wav_buf[i] = std::make_pair(128, 128);
+  }
+
 #if defined (M5UNIFIED_PC_BUILD)
   auto thread = SDL_CreateThread((SDL_ThreadFunction)task_func, "i2s", this);
 #else
@@ -178,7 +185,23 @@ bool task_i2s_t::start(void)
 
 void task_i2s_t::task_func(task_i2s_t* me)
 {
-#if !defined (M5UNIFIED_PC_BUILD)
+#if defined (M5UNIFIED_PC_BUILD)
+  auto raw_wave_pos = system_registry->raw_wave_pos;
+  auto wav_buf = system_registry->raw_wave;
+  for (;;) {
+    uint8_t min_level = 32 + (rand() & 127);
+    uint8_t max_level = min_level + 64;
+
+    wav_buf[raw_wave_pos] = std::make_pair(min_level, max_level);
+  
+    if (++raw_wave_pos >= (system_registry->raw_wave_length)) {
+      raw_wave_pos = 0;
+    }
+    system_registry->raw_wave_pos = raw_wave_pos;
+    SDL_Delay(1);
+  }
+
+#else
   int32_t* i2sbuf = &bufdata[overwrap];
 
   size_t transfer_size;
@@ -203,10 +226,10 @@ void task_i2s_t::task_func(task_i2s_t* me)
 
   for (;;) {
     _i2s_read(i2sbuf, buf_size, &transfer_size, 128);
-    system_registry.task_status.setWorking(system_registry_t::reg_task_status_t::bitindex_t::TASK_I2S);
+    system_registry->task_status.setWorking(system_registry_t::reg_task_status_t::bitindex_t::TASK_I2S);
 
     // マスターボリュームのレンジ0~100を 1~256に変換
-    int32_t target_volume = system_registry.user_setting.getMasterVolume() << 8;
+    int32_t target_volume = system_registry->user_setting.getMasterVolume() << 8;
     if (target_volume > 25600) { target_volume = 25600; }
 
     // 現在の音量と目標の音量に差がある場合は滑らかに接近させる
@@ -235,20 +258,20 @@ void task_i2s_t::task_func(task_i2s_t* me)
     min_level = ((min_level >> 16) + 32768 + 128) >> 8;
     max_level = ((max_level >> 16) + 32768 + 128) >> 8;
 
-    auto wav_buf = system_registry.raw_wave;
-    auto raw_wave_pos = system_registry.raw_wave_pos;
-    wav_buf[raw_wave_pos ++] = std::make_pair(min_level, max_level);
+    auto wav_buf = system_registry->raw_wave;
+    auto raw_wave_pos = system_registry->raw_wave_pos;
+    wav_buf[raw_wave_pos ++] = std::make_pair<uint8_t, uint8_t>(min_level, max_level);
 
-    if (raw_wave_pos >= (system_registry.raw_wave_length)) {
+    if (raw_wave_pos >= (system_registry->raw_wave_length)) {
       raw_wave_pos = 0;
     }
-    system_registry.raw_wave_pos = raw_wave_pos;
+    system_registry->raw_wave_pos = raw_wave_pos;
 }
 
 // M5_LOGE("readsize: %d", readsize);
 /* デバッグ用 ノコギリ波をミキシングする
 static int32_t value;
-int add = system_registry.internal_input.get16(0);
+int add = system_registry->internal_input.get16(0);
 for (int i = 0; i < i2s_dma_frame_num; i++) {
   i2sbuf[i] = (i2sbuf[i] + (value << 12)) >> 2;
   value += add;
@@ -258,7 +281,7 @@ for (int i = 0; i < i2s_dma_frame_num; i++) {
 }
 //*/
 // size_t result;
-    system_registry.task_status.setSuspend(system_registry_t::reg_task_status_t::bitindex_t::TASK_I2S);
+    system_registry->task_status.setSuspend(system_registry_t::reg_task_status_t::bitindex_t::TASK_I2S);
     _i2s_write(bufdata, buf_size, &transfer_size, 128);
   }
 #endif

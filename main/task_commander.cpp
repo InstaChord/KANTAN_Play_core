@@ -52,9 +52,9 @@ public:
     uint32_t delay_msec = 0xffffffffUL;
     if (_prev_bitmask == raw_value) { return delay_msec; }
 
-    uint8_t chattering_threshold_msec = system_registry.user_setting.getChatteringThreshold();
+    uint8_t chattering_threshold_msec = system_registry->user_setting.getChatteringThreshold();
     bool imu_requested = false;
-    uint8_t imu_level = system_registry.user_setting.getImuVelocityLevel();
+    uint8_t imu_level = system_registry->user_setting.getImuVelocityLevel();
     static constexpr const uint8_t imu_ratio_table[] = { 0, 127, 255 };
     static constexpr const uint8_t imu_base_table[] = { 127, 63, 0 };
     if (imu_level >= sizeof(imu_ratio_table) / sizeof(imu_ratio_table[0])) { imu_level = 0; }
@@ -119,12 +119,12 @@ public:
             imu_requested = true;
             int velocity = imu_base;
             if (_use_internal_imu && imu_ratio) {
-              uint32_t imu_sd = system_registry.internal_imu.getImuStandardDeviation();
+              uint32_t imu_sd = system_registry->internal_imu.getImuStandardDeviation();
               velocity += sqrtf(sqrtf(imu_sd)) * imu_ratio / 100;
               if (velocity < 1) { velocity = 1; }
               if (velocity > 255) { velocity = 255; }
             }
-            system_registry.operator_command.addQueue( { def::command::set_velocity, velocity } );
+            system_registry->operator_command.addQueue( { def::command::set_velocity, velocity } );
             break;
           }
         }
@@ -137,7 +137,7 @@ public:
 // M5_LOGV("command_param:%04x", command_param.raw);
         uint8_t command = command_param.getCommand();
         if (command == 0) { continue; }
-        system_registry.operator_command.addQueue(command_param, pressed);
+        system_registry->operator_command.addQueue(command_param, pressed);
       }
     }
     return delay_msec;
@@ -148,9 +148,9 @@ public:
     uint32_t delay_msec = 0xffffffffUL;
     if (_prev_bitmask == btn_bitmask) { return delay_msec; }
 
-    uint8_t chattering_threshold_msec = system_registry.user_setting.getChatteringThreshold();
+    uint8_t chattering_threshold_msec = system_registry->user_setting.getChatteringThreshold();
     bool imu_requested = false;
-    uint8_t imu_level = system_registry.user_setting.getImuVelocityLevel();
+    uint8_t imu_level = system_registry->user_setting.getImuVelocityLevel();
     static constexpr const uint8_t imu_ratio_table[] = { 0, 127, 255 };
     static constexpr const uint8_t imu_base_table[] = { 127, 63, 0 };
     if (imu_level >= sizeof(imu_ratio_table) / sizeof(imu_ratio_table[0])) { imu_level = 0; }
@@ -203,12 +203,12 @@ public:
             imu_requested = true;
             int velocity = imu_base;
             if (_use_internal_imu && imu_ratio) {
-              uint32_t imu_sd = system_registry.internal_imu.getImuStandardDeviation();
+              uint32_t imu_sd = system_registry->internal_imu.getImuStandardDeviation();
               velocity += sqrtf(sqrtf(imu_sd)) * imu_ratio / 100;
               if (velocity < 1) { velocity = 1; }
               if (velocity > 255) { velocity = 255; }
             }
-            system_registry.operator_command.addQueue( { def::command::set_velocity, velocity } );
+            system_registry->operator_command.addQueue( { def::command::set_velocity, velocity } );
             break;
           }
         }
@@ -221,7 +221,7 @@ public:
 // M5_LOGV("command_param:%04x", command_param.raw);
         uint8_t command = command_param.getCommand();
         if (command == 0) { continue; }
-        system_registry.operator_command.addQueue(command_param, pressed);
+        system_registry->operator_command.addQueue(command_param, pressed);
       }
     }
     return delay_msec;
@@ -259,7 +259,7 @@ public:
           case def::command::chord_degree:
           case def::command::note_button:
           case def::command::drum_button:
-            system_registry.operator_command.addQueue( { def::command::set_velocity, velocity } );
+            system_registry->operator_command.addQueue( { def::command::set_velocity, velocity } );
             break;
           }
         }
@@ -272,7 +272,7 @@ public:
 // M5_LOGV("command_param:%04x", command_param.raw);
         uint8_t command = command_param.getCommand();
         if (command == 0) { continue; }
-        system_registry.operator_command.addQueue(command_param, pressed);
+        system_registry->operator_command.addQueue(command_param, pressed);
       }
     }
     return delay_msec;
@@ -287,7 +287,7 @@ static commander_t commander_port_b   { 8, false, ~0u };
 void task_commander_t::start(void)
 {
   // ボタンのマスク状態をクリア
-  system_registry.internal_input.setButtonBitmask(0x00);
+  system_registry->internal_input.setButtonBitmask(0x00);
 
   commander_internal.start();
   commander_port_a.start();
@@ -313,8 +313,8 @@ void task_commander_t::start(void)
 #else
   TaskHandle_t handle = nullptr;
   xTaskCreatePinnedToCore((TaskFunction_t)task_func, "command", 1024 * 3, this, def::system::task_priority_commander, &handle, def::system::task_cpu_commander);
-  system_registry.internal_input.setNotifyTaskHandle(handle);
-  system_registry.external_input.setNotifyTaskHandle(handle);
+  system_registry->internal_input.setNotifyTaskHandle(handle);
+  system_registry->external_input.setNotifyTaskHandle(handle);
 #endif
 }
 
@@ -322,7 +322,7 @@ void task_commander_t::task_func(task_commander_t* me)
 {
   uint32_t delay_msec = 0;
 
-  system_registry.popup_qr.setQRCodeType(def::qrcode_type_t::QRCODE_URL_MANUAL);
+  system_registry->popup_qr.setQRCodeType(def::qrcode_type_t::QRCODE_URL_MANUAL);
 
 #if defined (M5UNIFIED_PC_BUILD)
   M5.delay(2000);
@@ -330,71 +330,71 @@ void task_commander_t::task_func(task_commander_t* me)
   ulTaskNotifyTake(pdTRUE, 16384);
 #endif
   // 起動直後に表示されているQRコードについて、何か操作があったらQRコードを消す
-  system_registry.popup_qr.setQRCodeType(def::qrcode_type_t::QRCODE_NONE);
+  system_registry->popup_qr.setQRCodeType(def::qrcode_type_t::QRCODE_NONE);
 
   for (;;) {
-    system_registry.task_status.setSuspend(system_registry_t::reg_task_status_t::bitindex_t::TASK_COMMANDER);
+    system_registry->task_status.setSuspend(system_registry_t::reg_task_status_t::bitindex_t::TASK_COMMANDER);
 #if defined (M5UNIFIED_PC_BUILD)
     M5.delay(delay_msec);
     uint32_t btn_mask = 0;
     for (int i = 0; i < 32; ++i) {
       btn_mask |= (m5gfx::gpio_in(i) ? 0 : 1) << i;
     }
-    system_registry.internal_input.setButtonBitmask(btn_mask);
-    system_registry.runtime_info.setPressVelocity(100);
+    system_registry->internal_input.setButtonBitmask(btn_mask);
+    system_registry->runtime_info.setPressVelocity(100);
     delay_msec = 1;
 #else
     ulTaskNotifyTake(pdTRUE, delay_msec);
     delay_msec = portMAX_DELAY;
 #endif
-    system_registry.task_status.setWorking(system_registry_t::reg_task_status_t::bitindex_t::TASK_COMMANDER);
+    system_registry->task_status.setWorking(system_registry_t::reg_task_status_t::bitindex_t::TASK_COMMANDER);
 
     bool hit = 0;
 
     const registry_t::history_t* history = nullptr;
-    while (nullptr != (history = system_registry.internal_input.getHistory(me->_internal_input_history_code)))
+    while (nullptr != (history = system_registry->internal_input.getHistory(me->_internal_input_history_code)))
     {
       hit = true;
       if (history->index == system_registry_t::reg_internal_input_t::BUTTON_BITMASK) {
-        auto result = commander_internal.update(history->value, M5.millis(), &system_registry.command_mapping_current);
+        auto result = commander_internal.update(history->value, M5.millis(), &system_registry->command_mapping_current);
         if (delay_msec > result) {
           delay_msec = result;
         }
       }
     }
     if (hit == 0) { // 履歴がない場合は読み取って処理を行う (チャタリング回避のための遅延処理があり得るため)
-      auto result = commander_internal.update(system_registry.internal_input.getButtonBitmask(), M5.millis(), &system_registry.command_mapping_current);
+      auto result = commander_internal.update(system_registry->internal_input.getButtonBitmask(), M5.millis(), &system_registry->command_mapping_current);
       if (delay_msec > result) {
         delay_msec = result;
       }
     }
 
     bool hit_a = false, hit_b = false;
-    while (nullptr != (history = system_registry.external_input.getHistory(me->_external_input_history_code)))
+    while (nullptr != (history = system_registry->external_input.getHistory(me->_external_input_history_code)))
     {
       if (history->index == system_registry_t::reg_external_input_t::PORTA_BITMASK_BYTE0) {
         hit_a = true;
-        auto result = commander_port_a.update(history->value, M5.millis(), &system_registry.command_mapping_external);
+        auto result = commander_port_a.update(history->value, M5.millis(), &system_registry->command_mapping_external);
         if (delay_msec > result) {
           delay_msec = result;
         }
       } else
       if (history->index == system_registry_t::reg_external_input_t::PORTB_BITMASK_BYTE0) {
         hit_b = true;
-        auto result = commander_port_b.update(history->value, M5.millis(), &system_registry.command_mapping_port_b);
+        auto result = commander_port_b.update(history->value, M5.millis(), &system_registry->command_mapping_port_b);
         if (delay_msec > result) {
           delay_msec = result;
         }
       }
     }
     if (hit_a == false) { // 履歴がない場合は読み取って処理を行う (チャタリング回避のための遅延処理があり得るため)
-      auto result = commander_port_a.update(system_registry.external_input.getPortAButtonBitmask(), M5.millis(), &system_registry.command_mapping_external);
+      auto result = commander_port_a.update(system_registry->external_input.getPortAButtonBitmask(), M5.millis(), &system_registry->command_mapping_external);
       if (delay_msec > result) {
         delay_msec = result;
       }
     }
     if (hit_b == false) {
-      auto result = commander_port_b.update(system_registry.external_input.getPortBButtonBitmask(), M5.millis(), &system_registry.command_mapping_port_b);
+      auto result = commander_port_b.update(system_registry->external_input.getPortBButtonBitmask(), M5.millis(), &system_registry->command_mapping_port_b);
       if (delay_msec > result) {
         delay_msec = result;
       }

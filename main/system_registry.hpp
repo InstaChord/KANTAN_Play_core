@@ -22,28 +22,46 @@ namespace kanplay_ns {
 
 class system_registry_t;
 
-extern system_registry_t system_registry;
+extern system_registry_t* system_registry;
 
 class system_registry_t {
-    bool loadSettingInternal(JsonVariant& json);
-    bool saveSettingInternal(JsonVariant& json);
+    bool save_impl(const char* filename);
+    bool loadInternal(def::app::data_type_t type);
 
+    bool saveSettingInternal(JsonVariant& json);
+    bool loadSettingInternal(JsonVariant& json);
+    // bool saveSetting(void);
+    // bool saveResume(void);
+    bool loadSetting(void);
+    bool loadResume(void);
+    bool loadMapping(void);
+    size_t saveSettingJSON(uint8_t* data, size_t data_length);
+    size_t saveMappingJSON(uint8_t* data, size_t data_length);
+    size_t saveResumeJSON(uint8_t* data, size_t data_length);
+    bool loadSettingJSON(const uint8_t* data, size_t data_length);
+    bool loadMappingJSON(const uint8_t* data, size_t data_length);
+    bool loadResumeJSON(const uint8_t* data, size_t data_length);
+    uint32_t calcSettingCRC32(void) const;
+    uint32_t calcMappingCRC32(void) const;
+    uint32_t calcResumeCRC32(void) const;
+    uint32_t calcSongCRC32(void) const;
+    uint32_t calcKmapCRC32(void) const;
+
+    uint32_t _last_setting_crc32 = 0;
+    uint32_t _last_mapping_crc32 = 0;
+    uint32_t _last_resume_crc32 = 0;
 public:
     void init(void);
 
+    void updateCRC32(void);
+    void updateUnchangedSongCRC32(void) { unchanged_song_crc32 = calcSongCRC32(); }
+    void updateUnchangedKmapCRC32(void) { unchanged_kmap_crc32 = calcKmapCRC32(); }
+
+    void updateControlMapping(void);
+
     void reset(void);
     bool save(void);
-    bool saveSetting(void);
-    bool saveResume(void);
-
     bool load(void);
-    bool loadSetting(void);
-    bool loadResume(void);
-
-    size_t saveSettingJSON(uint8_t* data, size_t data_length);
-    bool loadSettingJSON(const uint8_t* data, size_t data_length);
-    size_t saveResumeJSON(uint8_t* data, size_t data_length);
-    bool loadResumeJSON(const uint8_t* data, size_t data_length);
 
     void syncParams(void);
 
@@ -56,7 +74,7 @@ public:
 #if __has_include (<freertos/FreeRTOS.h>)
         void setNotifyTaskHandle(TaskHandle_t handle);
 protected:
-        void _execNotify(void) const { if (_task_handle != nullptr) { xTaskNotify(_task_handle, true, eNotifyAction::eSetValueWithOverwrite); } }
+        void _execNotify(void) const { if (_task_handle != nullptr) { xTaskNotify(_task_handle, (uint32_t)this, eNotifyAction::eSetValueWithOverwrite); } }
         TaskHandle_t _task_handle = nullptr;
 #else
 protected:
@@ -117,7 +135,10 @@ protected:
         uint8_t getADCMicAmp(void) const { return get8(ADC_MIC_AMP); }
 
         // オフビート演奏の方法 (false=自動 / true=手動(ボタン離した時) )
-        void setOffbeatStyle(def::play::offbeat_style_t style) { set8(OFFBEAT_STYLE, (uint8_t)std::min<uint8_t>(def::play::offbeat_style_t::offbeat_max - 1, std::max<uint8_t>(def::play::offbeat_style_t::offbeat_min + 1, style))); }
+        void setOffbeatStyle(def::play::offbeat_style_t style) {
+            auto tmp = (uint8_t)std::min<uint8_t>(def::play::offbeat_style_t::offbeat_max - 1, std::max<uint8_t>(def::play::offbeat_style_t::offbeat_min + 1, style));
+            set8(OFFBEAT_STYLE, tmp);
+        }
         def::play::offbeat_style_t getOffbeatStyle(void) const { return (def::play::offbeat_style_t)get8(OFFBEAT_STYLE); }
 
         // IMUベロシティの強さ (0はIMUベロシティ不使用で固定値動作)
@@ -172,10 +193,12 @@ protected:
         def::command::usb_mode_t getUSBMode(void) const { return static_cast<def::command::usb_mode_t>(get8(USB_MODE)); }
     } midi_port_setting;
 
-    // 実行時に変化する情報 (設定画面が存在しない可変情報)
+    // 実行時に変化する保存されない情報 (設定画面が存在しない可変情報)
     struct reg_runtime_info_t : public registry_t {
-        reg_runtime_info_t(void) : registry_t(40, 0, DATA_SIZE_8) {}
+        reg_runtime_info_t(void) : registry_t(48, 0, DATA_SIZE_8) {}
         enum index_t : uint16_t {
+            SEQUENCE_STEP_L,
+            SEQUENCE_STEP_H,
             PART_EFFECT_1,
             PART_EFFECT_2,
             PART_EFFECT_3,
@@ -196,8 +219,12 @@ protected:
             MASTER_KEY,
             PRESS_VELOCITY,
             PLAY_SLOT,
-            PLAY_MODE,
-            MENU_VISIBLE,
+            SEQUENCE_MODE,
+            GUI_FLAG_MENU,
+            GUI_FLAG_PARTEDIT,
+            GUI_FLAG_SONGRECORDING,
+            GUI_PERFORM_STYLE,
+            NOTE_SCALE,
             CHORD_AUTOPLAY_STATE,
             SUSTAIN_STATE,
             EDIT_VELOCITY,
@@ -213,6 +240,9 @@ protected:
             MIDI_RX_COUNT_BLE,
             MIDI_TX_COUNT_USB,
             MIDI_RX_COUNT_USB,
+            CHORD_MINOR_SWAP_PRESS_COUNT,
+            CHORD_SEMITONE_FLAT_PRESS_COUNT,
+            CHORD_SEMITONE_SHARP_PRESS_COUNT,
         };
 
         // 音が鳴ったパートへの発光エフェクト設定
@@ -267,31 +297,85 @@ protected:
         void setPlaySlot(uint8_t slot_index) {
             if (slot_index < def::app::max_slot) {
                 set8(PLAY_SLOT, slot_index);
-                system_registry.current_slot = &(system_registry.song_data.slot[slot_index]);
+                system_registry->current_slot = &(system_registry->song_data.slot[slot_index]);
             }
         }
         uint8_t getPlaySlot(void) const { return get8(PLAY_SLOT); }
 
-        // 現在の演奏モード
-        void setPlayMode(def::playmode::playmode_t mode) { set8(PLAY_MODE, mode); }
-        def::playmode::playmode_t getPlayMode(void) const { return (def::playmode::playmode_t)get8(PLAY_MODE); }
+        def::gui_mode_t getGuiMode(void) const {
+            if (getGuiFlag_Menu()) { return def::gui_mode_t::gm_menu; }
+            if (getGuiFlag_PartEdit()) { return def::gui_mode_t::gm_part_edit; }
+            if (getGuiFlag_SongRecording()) { return def::gui_mode_t::gm_song_recording; }
+            switch (getSequenceMode()) {
+            case def::seqmode::seq_auto_song:
+            case def::seqmode::seq_guide_play:
+                return def::gui_mode_t::gm_song_play;
+            default:
+                break;
+            }
+            switch (getGui_PerformStyle()) {
+            default:
+            case def::perform_style_t::ps_chord:
+                return def::gui_mode_t::gm_perform_chord;
+            case def::perform_style_t::ps_note:
+                return def::gui_mode_t::gm_perform_note;
+            case def::perform_style_t::ps_drum:
+                return def::gui_mode_t::gm_perform_drum;
+            }
+            return def::gui_mode_t::gm_unknown;
+        }
 
         // メニューUIを表示しているか否か
-        void setMenuVisible(bool visible) { set8(MENU_VISIBLE, visible); }
-        bool getMenuVisible(void) const { return get8(MENU_VISIBLE); }
+        void setGuiFlag_Menu(bool visible) { set8(GUI_FLAG_MENU, visible); }
+        bool getGuiFlag_Menu(void) const { return get8(GUI_FLAG_MENU); }
 
-        def::playmode::playmode_t getCurrentMode(void) const {
-            if (getMenuVisible()) { return def::playmode::menu_mode; }
-            return (def::playmode::playmode_t)get8(PLAY_MODE);
-        }
+        // パート編集モードか否か
+        void setGuiFlag_PartEdit(bool enabled) { set8(GUI_FLAG_PARTEDIT, enabled); }
+        bool getGuiFlag_PartEdit(void) const { return get8(GUI_FLAG_PARTEDIT); }
+
+        // シーケンス編集モードか否か
+        void setGuiFlag_SongRecording(bool enabled) { set8(GUI_FLAG_SONGRECORDING, enabled); }
+        bool getGuiFlag_SongRecording(void) const { return get8(GUI_FLAG_SONGRECORDING); }
+
+        void setGui_PerformStyle(def::perform_style_t style) { set8(GUI_PERFORM_STYLE, static_cast<uint8_t>(style)); }
+        def::perform_style_t getGui_PerformStyle(void) const { return static_cast<def::perform_style_t>(get8(GUI_PERFORM_STYLE)); }
+
+        // ノート演奏時のスケール
+        void setNoteScale(uint8_t scale) { set8(NOTE_SCALE, scale); }
+        uint8_t getNoteScale(void) const { return get8(NOTE_SCALE); }
+
+        void setSequenceMode(def::seqmode::seqmode_t mode) { set8(SEQUENCE_MODE, mode); }
+        def::seqmode::seqmode_t getSequenceMode(void) const { return (def::seqmode::seqmode_t)get8(SEQUENCE_MODE); }
 
         // IMUによるボタン押下時のベロシティ
         void setPressVelocity(uint8_t level) { set8(PRESS_VELOCITY, level); }
         uint8_t getPressVelocity(void) const { return get8(PRESS_VELOCITY); }
 
-        // コード自動演奏状態
-        void setChordAutoplayState(def::play::auto_play_mode_t mode) { set8(CHORD_AUTOPLAY_STATE, mode); }
-        def::play::auto_play_mode_t getChordAutoplayState(void) const { return (def::play::auto_play_mode_t)get8(CHORD_AUTOPLAY_STATE); }
+        // 自動ビート演奏状態
+        void setAutoplayState(def::play::auto_play_state_t mode) { set8(CHORD_AUTOPLAY_STATE, mode); }
+        def::play::auto_play_state_t getAutoplayState(void) const { return (def::play::auto_play_state_t)get8(CHORD_AUTOPLAY_STATE); }
+        def::play::auto_play_state_t getGuiAutoplayState(void) const {
+            auto res = def::play::auto_play_state_t::auto_play_none;
+            auto seq = getSequenceMode();
+
+            // ソング記録モードはガイド演奏モードと同等扱いとする
+            if (getGuiFlag_SongRecording()) { seq = def::seqmode::seq_guide_play; }
+
+            if (seq == def::seqmode::seq_beat_play || seq == def::seqmode::seq_auto_song) {
+                res = (def::play::auto_play_state_t)get8(CHORD_AUTOPLAY_STATE);
+                // ビート演奏モードと自動演奏モード時はnoneは無効化してwaitingにする
+                if (res == def::play::auto_play_state_t::auto_play_none) {
+                    res = def::play::auto_play_state_t::auto_play_waiting;
+                }
+            } else if (seq == def::seqmode::seq_guide_play) {
+                res = (def::play::auto_play_state_t)get8(CHORD_AUTOPLAY_STATE);
+                // ガイド演奏モードとシーケンス編集モード時はビートモード以外は無効化
+                if (res != def::play::auto_play_state_t::auto_play_beatmode) {
+                    res = def::play::auto_play_state_t::auto_play_none;
+                }
+            }
+            return res;
+        }
 
         void setSustainState(def::play::sustain_state_t state) { set8(SUSTAIN_STATE, state); }
         def::play::sustain_state_t getSustainState(void) const { return (def::play::sustain_state_t)get8(SUSTAIN_STATE); }
@@ -349,6 +433,38 @@ protected:
         // USB MIDI受信カウンタ
         void setMidiRxCountUSB(uint8_t count) { set8(MIDI_RX_COUNT_USB, count); }
         uint8_t getMidiRxCountUSB(void) const { return get8(MIDI_RX_COUNT_USB); }
+
+        // 現在のシーケンスのステップ位置
+        uint16_t getSequenceStepIndex(void) const { return get16(SEQUENCE_STEP_L); }
+        void setSequenceStepIndex(uint16_t step_index) { set16(SEQUENCE_STEP_L, step_index); }
+
+        void addChordMinorSwapPressCount(int count) {
+            count += get8(CHORD_MINOR_SWAP_PRESS_COUNT);
+            if (count < 0) { count = 0; } else if (count > 255) { count = 255; }
+            set8(CHORD_MINOR_SWAP_PRESS_COUNT, count);
+        }
+        void clearChordMinorSwapPressCount(void) { set8(CHORD_MINOR_SWAP_PRESS_COUNT, 0); }
+        uint8_t getChordMinorSwapPressCount(void) const { return get8(CHORD_MINOR_SWAP_PRESS_COUNT); }
+        void addChordSemitoneFlatPressCount(int count) {
+            count += get8(CHORD_SEMITONE_FLAT_PRESS_COUNT);
+            if (count < 0) { count = 0; } else if (count > 255) { count = 255; }
+            set8(CHORD_SEMITONE_FLAT_PRESS_COUNT, count);
+        }
+        void clearChordSemitoneFlatPressCount(void) { set8(CHORD_SEMITONE_FLAT_PRESS_COUNT, 0); }
+        uint8_t getChordSemitoneFlatPressCount(void) const { return get8(CHORD_SEMITONE_FLAT_PRESS_COUNT); }
+        void addChordSemitoneSharpPressCount(int count) {
+            count += get8(CHORD_SEMITONE_SHARP_PRESS_COUNT);
+            if (count < 0) { count = 0; } else if (count > 255) { count = 255; }
+            set8(CHORD_SEMITONE_SHARP_PRESS_COUNT, count);
+        }
+        void clearChordSemitoneSharpPressCount(void) { set8(CHORD_SEMITONE_SHARP_PRESS_COUNT, 0); }
+        uint8_t getChordSemitoneSharpPressCount(void) const { return get8(CHORD_SEMITONE_SHARP_PRESS_COUNT); }
+        int getChordSemitoneShift(void) {
+            int res = 0;
+            if (get8(CHORD_SEMITONE_FLAT_PRESS_COUNT)) { --res; }
+            if (get8(CHORD_SEMITONE_SHARP_PRESS_COUNT)) { ++res; }
+            return res;
+        }
     } runtime_info;
 
     struct reg_popup_notify_t : public registry_t {
@@ -419,7 +535,7 @@ protected:
     };
 
     struct reg_task_status_t : public registry_t {
-        reg_task_status_t(void) : registry_t(64, 4, DATA_SIZE_32) {}
+        reg_task_status_t(void) : registry_t(64, 0, DATA_SIZE_32) {}
         enum bitindex_t : uint32_t {
             TASK_SPI,
             TASK_I2S,
@@ -517,16 +633,17 @@ protected:
     // MIDI出力コントロール
     struct reg_midi_out_control_t : public registry_base_t {
         // 読み出しには非対応、値をセットすると履歴として取得できる
-        reg_midi_out_control_t(void) : registry_base_t(128) {}
+        reg_midi_out_control_t(void) : registry_base_t(256) {}
 
         void setMessage(uint8_t status, uint8_t data1, uint8_t data2 = 0) {
-            set16(status, data1 + (data2 << 8));
+            set16(status, data1 + (data2 << 8), true);
         }
         void setNoteVelocity(uint8_t channel, uint8_t note, uint8_t value) {
             uint8_t status = 0x80 + ((value & 0x80) >> 3);
             setMessage((status | channel), note, value & 0x7F);
         }
         void setProgramChange(uint8_t channel, uint8_t value) {
+            if (_program_number[channel] == value) { return; }
             _program_number[channel] = value;
             uint8_t status = 0xC0;
             setMessage((status | channel), value);
@@ -536,18 +653,19 @@ protected:
             setMessage((status | channel), control, value);
         }
         void setChannelVolume(uint8_t channel, uint8_t value) {
+            if (_channel_volume[channel] == value) { return; }
             _channel_volume[channel] = value;
             setControlChange(channel, 7, value);
         }
         uint8_t getProgramChange(uint8_t channel) const {
-            return _program_number[channel];
+            return _program_number[channel] & 0x7F;
         }
         uint8_t getChannelVolume(uint8_t channel) const {
-            return _channel_volume[channel];
+            return _channel_volume[channel] & 0x7F;
         }
     protected:
-        uint8_t _channel_volume[def::midi::channel_max] = { 0, };
-        uint8_t _program_number[def::midi::channel_max] = { 0, };
+        uint8_t _channel_volume[def::midi::channel_max] = { 128, 128, 128, 128,  128, 128, 128, 128,  128, 128, 128, 128,  128, 128, 128, 128,   };
+        uint8_t _program_number[def::midi::channel_max] = { 128, 128, 128, 128,  128, 128, 128, 128,  128, 128, 128, 128,  128, 128, 128, 128,   };
     } midi_out_control;
 
     // コード演奏アルペジオパターン
@@ -644,6 +762,11 @@ protected:
             arpeggio.reset();
             part_info.reset();
         }
+        uint32_t crc32(uint32_t crc = 0) const {
+            crc = arpeggio.crc32(crc);
+            crc = part_info.crc32(crc);
+            return crc;
+        }
         bool operator== (const kanplay_part_t &src) const {
             return arpeggio == src.arpeggio
                 && part_info == src.part_info;
@@ -652,41 +775,19 @@ protected:
     };
 
     struct reg_slot_info_t : public registry_t {
-        reg_slot_info_t(void) : registry_t(8, 0, DATA_SIZE_8) {}
+        reg_slot_info_t(void) : registry_t(6, 0, DATA_SIZE_8) {}
         enum index_t : uint16_t {
             TEMPO_BPM_L,
             TEMPO_BPM_H,
             SWING,
             KEY_OFFSET,
-            PLAY_MODE,
             STEP_PER_BEAT,
-            NOTE_SCALE,
             NOTE_PROGRAM,
         };
-        // void set8(uint16_t index, uint8_t value, bool force = false) {
-        //     system_registry.runtime_info.setSongModified(true);
-        //     registry_t::set8(index, value, force);
-        // }
-/*
-        // テンポ (BPM)
-        void setTempo(uint16_t bpm) {
-            if (bpm < def::app::tempo_bpm_min) { bpm = def::app::tempo_bpm_min; }
-            if (bpm > def::app::tempo_bpm_max) { bpm = def::app::tempo_bpm_max; }
-            set16(TEMPO_BPM_L, bpm);
-        }
-        uint16_t getTempo(void) const { return get16(TEMPO_BPM_L); }
 
-        // スウィング (swing)
-        void setSwing(uint8_t swing) { set8(SWING, swing); }
-        uint8_t getSwing(void) const { return get8(SWING); }
-*/
         // 基準キーに対するオフセット量
         void setKeyOffset(int8_t offset) { set8(KEY_OFFSET, offset); }
         int8_t getKeyOffset(void) const { return get8(KEY_OFFSET); }
-
-        // スロットの演奏モード
-        void setPlayMode(def::playmode::playmode_t mode) { set8(PLAY_MODE, mode); }
-        def::playmode::playmode_t getPlayMode(void) const { return (def::playmode::playmode_t)get8(PLAY_MODE); }
 
         // コード演奏時の１ビートあたりのステップ数 (1~4)
         void setStepPerBeat(uint8_t spb) {
@@ -702,19 +803,11 @@ protected:
             return spb;
         }
 
-        // ノート演奏時のスケール
-        void setNoteScale(uint8_t scale) { set8(NOTE_SCALE, scale); }
-        uint8_t getNoteScale(void) const { return get8(NOTE_SCALE); }
-
         void setNoteProgram(uint8_t program) { set8(NOTE_PROGRAM, program); }
         uint8_t getNoteProgram(void) const { return get8(NOTE_PROGRAM); }
 
         void reset(void) {
-            setPlayMode(def::playmode::playmode_t::chord_mode);
-            // setTempo(def::app::tempo_bpm_default);
-            // setSwing(def::app::swing_default);
             setStepPerBeat(def::app::step_per_beat_default);
-            setNoteScale(0);
             setKeyOffset(0);
             setNoteProgram(0);
         }
@@ -740,6 +833,13 @@ protected:
                 chord_part[i].reset();
             }
             slot_info.reset();
+        }
+        uint32_t crc32(uint32_t crc = 0) const {
+            for (int i = 0; i < def::app::max_chord_part; ++i) {
+                crc = chord_part[i].crc32(crc);
+            }
+            crc = slot_info.crc32(crc);
+            return crc;
         }
 
         // 比較オペレータ
@@ -808,18 +908,18 @@ protected:
             CONFIRM_ALLCLEAR, // 全消去確認
             CONFIRM_PASTE,    // 貼り付け確認
         };
-        void setChordDegree(uint8_t degree) { set8(CHORD_DEGREE, degree); }
-        uint8_t getChordDegree(void) const { return get8(CHORD_DEGREE); }
+        void setChordDegree(const degree_param_t &degree) { set8(CHORD_DEGREE, degree.raw); }
+        degree_param_t getChordDegree(void) const { return get8(CHORD_DEGREE); }
         void setChordModifier(uint8_t modifier) { set8(CHORD_MODIFIER, modifier); }
         KANTANMusic_Modifier getChordModifier(void) const { return (KANTANMusic_Modifier)get8(CHORD_MODIFIER); }
         void setChordMinorSwap(uint8_t swap) { set8(CHORD_MINOR_SWAP, swap); }
         uint8_t getChordMinorSwap(void) const { return get8(CHORD_MINOR_SWAP); }
-        void setChordSemitone(uint8_t semitone) { set8(CHORD_SEMITONE, semitone); }
-        int getChordSemitone(void) const { return (int8_t)get8(CHORD_SEMITONE); }
+        void setChordSemitoneShift(int semitone) { set8(CHORD_SEMITONE, semitone); }
+        int getChordSemitoneShift(void) const { return (int8_t)get8(CHORD_SEMITONE); }
         void setChordBassDegree(uint8_t degree) { set8(CHORD_BASS_DEGREE, degree); }
         uint8_t getChordBassDegree(void) const { return get8(CHORD_BASS_DEGREE); }
-        void setChordBassSemitone(int semitone) { set8(CHORD_BASS_SEMITONE, semitone); }
-        int getChordBassSemitone(void) const { return (int8_t)get8(CHORD_BASS_SEMITONE); }
+        void setChordBassSemitoneShift(int semitone) { set8(CHORD_BASS_SEMITONE, semitone); }
+        int getChordBassSemitoneShift(void) const { return (int8_t)get8(CHORD_BASS_SEMITONE); }
         void setPartStep(uint8_t part_index, int8_t step) { set8(PART_1_STEP + part_index, step); }
         int8_t getPartStep(uint8_t part_index) const { return get8(PART_1_STEP + part_index); }
         void setPartEnable(uint8_t part_index, uint8_t enable) { set8(PART_1_ENABLE + part_index, enable); }
@@ -856,11 +956,230 @@ protected:
         uint8_t getConfirm_Paste(void) const { return get8(CONFIRM_PASTE); }
     };
 
-    struct reg_command_request_t : public registry_t {
-#if __has_include (<freertos/FreeRTOS.h>)
-        using registry_t::setNotifyTaskHandle;
+    struct reg_sequence_timeline_t : public registry_t {
+        reg_sequence_timeline_t(void) : registry_t(8192, 0, DATA_SIZE_32) {}
+        std::pair<uint32_t, sequence_chord_desc_t>* begin(void) const {
+            return (std::pair<uint32_t, sequence_chord_desc_t>*)_reg_data;
+        }
+        std::pair<uint32_t, sequence_chord_desc_t>* end(void) const {
+            return (std::pair<uint32_t, sequence_chord_desc_t>*)(_reg_data) + _data_count;
+        }
+        size_t max_count(void) const {
+            return _registry_size / sizeof(std::pair<uint32_t, sequence_chord_desc_t>);
+        }
+
+        // 指定したステップと同値かそれより小さい最大のステップを持つ要素のイテレータを返す
+        std::pair<uint32_t, sequence_chord_desc_t>* find(uint16_t step) const {
+            if (step >= def::app::max_sequence_step) { return nullptr; }
+            auto bg = begin();
+            auto ed = end();
+            // upper_boundでstepより大きい最初の要素を見つける
+            auto it = std::upper_bound( bg
+                                      , ed
+                                      , step
+                                      , [](const auto& a, const auto& b) { return a < b.first; }
+                                      );
+            if (it == bg) { return nullptr; }
+            return --it;
+        }
+        sequence_chord_desc_t getStepDescriptor(uint16_t step) const {
+            // 指定した位置またはその直前のステップ情報を返す
+            auto it = find(step);
+            if (it != nullptr) { if (it->first <= step) { return it->second; } }
+            return sequence_chord_desc_t();
+        }
+
+        // 指定したステップに対して値を設定する
+        bool setStepDescriptor(uint16_t step, const sequence_chord_desc_t& value) {
+            // 最大値チェック
+            if (step >= def::app::max_sequence_step) { return false; }
+            if (_data_count >= max_count()) { return false; }
+
+            // 対象ステップの要素を探索
+            auto it = find(step);
+            auto insert_pos = begin();
+            if (it != nullptr) {
+                if (it->first < step) {
+                    // 指定ステップより前の要素が見つかった場合、その次の位置に挿入する
+                    insert_pos = it + 1;
+                } else {
+                    // 指定ステップと同じ要素が見つかった場合、その位置に上書きする
+                    it->second = value;
+                    return true;
+                }
+            } else {
+                // 指定ステップより前の要素が存在しない場合、先頭に挿入する
+                insert_pos = begin();
+            }
+
+            // 挿入位置以降の要素を1つ後ろにシフトする
+            auto e = end();
+            for (auto shift_it = e; shift_it != insert_pos; ) {
+                --shift_it;
+                *(shift_it + 1) = *shift_it;
+            }
+            // 新しい要素を挿入する
+            insert_pos->first = step;
+            insert_pos->second = value;
+            ++_data_count;
+            return true;
+        }
+        void clear(void) { _data_count = 0; }
+        void deleteAfter(uint16_t step) {
+            // 指定したステップ以降のデータを削除する
+            auto it = find(step);
+            if (it != nullptr) {
+                if (it->first < step) {
+                    ++it;
+                }
+                size_t index = it - begin();
+                _data_count = index;
+            }
+        }
+        bool saveJson(JsonVariant &json);
+        bool loadJson(const JsonVariant &json);
+        uint32_t crc32(uint32_t crc_init) const override {
+            return calc_crc32(_reg_data, _data_count * sizeof(std::pair<uint32_t, sequence_chord_desc_t>), crc_init);
+        }
+        void assign(const reg_sequence_timeline_t &src) {
+            _data_count = src._data_count;
+            memcpy(_reg_data, src._reg_data, _registry_size);
+        }
+
+    protected:
+        size_t _data_count = 0;
+    };
+#if 0
+    // シーケンス演奏パターン情報
+    struct reg_sequence_timeline_map_t : public registry_map_t<sequence_chord_desc_t> {
+        reg_sequence_timeline_map_t(void) : registry_map_t<sequence_chord_desc_t>(sequence_chord_desc_t()) {}
+        std::map<uint16_t, sequence_chord_desc_t>::const_iterator get_le(uint16_t step) const {
+            // 指定した位置またはその直前のステップ情報を返す
+            if (step >= def::app::max_sequence_step) {
+                return _data.end();
+            }
+            auto it = std::lower_bound( _data.begin()
+                                      , _data.end()
+                                      , step
+                                      , [](const auto& a, const auto& b) { return a.first < b; }
+                                      );
+            if (it != _data.end()) {
+                if (it->first == step) {
+                    return it;
+                }
+            }
+            if (it != _data.begin()) {
+                --it;
+            }
+            return it; 
+        }
+        const sequence_chord_desc_t& getStepDescriptor(uint16_t step) const {
+            // 指定した位置またはその直前のステップ情報を返す
+            auto it = get_le(step);
+            if (it != _data.end()) {
+                if (it->first <= step) {
+                    return it->second;
+                }
+            }
+            return _default_value;
+        }
+        void setStepDescriptor(uint16_t step, const sequence_chord_desc_t& value) {
+            if (step >= def::app::max_sequence_step) {
+                return;
+            }
+            auto it = get_le(step);
+            if (it != _data.end() && it->first <= step) {
+                if (it->first == step) {
+                    // 上書きされる値がある場合、先に削除しておく
+                    _data.erase(it);
+                    // 再帰呼び出しで対応することにより、現在位置より前の値との同一内容チェックが働く
+                    setStepDescriptor(step, value);
+                    return;
+                }
+                if (it->second == value) {
+                    // 既に同じ内容が存在しているなら登録しない
+                    return;
+                }
+            }
+            set(step, value);
+        }
+        void clear(void) {
+            _data.clear();
+        }
+        void deleteAfter(uint16_t step) {
+            // 指定したステップ以降のデータを削除する
+            auto it = _data.lower_bound(step);
+            while (it != _data.end()) {
+                it = _data.erase(it);
+            }
+        }
+        const auto& getDataMap(void) const { return _data; }
+        bool saveJson(JsonVariant &json);
+        bool loadJson(const JsonVariant &json);
+    };
 #endif
-        reg_command_request_t(void) : registry_t(4, 32, DATA_SIZE_16) {}
+    struct reg_sequence_info_t : public registry_t {
+        reg_sequence_info_t(void) : registry_t(16, 0, DATA_SIZE_8) {}
+        enum index_t : uint16_t {
+            LENGTH_L,
+            LENGTH_H,
+        };
+        void setLength(uint16_t step) { set16(LENGTH_L, step); }
+        uint16_t getLength(void) const { return get16(LENGTH_L); }
+    };
+
+    struct sequence_data_t {
+        reg_sequence_timeline_t timeline;
+        reg_sequence_info_t info;
+
+        void init(bool psram = false) {
+            timeline.init(psram);
+            info.init(psram);
+        }
+        void assign(const sequence_data_t &src) {
+            timeline.assign(src.timeline);
+            info.assign(src.info);
+        }
+        void reset(void) {
+            info.setLength(0);
+            timeline.clear();
+        }
+        uint32_t crc32(uint32_t crc) const {
+            crc = info.crc32(crc);
+            crc = timeline.crc32(crc);
+            return crc;
+        }
+        sequence_chord_desc_t getStepDescriptor(uint16_t step) const {
+            if (step >= info.getLength()) {
+                step = -1;
+            }
+            return timeline.getStepDescriptor(step);
+        }
+        void setStepDescriptor(uint16_t step, const sequence_chord_desc_t& value) {
+            if (step >= def::app::max_sequence_step) {
+                return;
+            }
+            timeline.setStepDescriptor(step, value);
+            auto max_step = info.getLength();
+            if (step >= max_step) {
+                info.setLength(step+1);
+            }
+        }
+        void deleteAfter(uint16_t step) 
+        {
+            auto max_step = info.getLength();
+            if (step < max_step) {
+                info.setLength(step);
+                // timeline.deleteAfter(step);
+            }
+        }
+    };
+
+    struct reg_command_request_t : public registry_base_t {
+#if __has_include (<freertos/FreeRTOS.h>)
+        using registry_base_t::setNotifyTaskHandle;
+#endif
+        reg_command_request_t(void) : registry_base_t(64) {}
         enum index_t : uint16_t {
             COMMAND_RELEASED = 0,
             COMMAND_PRESSED = 2,
@@ -873,47 +1192,13 @@ protected:
             *is_pressed = history->index == COMMAND_PRESSED;
             return true;
         }
-        void addQueue(const def::command::command_param_t& command_param, bool is_pressed)
+        void addQueue(const def::command::command_param_t& command_param, bool is_pressed = true)
         { set16(is_pressed ? COMMAND_PRESSED : COMMAND_RELEASED, command_param.raw, true); }
 
-        void addQueue(const def::command::command_param_t& command_param) {
+        void addQueueW(const def::command::command_param_t& command_param) {
             addQueue(command_param, true);
             addQueue(command_param, false);
         }
-
-        // void request(def::command::command_t command, int8_t param) {
-        //     addQueue({ command, param }, true);
-        //     addQueue({ command, param }, false);
-        // };
-    };
-
-    struct reg_file_command_t : public registry_t {
-        reg_file_command_t(void) : registry_t(16, 8, DATA_SIZE_32) {}
-        enum index_t : uint8_t {
-            CURRENT_SONG_INFO = 0x00,
-            UPDATE_LIST = 0x04,
-            FILE_LOAD = 0x08,
-            FILE_SAVE = 0x0C,
-        };
-        void setCurrentSongInfo(const def::app::file_command_info_t& info) { set32(CURRENT_SONG_INFO, info.raw, true); }
-        def::app::file_command_info_t getCurrentSongInfo(void) const { return def::app::file_command_info_t(get32(CURRENT_SONG_INFO)); }
-
-        void wait(void);
-
-        void waitUpdateList(void);
-        void setUpdateList(const def::app::file_command_info_t& info) { set32(UPDATE_LIST, info.raw, true); }
-        def::app::file_command_info_t getUpdateList(void) const { return def::app::file_command_info_t(get32(UPDATE_LIST)); }
-        void clearUpdateList(void) { set32(UPDATE_LIST, 0, false); }
-
-        void waitFileLoad(void);
-        void setFileLoadRequest(const def::app::file_command_info_t& info) { waitFileLoad(); set32(FILE_LOAD, info.raw, true); }
-        def::app::file_command_info_t getFileLoadRequest(void) const { return def::app::file_command_info_t(get32(FILE_LOAD)); }
-        void clearFileLoadRequest(void) { set32(FILE_LOAD, 0, false); }
-
-        void waitFileSave(void);
-        void setFileSaveRequest(const def::app::file_command_info_t& info) { waitFileSave(); set32(FILE_SAVE, info.raw, true); }
-        def::app::file_command_info_t getFileSaveRequest(void) const { return def::app::file_command_info_t(get32(FILE_SAVE)); }
-        void clearFileSaveRequest(void) { set32(FILE_SAVE, 0, false); }
     };
 
     struct reg_song_info_t : public registry_t {
@@ -924,14 +1209,6 @@ protected:
             SWING,
             BASE_KEY,
         };
-        // void set8(uint16_t index, uint8_t value, bool force = false) {
-        //     system_registry.runtime_info.setSongModified(true);
-        //     registry_t::set8(index, value, force);
-        // }
-        // void set16(uint16_t index, uint16_t value, bool force = false) {
-        //     system_registry.runtime_info.setSongModified(true);
-        //     registry_t::set16(index, value, force);
-        // }
         void setTempo(uint16_t bpm) {
             if (bpm < def::app::tempo_bpm_min) { bpm = def::app::tempo_bpm_min; }
             if (bpm > def::app::tempo_bpm_max) { bpm = def::app::tempo_bpm_max; }
@@ -952,6 +1229,7 @@ protected:
     // ソングデータ
     struct song_data_t {
         reg_song_info_t song_info;
+        sequence_data_t sequence;
 
         kanplay_slot_t slot[def::app::max_slot];
 
@@ -959,11 +1237,11 @@ protected:
         reg_chord_part_drum_t chord_part_drum[def::app::max_chord_part];
 
         size_t saveSongJSON(uint8_t* data, size_t data_length);
-
         bool loadSongJSON(const uint8_t* data, size_t data_length);
 
         void init(bool psram = false) {
             song_info.init(psram);
+            sequence.init(true);
             for (int i = 0; i < def::app::max_slot; ++i) {
                 slot[i].init(psram);
             }
@@ -971,15 +1249,27 @@ protected:
                 chord_part_drum[i].init(psram);
             }
         }
+        uint32_t crc32(uint32_t crc = 0) const {
+            crc = song_info.crc32(crc);
+            crc = sequence.crc32(crc);
+            for (int i = 0; i < def::app::max_slot; ++i) {
+                crc = slot[i].crc32(crc);
+            }
+            for (int i = 0; i < def::app::max_chord_part; ++i) {
+                crc = chord_part_drum[i].crc32(crc);
+            }
+            return crc;
+        }
 
         // メモリ上の文字列データから読み込む(旧仕様)
         bool loadText(uint8_t* data, size_t data_length);
 
         // メモリ上に文字列データを保存する(旧仕様)
-        size_t saveText(uint8_t* data, size_t data_length);
+        // size_t saveText(uint8_t* data, size_t data_length);
 
         bool assign(const song_data_t &src) {
             song_info.assign(src.song_info);
+            sequence.assign(src.sequence);
             for (int i = 0; i < def::app::max_slot; ++i) {
                 slot[i].assign(src.slot[i]);
             }
@@ -990,6 +1280,7 @@ protected:
         }
         void reset(void) {
             song_info.reset();
+            sequence.reset();
             for (int i = 0; i < def::app::max_slot; ++i) {
                 slot[i].reset();
             }
@@ -1001,6 +1292,7 @@ protected:
         // 比較オペレータ
         bool operator== (const song_data_t &src) const {
             if (song_info != src.song_info) { return false; }
+            if (sequence.info != src.sequence.info) { return false; }
             for (int i = 0; i < def::app::max_slot; ++i) {
                 if (slot[i] != src.slot[i]) { return false; }
             }
@@ -1017,51 +1309,28 @@ protected:
     // そのため、ボタンに8Byteの割り当てとしている
     struct reg_command_mapping_t : public registry_t {
         reg_command_mapping_t(uint8_t button_count) : registry_t(button_count * 8, 0, DATA_SIZE_32) {}
-        void setCommandParamArray(uint8_t button_index, def::command::command_param_array_t command) { set32(button_index * 8, command.raw32_0); set32(button_index * 8 + 4, command.raw32_1); }
+        void setCommandParamArray(uint8_t button_index, def::command::command_param_array_t command)
+        {
+            set32(button_index * 8, command.raw32_0);
+            set32(button_index * 8 + 4, command.raw32_1);
+        }
         def::command::command_param_array_t getCommandParamArray(uint8_t button_index) const { return def::command::command_param_array_t { get32(button_index * 8), get32(button_index * 8 + 4) }; }
         void reset(void) {
             for (int i = 0; i < _registry_size; i += 4) {
                 set32(i, 0);
             }
         }
-    };
-
-    struct reg_midi_command_mapping_t : public registry_map_t<def::command::command_param_array_t> {
-        reg_midi_command_mapping_t(void) : registry_map_t<def::command::command_param_array_t>( def::command::command_param_array_t(0) ) {}
-        void setCommandParamArray(uint8_t button_index, def::command::command_param_array_t command) { set(button_index, command); }
-        const def::command::command_param_array_t& getCommandParamArray(uint8_t button_index) const { return get(button_index); }
-        void reset(void) {
-            _data.clear();
-        }
-    };
-
-/*
-    struct reg_command_mapping_t : public registry_base_t {
-        reg_command_mapping_t(void) : registry_base_t { 0 } {}
-        void setCommandParamArray(uint8_t button_index, def::command::command_param_array_t command)
-        {
-            _command_map[button_index].clear();
-            _command_map[button_index].push_back(command.array[0]);
-            if (command.array[1].raw != 0) { _command_map[button_index].push_back(command.array[1]); }
-        }
-        def::command::command_param_array_t getCommandParamArray(uint8_t button_index) const
-        {
-            def::command::command_param_array_t result;
-            auto it = _command_map.find(button_index);
-            if (it != _command_map.end()) {
-                result.array[0] = it->second[0];
-                if (it->second.size() > 1) { result.array[1] = it->second[1]; }
+        size_t getButtonCount(void) const { return _registry_size >> 3; }
+        bool empty(void) const {
+            for (int i = 0; i < _registry_size; i += 4) {
+                if (get32(i) != 0) {
+                    return false;
+                }
             }
-            return result;
+            return true;
         }
-        // const std::vector<def::command::command_param_t>& getCommandParam(uint8_t button_index) const
-        // {
-        //     return static_cast<def::command::command_param_array_t>(get32(button_index * 4));
-        // }
-    protected:
-        std::map<uint8_t, std::vector<def::command::command_param_t> > _command_map;
     };
-//*/
+
     struct reg_color_setting_t : public registry_t {
         reg_color_setting_t(void) : registry_t(72, 0, DATA_SIZE_32) {}
         enum index_t : uint16_t {
@@ -1123,12 +1392,14 @@ protected:
     };
 
     struct reg_menu_status_t : public registry_t {
-        reg_menu_status_t(void) : registry_t(16, 0, DATA_SIZE_8) {}
+        reg_menu_status_t(void) : registry_t(20, 0, DATA_SIZE_8) {}
         enum index_t : uint16_t {
           CURRENT_LEVEL,
           MENU_CATEGORY,
-          CURRENT_SEQUENCE_L,
-          CURRENT_SEQUENCE_H,
+          CURRENT_MENU_ID_L,
+          CURRENT_MENU_ID_H,
+          SELECT_INDEX_LEVEL_M1L,
+          SELECT_INDEX_LEVEL_M1H,
           SELECT_INDEX_LEVEL_0L,
           SELECT_INDEX_LEVEL_0H,
           SELECT_INDEX_LEVEL_1L,
@@ -1139,20 +1410,52 @@ protected:
           SELECT_INDEX_LEVEL_3H,
           SELECT_INDEX_LEVEL_4L,
           SELECT_INDEX_LEVEL_4H,
+          SELECT_INDEX_LEVEL_5L,
+          SELECT_INDEX_LEVEL_5H,
         };
-        void reset(void) { for (int i = 0; i < 16; ++i) { set8(i, 0); } }
+        void reset(void) { for (int i = 0; i < 20; ++i) { set8(i, 0); } }
         void setCurrentLevel(uint8_t level) { set8(CURRENT_LEVEL, level); }
         uint8_t getCurrentLevel(void) const { return get8(CURRENT_LEVEL); }
-        void setCurrentSequence(uint16_t seq) { set16(CURRENT_SEQUENCE_L, seq); }
-        uint16_t getCurrentSequence(void) const { return get16(CURRENT_SEQUENCE_L); }
+        void setCurrentMenuID(uint16_t menu_id) { set16(CURRENT_MENU_ID_L, menu_id); }
+        uint16_t getCurrentMenuID(void) const { return get16(CURRENT_MENU_ID_L); }
         void setMenuCategory(uint8_t index) {
             assert(index < 8 && "Menu category index is out of range.");
             set8(MENU_CATEGORY, index);
         }
         uint8_t getMenuCategory(void) const { return get8(MENU_CATEGORY); }
-        void setSelectIndex(uint8_t level, uint16_t index) { set16(SELECT_INDEX_LEVEL_0L + level*2, index); }
-        uint16_t getSelectIndex(uint8_t level) const { return get16(SELECT_INDEX_LEVEL_0L + level*2); }
+        void setSelectIndex(uint8_t level, uint16_t index) { set16(SELECT_INDEX_LEVEL_0L + ((int8_t)level)*2, index); }
+        uint16_t getSelectIndex(uint8_t level) const { return get16(SELECT_INDEX_LEVEL_0L + ((int8_t)level)*2); }
     }; 
+
+    struct control_mapping_t {
+        reg_command_mapping_t internal { def::hw::max_main_button };      // 現在のボタンマッピングテーブル
+        reg_command_mapping_t external { def::hw::max_button_mask };     // 外部機器ボタンのマッピングテーブル
+        reg_command_mapping_t midinote { def::midi::max_note };    // MIDIノートへのコマンドマッピングテーブル
+        void init(bool psram = false) {
+            internal.init(psram);
+            external.init(psram);
+            midinote.init(psram);
+        }
+        uint32_t crc32(uint32_t crc = 0) const {
+            crc = internal.crc32(crc);
+            crc = external.crc32(crc);
+            crc = midinote.crc32(crc);
+            return crc;
+        }
+        size_t saveJSON(uint8_t* data, size_t data_length);
+        bool loadJSON(const uint8_t* data, size_t data_length);
+        bool saveJSON(JsonVariant &json);
+        bool loadJSON(const JsonVariant &json);
+        bool empty(void) const {
+            return internal.empty() && external.empty() && midinote.empty();
+        }
+        void reset(void) {
+            internal.reset();
+            external.reset();
+            midinote.reset();
+            system_registry->updateControlMapping();
+        }
+    };
 
     reg_menu_status_t      menu_status;
 
@@ -1166,27 +1469,27 @@ protected:
     reg_command_request_t  player_command;      // オペレータから演奏部への指示に限定したコマンド
 
     reg_chord_play_t       chord_play;          // コード演奏情報
-    kanplay_slot_t*        current_slot = &song_data.slot[0];        // 現在の操作対象スロット(編集中のスロット)
     song_data_t            song_data;           // 演奏対象のソングデータ スロット1~8のデータ (保存用)
+    kanplay_slot_t*        current_slot = &song_data.slot[0];        // 現在の操作対象スロット(編集中のスロット)
+    sequence_data_t*       current_sequence = &song_data.sequence;     // 現在のシーケンスデータへのポインタ
 
     // // 一時預かりデータ。ファイルから読込処理を行う際の一時利用や、編集モードに移行する前に元の状態を保持する
     song_data_t            backup_song_data;
-
-    // 変更前のソングデータ。ファイル入出力直後の状態を保持する
-    song_data_t            unchanged_song_data;
 
     reg_color_setting_t    color_setting;       // GUIの各種カラー設定
 
     reg_external_input_t   external_input;      // 外部機器のボタン類の操作状態
 
-    reg_command_mapping_t command_mapping_current { def::hw::max_button_mask };      // 現在のボタンマッピングテーブル
-    reg_command_mapping_t command_mapping_external { def::hw::max_button_mask };     // 外部機器ボタンのマッピングテーブル
-    reg_command_mapping_t command_mapping_port_b { 4 };     // 外部機器ボタンのマッピングテーブル
-    reg_midi_command_mapping_t command_mapping_midinote;    // MIDIノートへのコマンドマッピングテーブル
-    reg_midi_command_mapping_t command_mapping_midicc15;    // MIDI CCへのコマンドマッピングテーブル
-    reg_midi_command_mapping_t command_mapping_midicc16;    // MIDI CCへのコマンドマッピングテーブル
+    control_mapping_t      control_mapping[2];  // コントロールマッピング設定 (0:本体デフォルト, 1:ソングデータ)
 
-    reg_command_mapping_t command_mapping_custom_main { def::hw::max_button_mask };  // メインボタンの割当カスタマイズテーブル
+    reg_command_mapping_t command_mapping_internal { def::hw::max_main_button };
+    reg_command_mapping_t command_mapping_external { def::hw::max_button_mask };
+    reg_command_mapping_t command_mapping_midinote { def::midi::max_note };
+
+    reg_command_mapping_t command_mapping_current { def::hw::max_button_mask };      // 現在のボタンマッピングテーブル
+    reg_command_mapping_t command_mapping_port_b { 4 };     // 外部機器ボタンのマッピングテーブル
+    reg_command_mapping_t command_mapping_midicc15 { def::midi::max_note };    // MIDI CCへのコマンドマッピングテーブル
+    reg_command_mapping_t command_mapping_midicc16 { def::midi::max_note };    // MIDI CCへのコマンドマッピングテーブル
 
     kanplay_slot_t       clipboard_slot;      // コピー/ペースト(クリップボード)データ。コピー/カットしたデータを一時的に保持する
     reg_arpeggio_table_t clipboard_arpeggio;  // コピー/ペースト(クリップボード)データ。コピー/カットしたデータを一時的に保持する
@@ -1201,16 +1504,16 @@ protected:
 
     registry_t drum_mapping { 16, 0, registry_t::DATA_SIZE_8 }; // ドラム演奏モードのコマンドとノートナンバーのマッピングテーブル
 
-    reg_file_command_t file_command;  // ファイル操作に対するコマンド
-
-    void checkSongModified(void) const {
-        bool mod = song_data != unchanged_song_data;
-        system_registry.runtime_info.setSongModified(mod);
-    }
+    void checkSongModified(void) const;
 
     static constexpr const size_t raw_wave_length = 320;
     std::pair<uint8_t, uint8_t> raw_wave[raw_wave_length] = { { 128, 128 },};
     uint16_t raw_wave_pos = 0;
+
+protected:
+    // 変更前のソングデータのCRC32値 (変更検出用)
+    uint32_t unchanged_song_crc32 = 0;
+    uint32_t unchanged_kmap_crc32 = 0;
 };
 
 //-------------------------------------------------------------------------

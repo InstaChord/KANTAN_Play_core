@@ -6,6 +6,10 @@
 
 #include "../system_registry.hpp"
 
+#include "internal_es8388.hpp"
+#include "internal_si5351.hpp"
+#include "internal_bmi270.hpp"
+
 namespace kanplay_ns {
 //-------------------------------------------------------------------------
 // かんぷれ本体制御用クラスの基本形。本体のハードウェアのバリエーションに応じて派生型を作る
@@ -32,6 +36,13 @@ public:
     bool execFirmwareUpdate(void) override;
     void mute(void) override;
 protected:
+    uint32_t calcImuStandardDeviation(void);
+    void updateImuVelocity(void);
+
+    internal_es8388_t internal_es8388;
+    internal_si5351_t internal_si5351;
+    internal_bmi270_t internal_bmi270;
+
     registry_t::history_code_t rgbled_history_code = 0;
 };
 

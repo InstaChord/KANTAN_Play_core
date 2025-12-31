@@ -38,9 +38,10 @@ static uint8_t pin_debug[6] = { 0, 0, 0, 0, 0, 0 };
 namespace kanplay_ns {
 //-------------------------------------------------------------------------
 // extern instance
-system_registry_t system_registry;
+system_registry_t* system_registry;
 
 static std::set<def::command::command_param_t> working_command_param;
+// static std::map<def::command::command_param_t, uint16_t> working_command_counter;
 static std::mutex mtx_working_command_param;
 
 #if __has_include (<freertos/freertos.h>)
@@ -56,19 +57,37 @@ void system_registry_t::reg_working_command_t::setNotifyTaskHandle(TaskHandle_t 
 
 void system_registry_t::reg_working_command_t::set(const def::command::command_param_t& command_param)
 {
-  std::lock_guard<std::mutex> lock(mtx_working_command_param);
-   // M5_LOGV("set %04x", command_param);
-  working_command_param.insert(command_param);
-  ++_working_command_change_counter;
-  _execNotify();
+  bool notify = false;
+  {
+    // M5_LOGV("set %04x", command_param);
+    std::lock_guard<std::mutex> lock(mtx_working_command_param);
+    auto it = working_command_param.find(command_param);
+    if (it == working_command_param.end()) {
+      working_command_param.insert(command_param);
+      ++_working_command_change_counter;
+      notify = true;
+    }
+  }
+  if (notify) {
+    _execNotify();
+  }
 }
 void system_registry_t::reg_working_command_t::clear(const def::command::command_param_t& command_param)
 {
-  std::lock_guard<std::mutex> lock(mtx_working_command_param);
-  // M5_LOGV("clear %04x", command_param);
-  working_command_param.erase(command_param);
-  ++_working_command_change_counter;
-  _execNotify();
+  bool notify = false;
+  {
+    // M5_LOGV("clear %04x", command_param);
+    std::lock_guard<std::mutex> lock(mtx_working_command_param);
+    auto it = working_command_param.find(command_param);
+    if (it != working_command_param.end()) {
+      working_command_param.erase(it);
+      ++_working_command_change_counter;
+      notify = true;
+    }
+  }
+  if (notify) {
+    _execNotify();
+  }
 }
 bool system_registry_t::reg_working_command_t::check(const def::command::command_param_t& command_param) const
 {
@@ -80,15 +99,12 @@ void system_registry_t::init(void)
 {
   user_setting.init();
   midi_port_setting.init();
-
   runtime_info.init();
-  popup_notify.init();
-  popup_qr.init();
   wifi_control.init();
-  menu_status.init();
   task_status.init();
   sub_button.init();
   internal_input.init();
+  external_input.init();
   internal_imu.init();
   rgbled_control.init();
   midi_out_control.init();
@@ -96,23 +112,28 @@ void system_registry_t::init(void)
   player_command.init();
   chord_play.init();
   color_setting.init();
-  external_input.init();
   command_mapping_current.init();
-  command_mapping_external.init();
-  command_mapping_port_b.init();
-  command_mapping_midinote.init();
-  command_mapping_midicc15.init();
-  command_mapping_midicc16.init();
-  drum_mapping.init();
-  file_command.init();
 
   // 以下のデータはPSRAM配置として初期化する
+  control_mapping[0].init(true);
+  control_mapping[1].init(true);
+  command_mapping_internal.init(true);
+  command_mapping_external.init(true);
+  command_mapping_midinote.init(true);
+  command_mapping_port_b.init(true);
+  command_mapping_midicc15.init(true);
+  command_mapping_midicc16.init(true);
+  drum_mapping.init(true);
+  menu_status.init(true);
+  popup_notify.init(true);
+  popup_qr.init(true);
   song_data.init(true);
   backup_song_data.init(true);
-  unchanged_song_data.init(true);
   clipboard_slot.init(true);
   clipboard_arpeggio.init(true);
-  command_mapping_custom_main.init(true);
+// command_mapping_custom_main.init(true);
+//sequence_play.init(true);
+//current_sequence_timeline.init(true);
 
   // 設定値を読み込む
   load();
@@ -139,6 +160,90 @@ void system_registry_t::init(void)
 #endif
 #endif
 }
+
+//-------------------------------------------------------------------------
+struct note_cp_t {
+  uint8_t note;
+  def::command::command_param_array_t command_param;
+};
+
+void system_registry_t::updateControlMapping(void)
+{
+  if (control_mapping[0].internal.empty()) {
+    // コード演奏時のメインボタンのカスタマイズ用マッピングを準備
+    for (int i = 0; i < def::hw::max_main_button; ++i) {
+      auto pair = def::command::command_mapping_chord_play_table[i];
+      control_mapping[0].internal.setCommandParamArray(i, pair);
+    }
+  }
+
+  if (control_mapping[0].external.empty()) {
+    for (int i = 0; i < def::hw::max_button_mask; ++i) {
+      control_mapping[0].external.setCommandParamArray(i, def::command::command_mapping_external_table[i]);
+    }
+  }
+
+  if (control_mapping[0].midinote.empty()) {
+    static constexpr const note_cp_t note_cp_table[] = {
+      { 53, { def::command::chord_modifier  , KANTANMusic_Modifier_dim } },
+      { 55, { def::command::chord_modifier  , KANTANMusic_Modifier_7 } },
+      { 56, { def::command::chord_modifier  , KANTANMusic_Modifier_sus4 } },
+      { 57, { def::command::chord_minor_swap, 1 } },
+      { 58, { def::command::chord_modifier  , KANTANMusic_Modifier_Add9 } },
+      { 59, { def::command::chord_modifier  , KANTANMusic_Modifier_M7 } },
+      { 60, { def::command::chord_degree, make_degree(1, false               ) } },
+      { 61, { def::command::chord_degree, make_degree(2, false, semitone_flat) } },
+      { 62, { def::command::chord_degree, make_degree(2, false               ) } },
+      { 63, { def::command::chord_degree, make_degree(3, false, semitone_flat) } },
+      { 64, { def::command::chord_degree, make_degree(3, false               ) } },
+      { 65, { def::command::chord_degree, make_degree(4, false               ) } },
+      { 66, { def::command::chord_degree, make_degree(5, false, semitone_flat) } },
+      { 67, { def::command::chord_degree, make_degree(5, false               ) } },
+      { 68, { def::command::chord_degree, make_degree(6, false, semitone_flat) } },
+      { 69, { def::command::chord_degree, make_degree(6, false               ) } },
+      { 70, { def::command::chord_degree, make_degree(7, false, semitone_flat) } },
+      { 71, { def::command::chord_degree, make_degree(7, false               ) } },
+    };
+    for (const auto& cp : note_cp_table) {
+      control_mapping[0].midinote.setCommandParamArray(cp.note, cp.command_param);
+    }
+  }
+
+  // command_mapping_internal = &(control_mapping[control_mapping[1].internal.empty() ? 0 : 1].internal);
+  // command_mapping_external = &(control_mapping[control_mapping[1].external.empty() ? 0 : 1].external);
+  // command_mapping_midinote = &(control_mapping[control_mapping[1].midinote.empty() ? 0 : 1].midinote);
+  command_mapping_internal.assign(control_mapping[0].internal);
+  command_mapping_external.assign(control_mapping[0].external);
+  command_mapping_midinote.assign(control_mapping[0].midinote);
+
+  // マッピング１のうち値があるものを優先的に使用する
+  if (!control_mapping[1].internal.empty()) {
+    for (int i = 0; i < def::hw::max_main_button; ++i) {
+      auto command_param_array = control_mapping[1].internal.getCommandParamArray(i);
+      if (!command_param_array.empty()) {
+        command_mapping_internal.setCommandParamArray(i, command_param_array);
+      }
+    }
+  }
+  if (!control_mapping[1].external.empty()) {
+    for (int i = 0; i < def::hw::max_button_mask; ++i) {
+      auto command_param_array = control_mapping[1].external.getCommandParamArray(i);
+      if (!command_param_array.empty()) {
+        command_mapping_external.setCommandParamArray(i, command_param_array);
+      }
+    }
+  }
+  if (!control_mapping[1].midinote.empty()) {
+    for (int i = 0; i < def::midi::max_note; ++i) {
+      auto command_param_array = control_mapping[1].midinote.getCommandParamArray(i);
+      if (!command_param_array.empty()) {
+        command_mapping_midinote.setCommandParamArray(i, command_param_array);
+      }
+    }
+  }
+  
+}
+//-------------------------------------------------------------------------
 
 void system_registry_t::reset(void)
 {
@@ -199,48 +304,13 @@ void system_registry_t::reset(void)
   runtime_info.setPressVelocity(127);
 
 
-  command_mapping_external.reset();
-  for (int i = 0; i < def::hw::max_button_mask; ++i) {
-    command_mapping_external.setCommandParamArray(i, def::command::command_mapping_external_table[i]);
-  }
-
   command_mapping_port_b.reset();
   for (int i = 0; i < def::hw::max_port_b_pins; ++i) {
     command_mapping_port_b.setCommandParamArray(i, def::command::command_mapping_port_b_table[i]);
   }
 
-  struct note_cp_t {
-    uint8_t note;
-    def::command::command_param_array_t command_param;
-  };
-  {
-    command_mapping_midinote.reset();
-    static constexpr const note_cp_t note_cp_table[] = {
-      { 53, { def::command::chord_modifier  , KANTANMusic_Modifier_dim } },
-      { 55, { def::command::chord_modifier  , KANTANMusic_Modifier_7 } },
-      { 56, { def::command::chord_modifier  , KANTANMusic_Modifier_sus4 } },
-      { 57, { def::command::chord_minor_swap, 1 } },
-      { 58, { def::command::chord_modifier  , KANTANMusic_Modifier_Add9 } },
-      { 59, { def::command::chord_modifier  , KANTANMusic_Modifier_M7 } },
-      { 60, {                                  def::command::chord_degree, 1 } },
-      { 61, { def::command::chord_semitone, 1, def::command::chord_degree, 2 } },
-      { 62, {                                  def::command::chord_degree, 2 } },
-      { 63, { def::command::chord_semitone, 1, def::command::chord_degree, 3 } },
-      { 64, {                                  def::command::chord_degree, 3 } },
-      { 65, {                                  def::command::chord_degree, 4 } },
-      { 66, { def::command::chord_semitone, 1, def::command::chord_degree, 5 } },
-      { 67, {                                  def::command::chord_degree, 5 } },
-      { 68, { def::command::chord_semitone, 1, def::command::chord_degree, 6 } },
-      { 69, {                                  def::command::chord_degree, 6 } },
-      { 70, { def::command::chord_semitone, 1, def::command::chord_degree, 7 } },
-      { 71, {                                  def::command::chord_degree, 7 } },
-    };
-    for (const auto& cp : note_cp_table) {
-      command_mapping_midinote.setCommandParamArray(cp.note, cp.command_param);
-    }
-  }
-
   { // InstaChord連携用のコントロールチェンジへの機能マッピング
+    // CC15: キーチェンジ
     command_mapping_midicc15.reset();
     static constexpr const note_cp_t cc15_cp_table[] = {
       {  0, { def::command::target_key_set  ,  0 } },
@@ -260,50 +330,54 @@ void system_registry_t::reset(void)
       command_mapping_midicc15.setCommandParamArray(cp.note, cp.command_param);
     }
 
+    // CC16: 演奏操作
     command_mapping_midicc16.reset();
     static constexpr const note_cp_t cc16_cp_table[] = {
-      {  2, { def::command::slot_select_ud  , def::command::slot_select_ud_t::slot_next } },
-      {  3, { def::command::slot_select_ud  , def::command::slot_select_ud_t::slot_prev } },
-      {  7, { def::command::internal_button , 21 } },
-      {  8, { def::command::internal_button , 27 } },
-      {  9, { def::command::chord_semitone  ,  1 } },
-      { 10, { def::command::chord_minor_swap,  1 } },
-      { 11, { def::command::chord_modifier  , KANTANMusic_Modifier_m7_5 } },
-      { 12, { def::command::chord_modifier  , KANTANMusic_Modifier_7    } },
-      { 13, { def::command::chord_modifier  , KANTANMusic_Modifier_M7   } },
-      { 14, { def::command::chord_modifier  , KANTANMusic_Modifier_sus4 } },
-      { 15, { def::command::chord_modifier  , KANTANMusic_Modifier_dim  } },
-      { 16, { def::command::chord_modifier  , KANTANMusic_Modifier_Add9 } },
-      { 17, { def::command::chord_modifier  , KANTANMusic_Modifier_aug  } },
-      { 18, { def::command::chord_degree    ,  1 } },
-      { 19, { def::command::chord_degree    ,  2 } },
-      { 20, { def::command::chord_degree    ,  3 } },
-      { 21, { def::command::chord_degree    ,  4 } },
-      { 22, { def::command::chord_degree    ,  5 } },
-      { 23, { def::command::chord_degree    ,  6 } },
-      { 24, { def::command::chord_degree    ,  7 } },
-      { 25, { def::command::chord_semitone  ,  1 , def::command::chord_degree, 3 } },
-      { 26, { def::command::chord_semitone  ,  1 , def::command::chord_degree, 7 } },
-      { 27, { def::command::chord_degree    ,  6 } },
-      { 28, { def::command::chord_degree    ,  7 } },
-      { 29, { def::command::chord_degree    ,  1 } },
-      { 30, { def::command::chord_degree    ,  2 } },
-      { 31, { def::command::chord_minor_swap,  1 , def::command::chord_degree, 3 } },
-      { 32, { def::command::chord_degree    ,  4 } },
-      { 33, { def::command::chord_degree    ,  5 } },
-      { 34, { def::command::chord_semitone  ,  1 , def::command::chord_degree, 3 } },
-      { 35, { def::command::chord_semitone  ,  1 , def::command::chord_degree, 7 } },
+//    {  1,                                                                               }, // 十字ボタン中央  
+      {  2, { def::command::slot_select_ud  , def::command::slot_select_ud_t::slot_next } }, // 十字ボタン上(楽器順送り)
+      {  3, { def::command::slot_select_ud  , def::command::slot_select_ud_t::slot_prev } }, // 十字ボタン下(楽器逆送り)
+//    {  4,                                                                               }, // 十字ボタン♭  
+//    {  5,                                                                               }, // 十字ボタン＃  
+//    {  6,                                                                               }, // 21ボタン pos  
+      {  7, { def::command::internal_button , 21                                   } }, // 21ボタン menu
+      {  8, { def::command::internal_button , 27                                   } }, // 21ボタン key
+      {  9, { def::command::chord_semitone  ,  1                                   } }, // 21ボタン ♭
+      { 10, { def::command::chord_minor_swap,  1                                   } }, // 21ボタン ～
+      { 11, { def::command::chord_modifier  , KANTANMusic_Modifier_m7_5            } }, // 21ボタン コード種 m7-5
+      { 12, { def::command::chord_modifier  , KANTANMusic_Modifier_7               } }, // 21ボタン コード種 7
+      { 13, { def::command::chord_modifier  , KANTANMusic_Modifier_M7              } }, // 21ボタン コード種 M7
+      { 14, { def::command::chord_modifier  , KANTANMusic_Modifier_sus4            } }, // 21ボタン コード種 sus4
+      { 15, { def::command::chord_modifier  , KANTANMusic_Modifier_dim             } }, // 21ボタン コード種 dim
+      { 16, { def::command::chord_modifier  , KANTANMusic_Modifier_Add9            } }, // 21ボタン コード種 add9
+      { 17, { def::command::chord_modifier  , KANTANMusic_Modifier_aug             } }, // 21ボタン コード種 aug
+      { 18, { def::command::chord_degree    , make_degree(1                      ) } }, // 21ボタン ルート根1
+      { 19, { def::command::chord_degree    , make_degree(2                      ) } }, // 21ボタン ルート根2
+      { 20, { def::command::chord_degree    , make_degree(3                      ) } }, // 21ボタン ルート根3
+      { 21, { def::command::chord_degree    , make_degree(4                      ) } }, // 21ボタン ルート根4
+      { 22, { def::command::chord_degree    , make_degree(5                      ) } }, // 21ボタン ルート根5
+      { 23, { def::command::chord_degree    , make_degree(6                      ) } }, // 21ボタン ルート根6
+      { 24, { def::command::chord_degree    , make_degree(7                      ) } }, // 21ボタン ルート根7
+      { 25, { def::command::chord_degree    , make_degree(3, false, semitone_flat) } }, // 21ボタン ルート根8
+      { 26, { def::command::chord_degree    , make_degree(7, false, semitone_flat) } }, // 21ボタン ルート根9
+      { 27, { def::command::chord_degree    , make_degree(6                      ) } }, // 21ボタン ルート根1(短調モード時)
+      { 28, { def::command::chord_degree    , make_degree(7                      ) } }, // 21ボタン ルート根2(短調モード時)
+      { 29, { def::command::chord_degree    , make_degree(1                      ) } }, // 21ボタン ルート根3(短調モード時)
+      { 30, { def::command::chord_degree    , make_degree(2                      ) } }, // 21ボタン ルート根4(短調モード時)
+      { 31, { def::command::chord_degree    , make_degree(3, true                ) } }, // 21ボタン ルート根5(短調モード時)
+      { 32, { def::command::chord_degree    , make_degree(4                      ) } }, // 21ボタン ルート根6(短調モード時)
+      { 33, { def::command::chord_degree    , make_degree(5                      ) } }, // 21ボタン ルート根7(短調モード時)
+      { 34, { def::command::chord_degree    , make_degree(3, false, semitone_flat) } }, // 21ボタン ルート根8(短調モード時)
+      { 35, { def::command::chord_degree    , make_degree(7, false, semitone_flat) } }, // 21ボタン ルート根9(短調モード時)
     };
     for (const auto& cp : cc16_cp_table) {
       command_mapping_midicc16.setCommandParamArray(cp.note, cp.command_param);
     }
   }
 
-  // コード演奏時のメインボタンのカスタマイズ用マッピングを準備
-  for (int i = 0; i < def::hw::max_button_mask; ++i) {
-    auto pair = def::command::command_mapping_chord_play_table[i];
-    system_registry.command_mapping_custom_main.setCommandParamArray(i, pair);
-  }
+  control_mapping[0].internal.reset();
+  control_mapping[0].external.reset();
+  control_mapping[0].midinote.reset();
+  updateControlMapping();
 
   // ドラム演奏モードのボタンマッピング設定
   // TODO:ソングデータへの保存と読み込みを実装する
@@ -335,63 +409,93 @@ void system_registry_t::reset(void)
 }
 
 
-bool system_registry_t::saveSetting(void)
+bool system_registry_t::save_impl(const char* filename)
 {
   // 各種設定を内蔵フラッシュに保存
   auto mem = file_manage.createMemoryInfo(def::app::max_file_len);
-  mem->filename = "";
-  mem->dir_type = def::app::data_type_t::data_setting;
-  auto len = saveSettingJSON(mem->data, def::app::max_file_len);
-  if (len < 16) { // 極端に小さいサイズの場合は失敗と見做す
+  mem->filename = filename;
+  mem->dir_type = def::app::data_type_t::data_system;
+  size_t len = 0;
+  if (strcmp(filename, def::app::filename_setting) == 0) {
+    len = saveSettingJSON(mem->data, def::app::max_file_len);
+  } else if (strcmp(filename, def::app::filename_resume) == 0) {
+    len = saveResumeJSON(mem->data, def::app::max_file_len);
+  } else if (strcmp(filename, def::app::filename_mapping_device) == 0) {
+    len = control_mapping[0].saveJSON(mem->data, def::app::max_file_len);
+  } else if (strcmp(filename, def::app::filename_mapping_song) == 0) {
+    len = control_mapping[1].saveJSON(mem->data, def::app::max_file_len);
+  } else {
+    mem->release();
     return false;
   }
   mem->size = len;
-  // セーブリクエストは使用せず直接保存する。 (内蔵フラッシュへの保存なのでSPIタスクに任せる必要が無いため)
+M5_LOGV("save_impl %s %d", filename, (int)len);
 
-  return file_manage.saveFile(def::app::data_type_t::data_setting, mem->index);
-
-/* // 以下はセーブリクエストを使用してSPIタスクで処理する場合のコード
-  def::app::file_command_info_t info;
-  info.mem_index = mem->index;
-  info.dir_type = def::app::data_type_t::data_setting;
-  info.file_index = -1;
-  file_command.setFileSaveRequest(info);
-//*/
-}  
-
-bool system_registry_t::saveResume(void)
-{
-  // レジューム用ファイルを内蔵フラッシュに保存
-  auto mem = file_manage.createMemoryInfo(def::app::max_file_len);
-  mem->filename = "";
-  mem->dir_type = def::app::data_type_t::data_resume;
-  auto len = saveResumeJSON(mem->data, def::app::max_file_len);
-  if (len < 16) { // 極端に小さいサイズの場合は失敗と見做す
-    return false;
-  }
-  mem->size = len;
-
-  return file_manage.saveFile(def::app::data_type_t::data_resume, mem->index);
+  return file_manage.saveFile(mem->dir_type, mem->index);
 }
 
 // 設定を保存する
 bool system_registry_t::save(void)
 {
   bool result = true;
-  result = saveSetting() & result;
-  result = saveResume() & result;
+
+  uint32_t crc;
+  crc = calcSettingCRC32();
+  if (_last_setting_crc32 != crc) {
+    if (save_impl(def::app::filename_setting)) {
+      _last_setting_crc32 = crc;
+    } else {
+      result = false;
+    }
+  }
+  crc = calcMappingCRC32();
+  if (_last_mapping_crc32 != crc) {
+    bool result_device = save_impl(def::app::filename_mapping_device);
+    bool result_song = save_impl(def::app::filename_mapping_song);
+// printf("save mapping device=%d song=%d\n", result_device ? 1 : 0, result_song ? 1 : 0);
+    if (result_device && result_song) {
+      _last_mapping_crc32 = crc;
+    } else {
+      result = false;
+    }
+  }
+  crc = calcResumeCRC32();
+  if (_last_resume_crc32 != crc) {
+    if (save_impl(def::app::filename_resume)) {
+      _last_resume_crc32 = crc;
+    } else {
+      result = false;
+    }
+  }
   return result;
 }
 
 // 設定を読み込む
 bool system_registry_t::loadSetting(void)
 {
-  reset();
-
   bool result = false;
-  auto mem = file_manage.loadFile(def::app::data_type_t::data_setting, 0);
+  auto mem = file_manage.loadFile(def::app::data_type_t::data_system, def::app::filename_setting);
   if (mem != nullptr) {
     result = loadSettingJSON(mem->data, mem->size);
+  }
+
+  return result;
+}
+
+bool system_registry_t::loadMapping(void)
+{
+  bool result = false;
+  {
+    auto mem = file_manage.loadFile(def::app::data_type_t::data_system, def::app::filename_mapping_device);
+    if (mem != nullptr) {
+      result =  control_mapping[0].loadJSON(mem->data, mem->size);
+    }
+  }
+  {
+    auto mem = file_manage.loadFile(def::app::data_type_t::data_system, def::app::filename_mapping_song);
+    if (mem != nullptr) {
+      result =  control_mapping[1].loadJSON(mem->data, mem->size);
+    }
   }
 
   return result;
@@ -400,7 +504,7 @@ bool system_registry_t::loadSetting(void)
 bool system_registry_t::loadResume(void)
 {
   bool result = false;
-  auto mem = file_manage.loadFile(def::app::data_type_t::data_resume, 0);
+  auto mem = file_manage.loadFile(def::app::data_type_t::data_system, def::app::filename_resume);
   if (mem != nullptr) {
     result = loadResumeJSON(mem->data, mem->size);
   }
@@ -409,7 +513,7 @@ bool system_registry_t::loadResume(void)
   {
     checkSongModified();
   } else {
-    auto mem = file_manage.loadFile(def::app::data_type_t::data_song_preset, 0);
+    auto mem = file_manage.loadFile(def::app::data_type_t::data_song_preset, (int)0);
     if (mem != nullptr) {
       operator_command.addQueue( { def::command::file_load_notify, mem->index } );
     } else {
@@ -421,10 +525,75 @@ bool system_registry_t::loadResume(void)
 
 bool system_registry_t::load(void)
 {
+  reset();
+
   bool result = true;
-  result = loadSetting() & result;
-  result = loadResume() & result;
+  if (!loadSetting()) {
+    result = false;
+  }
+  if (!loadMapping()) {
+    result = false;
+  }
+  if (!loadResume()) {
+    result = false;
+  }
+  updateCRC32();
   return result;
+}
+
+void system_registry_t::updateCRC32(void)
+{
+  _last_setting_crc32 = calcSettingCRC32();
+  _last_mapping_crc32 = calcMappingCRC32();
+  _last_resume_crc32 = calcResumeCRC32();
+}
+
+//-------------------------------------------------------------------------
+uint32_t system_registry_t::calcSettingCRC32(void) const
+{
+  uint32_t crc = user_setting.crc32();
+  crc = midi_port_setting.crc32(crc);
+  return crc;
+}
+
+uint32_t system_registry_t::calcMappingCRC32(void) const
+{
+  // コントロールマッピングデータのCRC32を計算する
+  // ※ リジューム目的なのでソングに付帯するコントロールマッピングも含む
+  uint32_t crc = control_mapping[0].crc32();
+  crc = control_mapping[1].crc32(crc);
+  return crc;
+}
+
+uint32_t system_registry_t::calcResumeCRC32(void) const
+{
+  uint32_t crc = song_data.crc32();
+  crc = calc_crc32(&unchanged_song_crc32, sizeof(unchanged_song_crc32), crc);
+  crc = calc_crc32(&unchanged_kmap_crc32, sizeof(unchanged_kmap_crc32), crc);
+  return crc;
+}
+
+uint32_t system_registry_t::calcSongCRC32(void) const
+{
+  // ソングデータ本体のCRC32を計算する
+  uint32_t crc = system_registry->song_data.crc32();
+  return crc;
+}
+uint32_t system_registry_t::calcKmapCRC32(void) const
+{
+  // ソングに付帯するコントロールマッピングデータのCRC32を計算する
+  // ※ デバイス側コントロールマッピングは除外する
+  uint32_t crc = control_mapping[1].crc32();
+  return crc;
+}
+
+void system_registry_t::checkSongModified(void) const {
+    auto song_crc32 = calcSongCRC32();
+    auto kmap_crc32 = calcKmapCRC32();
+    bool mod = song_crc32 != unchanged_song_crc32;
+    mod |= kmap_crc32 != unchanged_kmap_crc32;
+M5_LOGV("checkSongModified: song_crc32=0x%08X (unchanged=0x%08X) kmap_crc32=0x%08X (unchanged=0x%08X) mod=%d", song_crc32, unchanged_song_crc32, kmap_crc32, unchanged_kmap_crc32, mod);
+    system_registry->runtime_info.setSongModified(mod);
 }
 
 //-------------------------------------------------------------------------
@@ -542,14 +711,6 @@ void system_registry_t::reg_user_setting_t::setTimeZone15min(int8_t offset)
 }
 
 //-------------------------------------------------------------------------
-void system_registry_t::reg_file_command_t::wait(void) {
-  while (get32(UPDATE_LIST) != 0 || get32(FILE_LOAD) != 0 || get32(FILE_SAVE) != 0) { M5.delay(1); }
-}
-void system_registry_t::reg_file_command_t::waitUpdateList(void) { while (get32(UPDATE_LIST) != 0) { M5.delay(1); } }
-void system_registry_t::reg_file_command_t::waitFileLoad(void) { while (get32(FILE_LOAD) != 0) { M5.delay(1); } }
-void system_registry_t::reg_file_command_t::waitFileSave(void) { while (get32(FILE_SAVE) != 0) { M5.delay(1); } }
-
-//-------------------------------------------------------------------------
 namespace def::ctrl_assign {
   int get_index_from_command(const control_assignment_t* data, const def::command::command_param_array_t& command)
   {
@@ -573,7 +734,38 @@ namespace def::ctrl_assign {
 }
 
 const char* localize_text_t::get(void) const
-{ auto i = (uint8_t)system_registry.user_setting.getLanguage(); return text[i] ? text[i] : text[0]; }
+{ auto i = (uint8_t)system_registry->user_setting.getLanguage(); return text[i] ? text[i] : text[0]; }
+
+
+static bool saveMappingInternal(system_registry_t::reg_command_mapping_t* mapping, JsonObject &json, const def::ctrl_assign::control_assignment_t* table)
+{
+  size_t count = mapping->getButtonCount();
+  for (int num = 0; num < count; ++num) {
+    auto cmd = mapping->getCommandParamArray(num);
+    if (cmd.empty()) { continue; }
+    auto index = def::ctrl_assign::get_index_from_command(table, cmd);
+    if (index < 0) { continue; }
+    json[std::to_string(num + 1)] = table[index].jsonname;
+  }
+  return true;
+}
+
+static bool loadMappingInternal(system_registry_t::reg_command_mapping_t* mapping, const JsonObject &json, const def::ctrl_assign::control_assignment_t* table)
+{
+  if (!json.isNull()) {
+    mapping->reset();
+    size_t count = mapping->getButtonCount();
+    for (int num = 0; num < count; ++num) {
+      auto name = json[std::to_string(num + 1)].as<const char*>();
+      if (name == nullptr) { continue; }
+      auto index = def::ctrl_assign::get_index_from_jsonname(table, name);
+      if (index < 0) { continue; }
+      mapping->setCommandParamArray(num, table[index].command);
+    }
+    return true;
+  }
+  return false;
+}
 
 //-------------------------------------------------------------------------
 bool system_registry_t::saveSettingInternal(JsonVariant& json_root)
@@ -597,43 +789,28 @@ bool system_registry_t::saveSettingInternal(JsonVariant& json_root)
   {
     auto json = json_root["midi_port_setting"].to<JsonObject>();
     json["instachord_link_dev"] = (uint8_t)midi_port_setting.getInstaChordLinkDev();
+    json["instachord_link_style"] = (uint8_t)midi_port_setting.getInstaChordLinkStyle();
     json["usb_mode"] = (uint8_t)midi_port_setting.getUSBMode();
     json["usb_power"] = (uint8_t)midi_port_setting.getUSBPowerEnabled();
   }
 
+/* 以下廃止、新仕様では control_mapping に統一
   auto json_key_mapping = json_root["key_mapping"].to<JsonObject>();
   {
     {
       auto json = json_key_mapping["chord_play"].to<JsonObject>();
-      for (int btn = 1; btn <= 15; ++btn) {
-        auto cmd = command_mapping_custom_main.getCommandParamArray(btn - 1);
-        auto index = def::ctrl_assign::get_index_from_command(def::ctrl_assign::playbutton_table, cmd);
-        if (index < 0) { continue; }
-        json[std::to_string(btn)] = def::ctrl_assign::playbutton_table[index].jsonname;
-      }
+      saveMappingInternal(&command_mapping_custom_main, json, def::ctrl_assign::playbutton_table);
     }
     {
       auto json = json_key_mapping["external"].to<JsonObject>();
-      for (int btn = 1; btn <= def::hw::max_button_mask; ++btn) {
-        auto cmd = command_mapping_external.getCommandParamArray(btn - 1);
-        if (cmd.empty()) { continue; }
-        auto index = def::ctrl_assign::get_index_from_command(def::ctrl_assign::external_table, cmd);
-        if (index < 0) { continue; }
-        json[std::to_string(btn)] = def::ctrl_assign::external_table[index].jsonname;
-      }
+      saveMappingInternal(&command_mapping_external, json, def::ctrl_assign::external_table);
     }
     {
       auto json = json_key_mapping["midinote"].to<JsonObject>();
-      for (int btn = 1; btn <= def::midi::max_note; ++btn) {
-        auto cmd = command_mapping_midinote.getCommandParamArray(btn - 1);
-        if (cmd.empty()) { continue; }
-        auto index = def::ctrl_assign::get_index_from_command(def::ctrl_assign::external_table, cmd);
-        if (index < 0) { continue; }
-        json[std::to_string(btn)] = def::ctrl_assign::external_table[index].jsonname;
-      }
+      saveMappingInternal(&command_mapping_midinote, json, def::ctrl_assign::external_table);
     }
   }
-
+//*/
   return true;
 }
 
@@ -678,12 +855,13 @@ bool system_registry_t::loadSettingInternal(JsonVariant& json_root)
   {
     auto json = json_root["midi_port_setting"].as<JsonObject>();
     midi_port_setting.setInstaChordLinkDev((def::command::instachord_link_dev_t)json["instachord_link_dev"      ].as<uint8_t>());
+    midi_port_setting.setInstaChordLinkStyle((def::command::instachord_link_style_t)json["instachord_link_style"].as<uint8_t>());
     midi_port_setting.setUSBMode((def::command::usb_mode_t)json["usb_mode"].as<uint8_t>());
     midi_port_setting.setUSBPowerEnabled(json["usb_power"].as<bool>());
   }
 
-  // control_assignment::play button ( 旧名 key mapping )
   {
+    // control_assignment::play button ( 旧名 key mapping )
     auto json_key_mapping = json_root["key_mapping"].as<JsonObject>();
     if (!json_key_mapping.isNull())
     {
@@ -693,41 +871,20 @@ bool system_registry_t::loadSettingInternal(JsonVariant& json_root)
           if (data_version == 1 && json["9"] == "7") {
             // 旧仕様のキーアサイン設定で Degree 7 と 7th を混同するケースがあったので、ここで古いデータを無視する
           } else {
-            for (int btn = 1; btn <= 15; ++btn) {
-              auto name = json[std::to_string(btn)].as<const char*>();
-              if (name == nullptr) { continue; }
-              auto index = def::ctrl_assign::get_index_from_jsonname(def::ctrl_assign::playbutton_table, name);
-              if (index < 0) { continue; }
-              command_mapping_custom_main.setCommandParamArray(btn - 1, def::ctrl_assign::playbutton_table[index].command);
-            }
+            loadMappingInternal(&control_mapping[0].internal, json, def::ctrl_assign::playbutton_table);
+            // loadMappingInternal(&command_mapping_custom_main, json, def::ctrl_assign::playbutton_table);
           }
         }
       }
       {
         auto json = json_key_mapping["external"].as<JsonObject>();
-        if (!json.isNull()) {
-          command_mapping_external.reset();
-          for (int btn = 1; btn <= def::hw::max_button_mask; ++btn) {
-            auto name = json[std::to_string(btn)].as<const char*>();
-            if (name == nullptr) { continue; }
-            auto index = def::ctrl_assign::get_index_from_jsonname(def::ctrl_assign::external_table, name);
-            if (index < 0) { continue; }
-            command_mapping_external.setCommandParamArray(btn - 1, def::ctrl_assign::external_table[index].command);
-          }
-        }
+        loadMappingInternal(&control_mapping[0].external, json, def::ctrl_assign::external_table);
+        // loadMappingInternal(&command_mapping_external, json, def::ctrl_assign::external_table);
       }
       {
         auto json = json_key_mapping["midinote"].as<JsonObject>();
-        if (!json.isNull()) {
-          command_mapping_midinote.reset();
-          for (int btn = 1; btn <= def::midi::max_note; ++btn) {
-            auto name = json[std::to_string(btn)].as<const char*>();
-            if (name == nullptr) { continue; }
-            auto index = def::ctrl_assign::get_index_from_jsonname(def::ctrl_assign::external_table, name);
-            if (index < 0) { continue; }
-            command_mapping_midinote.setCommandParamArray(btn - 1, def::ctrl_assign::external_table[index].command);
-          }
-        }
+        loadMappingInternal(&control_mapping[0].midinote, json, def::ctrl_assign::external_table);
+        // loadMappingInternal(&command_mapping_midinote, json, def::ctrl_assign::external_table);
       }
     }
   }
@@ -764,6 +921,99 @@ bool system_registry_t::loadSettingJSON(const uint8_t* data, size_t data_length)
   }
 //*/
   return false;
+}
+
+bool system_registry_t::control_mapping_t::saveJSON(JsonVariant &json)
+{
+  json["type"] = "Mapping";
+  json["version"] = 1;
+
+  if (!internal.empty())
+  {
+    auto json_internal = json["internal"].to<JsonObject>();
+    saveMappingInternal(&internal, json_internal, def::ctrl_assign::playbutton_table);
+  }
+  if (!external.empty())
+  {
+    auto json_external = json["external"].to<JsonObject>();
+    saveMappingInternal(&external, json_external, def::ctrl_assign::external_table);
+  }
+  if (!midinote.empty())
+  {
+    auto json_midinote = json["midinote"].to<JsonObject>();
+    saveMappingInternal(&midinote, json_midinote, def::ctrl_assign::external_table);
+  }
+  return false;
+}
+
+bool system_registry_t::control_mapping_t::loadJSON(const JsonVariant &json)
+{
+  bool res = false;
+  auto data_version = json["version"].as<int>();
+  if (data_version <= 1 && json["type"] == "Mapping")
+  {
+    reset();
+    res = true;
+    {
+      auto json_internal = json["internal"].as<JsonObject>();
+      if (!json_internal.isNull()) {
+        loadMappingInternal(&internal, json_internal, def::ctrl_assign::playbutton_table);
+      }
+    }
+    {
+      auto json_external = json["external"].as<JsonObject>();
+      if (!json_external.isNull()) {
+        loadMappingInternal(&external, json_external, def::ctrl_assign::external_table);
+      }
+    }
+    {
+      auto json_midinote = json["midinote"].as<JsonObject>();
+      if (!json_midinote.isNull()) {
+        loadMappingInternal(&midinote, json_midinote, def::ctrl_assign::external_table);
+      }
+    }
+  }
+
+  system_registry->updateControlMapping();
+
+  return res;
+}
+
+size_t system_registry_t::control_mapping_t::saveJSON(uint8_t* data, size_t data_length)
+{
+  ArduinoJson::JsonDocument json_root;
+
+  json_root["format"] = "KANTANPlayCore";
+
+  {
+    auto variant = json_root.as<JsonVariant>();
+    saveJSON(variant);
+  }
+
+  auto result = serializeJson(json_root, (char*)data, data_length);
+// ESP_LOGV("sysreg", "saveSettingJSON result: %d\n", result);
+
+  return result;
+}
+
+bool system_registry_t::control_mapping_t::loadJSON(const uint8_t* data, size_t data_length)
+{
+  ArduinoJson::JsonDocument json_root;
+  auto error = deserializeJson(json_root, (const char*)data, data_length);
+  if (error)
+  {
+    M5_LOGE("deserializeJson error: %s", error.c_str());
+    return false;
+  }
+
+  if (json_root["format"] != "KANTANPlayCore")
+  {
+    M5_LOGE("format error: %s", json_root["format"].as<const char*>());
+    return false;
+  }
+
+  auto variant = json_root.as<JsonVariant>();
+  return loadJSON(variant);
 }
 
 //-------------------------------------------------------------------------
@@ -909,16 +1159,6 @@ bool system_registry_t::song_data_t::loadText(uint8_t* data, size_t data_length)
           break;
 
         case datafile_key_t::kwd_Mode:
-          {
-            auto m = def::playmode::playmode_t::chord_mode;
-            switch (c) {
-            case 'n':  case 'N':  m = def::playmode::playmode_t::note_mode;    break;
-            case 'd':  case 'D':  m = def::playmode::playmode_t::drum_mode;    break;
-            default: break;
-            }
-M5_LOGV("mode change: %02x", c);
-            ps->slot_info.setPlayMode(m);
-          }
           break;
 
         case datafile_key_t::kwd_Part:
@@ -1001,136 +1241,6 @@ M5_LOGV("mode change: %02x", c);
   return true;
 }
 
-size_t system_registry_t::song_data_t::saveText(uint8_t* data_buffer, size_t data_length)
-{
-  size_t result = 0;
-
-  auto buf = (char*)data_buffer;
-
-  for (int setidx = 0; setidx < def::app::max_slot; ++setidx)
-  {
-    // partset_info_t* ps = &partset_list[setidx];
-    auto ps = &slot[setidx];
-    int len = 0;
-    len = snprintf(buf, data_length - result, "%s\t%d\n", datafile_key[datafile_key_t::kwd_Slot], setidx);
-    buf += len;
-    result += len;
-
-    len = snprintf(buf, data_length - result, "%s\t%s\n", datafile_key[datafile_key_t::kwd_Mode], def::playmode::playmode_name_table[ps->slot_info.getPlayMode()]);
-// M5_LOGI("%s\t%s", datafile_key[datafile_key_t::kwd_Mode], def::playmode::playmode_name_table[ps->slot_info.getPlayMode()]);
-    buf += len;
-    result += len;
-
-    for (int partidx = 0; partidx < def::app::max_chord_part; ++partidx)
-    {
-      auto pi = &(ps->chord_part[partidx]);
-      auto gp = &(chord_part_drum[partidx]);
-
-      for (int k = 0; k < kwd_max; ++k) {
-        auto kwd = (datafile_key_t)k;
-
-        int32_t val = INT32_MAX;
-        int len = 0;
-        switch (kwd) {
-        case datafile_key_t::kwd_Part:     val = partidx;                               break;
-        case datafile_key_t::kwd_Tone:     val = pi->part_info.getTone() + 1;  break;
-        case datafile_key_t::kwd_Volume:   val = pi->part_info.getVolume();             break;
-        case datafile_key_t::kwd_BanLift:  val = pi->part_info.getAnchorStep();       break;
-        case datafile_key_t::kwd_End:      val = pi->part_info.getLoopStep() + 1;       break;
-        case datafile_key_t::kwd_Position: val = pi->part_info.getPosition();           break;
-        case datafile_key_t::kwd_Voicing:
-          {
-            len = snprintf(buf, 32, "%s\t%s\n", datafile_key[k], def::play::GetVoicingName(pi->part_info.getVoicing()));
-            buf += len;
-            result += len;
-            len = 0;
-          }
-          break;
-
-        case datafile_key_t::kwd_Pitch:
-          for (int pitch = 0; pitch < def::app::max_pitch_with_drum; ++pitch) {
-            len = snprintf(buf, 16, "%s%d", datafile_key[k], pitch);
-            buf += len;
-            result += len;
-            len = 0;
-            for (int step = 0; step < def::app::max_arpeggio_step; ++step) {
-              snprintf(buf, 8, "\t%d  ", pi->arpeggio.getVelocity(step, pitch));
-              buf += 4;
-              result += 4;
-            }
-            buf[0] = '\n';
-            buf += 1;
-            result += 1;
-          }
-          break;
-
-        case kwd_Drum:
-          if (setidx == 0)
-          {
-            for (int pitch = 0; pitch < def::app::max_pitch_with_drum; ++pitch) {
-              len = snprintf(buf, 16, "%s%d", datafile_key[k], pitch);
-              buf += len;
-              result += len;
-              len = snprintf(buf, 8, "\t%d\n", gp->getDrumNoteNumber(pitch));
-              buf += len;
-              result += len;
-            }
-          }
-          break;
-
-        case datafile_key_t::kwd_Style:
-          {
-            len = snprintf(buf, 16, "%s", datafile_key[k]);
-            buf += len;
-            result += len;
-            len = 0;
-            for (int step = 0; step < def::app::max_arpeggio_step; ++step) {
-              const char* style_name = "\t ";
-              switch (pi->arpeggio.getStyle(step))
-              {
-              default:
-              case def::play::arpeggio_style_t::same_time: break;
-              case def::play::arpeggio_style_t::high_to_low:
-                style_name = "\tU";
-              break;
-
-              case def::play::arpeggio_style_t::low_to_high:
-                style_name = "\tD";
-                break;
-
-              case def::play::arpeggio_style_t::mute:
-                style_name = "\tM";
-                break;
-              }
-              snprintf(buf, 3, "%s", style_name);
-              buf += 2;
-              result += 2;
-            }
-            buf[0] = '\n';
-            buf += 1;
-            result += 1;
-          }
-          break;
-
-        default:
-          break;
-
-        }
-        if (val != INT32_MAX) {
-          len = snprintf(buf, 16, "%s\t%d\n", datafile_key[k], (int)val);
-          buf += len;
-          result += len;
-        }
-      }
-      buf[0] = '\n';
-      buf += 1;
-      result += 1;
-    }
-  }
-  return result;
-}
-
-
 
 static KANTANMusic_Voicing getVoicing(const char* voicing)
 {
@@ -1144,29 +1254,184 @@ static KANTANMusic_Voicing getVoicing(const char* voicing)
   return KANTANMusic_Voicing_Close;
 }
 
-static const char* getPlayModeName(def::playmode::playmode_t mode)
+static int degree_param_to_str(const degree_param_t& param, char* buf, size_t bufsize)
 {
-  switch (mode)
-  {
-  case def::playmode::playmode_t::chord_mode: return "Chord";
-  case def::playmode::playmode_t::note_mode: return "Note";
-  case def::playmode::playmode_t::drum_mode: return "Drum";
+  const char* semitone = "";
+  const char* swap = "";
+  switch (param.getSemitone()) {
+  case semitone_t::semitone_flat:  semitone = "b"; break;
+  case semitone_t::semitone_sharp: semitone = "#"; break;
   default: break;
   }
-  return "Unknown";
+  if (param.getMinorSwap()) swap = "~";
+  return snprintf(buf, bufsize, "%d%s%s", param.getDegree(), semitone, swap);
 }
 
-static def::playmode::playmode_t getPlayMode(const char* name)
+static void degree_param_from_str(const char* str, degree_param_t& param)
 {
-  if (name != nullptr) {
-    for (int i = 0; i < def::playmode::playmode_max; ++i) {
-      auto mode = def::playmode::playmode_t(i);
-      if (strcmp(name, getPlayModeName(mode)) == 0) {
-        return (def::playmode::playmode_t)i;
+  param.setSemitone(semitone_t::semitone_none);
+  param.setMinorSwap(false);
+
+  int i = 0;
+  int degree = 0;
+  if (str[i] >= '0' && str[i] <= '9') {
+    degree = str[i] - '0';
+    ++i;
+  }
+  param.setDegree(degree);
+
+  auto semitone = semitone_t::semitone_none;
+  if (str[i] == 'b' || str[i] == '#') {
+    semitone = (str[i] == 'b') ? semitone_t::semitone_flat : semitone_t::semitone_sharp;
+    ++i;
+  }
+  param.setSemitone(semitone);
+
+  bool swap = (str[i] == '~');
+  param.setMinorSwap(swap);
+}
+
+bool system_registry_t::reg_sequence_timeline_t::saveJson(JsonVariant &json)
+{
+  char buf[32];
+  sequence_chord_desc_t prev_desc;
+  prev_desc.setSlotIndex(0xFF); // 強制的に最初のデータを保存させるため
+
+  auto it = begin();
+  auto it_e = end();
+  for (; it != it_e; ++it)
+  {
+    auto &pair = *it;
+    if (prev_desc == pair.second) { continue; }
+
+    itoa(pair.first, buf, 10);
+    auto obj = json[buf].to<JsonObject>();
+    degree_param_to_str(pair.second.main_degree, buf, sizeof(buf));
+    obj["main"] = buf;
+
+    {
+      auto modifier = pair.second.getModifier();
+      if (KANTANMusic_Modifier_None != modifier) {
+        obj["mod"] = def::command::command_name_table[def::command::chord_modifier][modifier];
       }
     }
+    if (0 != pair.second.bass_degree.raw) {
+      degree_param_to_str(pair.second.bass_degree, buf, sizeof(buf));
+      obj["bass"] = buf;
+    }
+    auto slot_index = pair.second.getSlotIndex();
+    if (prev_desc.getSlotIndex() != slot_index) {
+      obj["slot"] = slot_index;
+    }
+    if (prev_desc.getPartBits() != pair.second.getPartBits()) {
+      auto parts = obj["part"].to<JsonArray>();
+      for (int part_index = 0; part_index < def::app::max_chord_part; ++part_index)
+      {
+        if (pair.second.getPartEnable(part_index)) {
+          parts.add(part_index);
+        }
+      }
+    }
+    prev_desc = pair.second;
   }
-  return def::playmode::playmode_t::chord_mode;
+  return true;
+}
+
+bool system_registry_t::reg_sequence_timeline_t::loadJson(const JsonVariant &json)
+{
+  // decltype(_data) tmpdata;
+  auto it = begin();
+  size_t count = 0;
+  size_t limit = max_count();
+
+  sequence_chord_desc_t desc;
+  for (auto kvp : json.as<JsonObject>())
+  {
+    uint_fast16_t step = atoi(kvp.key().c_str());
+    auto obj = kvp.value().as<JsonObject>();
+
+    {
+      const char* main_str = obj["main"].as<const char*>();
+      if (main_str != nullptr) {
+        degree_param_from_str(main_str, desc.main_degree);
+      }
+    }
+    {
+      desc.bass_degree = degree_param_t(); // リセット
+      const char* bass_str = obj["bass"].as<const char*>();
+      if (bass_str != nullptr) {
+        degree_param_from_str(bass_str, desc.bass_degree);
+      }
+    }
+
+    {
+      auto modifier = KANTANMusic_Modifier_None;
+      const char* mod_str = obj["mod"].as<const char*>();
+      if (mod_str != nullptr) {
+        for (int i = 0; i < KANTANMusic_MAX_MODIFIER; ++i) {
+          if (strcmp(mod_str, def::command::command_name_table[def::command::chord_modifier][i]) == 0) {
+            modifier = (KANTANMusic_Modifier)i;
+            break;
+          }
+        }
+      }
+      desc.setModifier(modifier);
+    }
+
+    if (obj["slot"].is<int>())
+    {
+      int slot_index = obj["slot"].as<int>();
+      if (slot_index >= 0 && slot_index < def::app::max_slot) {
+        desc.setSlotIndex((uint8_t)slot_index);
+      }
+    }
+    if (obj["part"].is<JsonArray>())
+    {
+      auto parts = obj["part"].as<JsonArray>();
+      if (!parts.isNull()) {
+        desc.clearPartEnable();
+        for (auto part_index : parts) {
+          if (part_index >= 0 && part_index < def::app::max_chord_part) {
+            desc.setPartEnable(part_index, true);
+          }
+        }
+      }
+    }
+    it->first = step;
+    it->second = desc;
+    ++it;
+    ++count;
+    if (count >= limit) { break; }
+  }
+  _data_count = count;
+
+  return true;
+}
+
+static bool saveSequenceInternal(system_registry_t::sequence_data_t* sequence, JsonVariant &json)
+{
+  json["version"] = 1;
+  json["length"] = sequence->info.getLength();
+  auto json_timeline = json["timeline"].to<JsonVariant>();
+  return sequence->timeline.saveJson(json_timeline);
+}
+
+static bool loadSequenceInternal(system_registry_t::sequence_data_t* sequence, const JsonVariant &json)
+{
+  if (json.isNull()) { return false; }
+  if (json.size() == 0) { return false; }
+
+  if (json["version"] > 1)
+  {
+    M5_LOGV("version mismatch: %d", json["version"].as<int>());
+  }
+  auto json_timeline = json["timeline"].as<JsonVariant>();
+
+  sequence->reset();
+  sequence->timeline.loadJson(json_timeline);
+  sequence->info.setLength(json["length"].as<int>());
+
+  return true;
 }
 
 static bool saveSongInternal(system_registry_t::song_data_t* song, JsonVariant &json)
@@ -1174,7 +1439,13 @@ static bool saveSongInternal(system_registry_t::song_data_t* song, JsonVariant &
   json["version"] = 2;
   json["tempo"] = song->song_info.getTempo();
   json["swing"] = song->song_info.getSwing();
-  json["base_key"] = system_registry.runtime_info.getMasterKey();
+  json["base_key"] = system_registry->runtime_info.getMasterKey();
+
+  if (song->sequence.info.getLength() > 0)
+  {
+    auto json_sequence = json["sequence"].to<JsonVariant>();
+    saveSequenceInternal(&song->sequence, json_sequence);
+  }
 
   auto drum_note = json["drum_note"].to<JsonArray>();
   for (int part_index = 0; part_index < def::app::max_chord_part; ++part_index)
@@ -1200,7 +1471,6 @@ static bool saveSongInternal(system_registry_t::song_data_t* song, JsonVariant &
     if (*reg_slot == slot_default) { continue; }
     if (slot_index != 0 && *reg_slot == song->slot[slot_index - 1]) { continue; }
 
-    slot_info["play_mode"] = getPlayModeName(reg_slot->slot_info.getPlayMode());
     slot_info["key_offset"] = reg_slot->slot_info.getKeyOffset();
     slot_info["step_per_beat"] = reg_slot->slot_info.getStepPerBeat();
     auto chord_mode = slot_info["chord_mode"].to<JsonObject>();
@@ -1278,7 +1548,7 @@ static bool saveSongInternal(system_registry_t::song_data_t* song, JsonVariant &
   return true;
 }
 
-static bool loadSongInternal(system_registry_t::song_data_t* song, JsonVariant &json)
+static bool loadSongInternal(system_registry_t::song_data_t* song, const JsonVariant &json)
 {
   if (json["version"] > 2)
   {
@@ -1289,7 +1559,12 @@ static bool loadSongInternal(system_registry_t::song_data_t* song, JsonVariant &
   song->song_info.setSwing(json["swing"].as<int>());
   song->song_info.setBaseKey(json["base_key"].as<int>());
 
-  system_registry.runtime_info.setMasterKey(json["base_key"].as<int>());
+  system_registry->runtime_info.setMasterKey(json["base_key"].as<int>());
+
+  {
+    loadSequenceInternal(&(song->sequence), json["sequence"].as<JsonVariant>());
+    system_registry->runtime_info.setSequenceStepIndex(0);
+  }
 
   auto drum_note = json["drum_note"].as<JsonArray>();
   for (int part_index = 0; part_index < def::app::max_chord_part; ++part_index)
@@ -1320,7 +1595,6 @@ static bool loadSongInternal(system_registry_t::song_data_t* song, JsonVariant &
 
     auto reg_chord_part = reg_slot->chord_part;
     auto slot_info = json_slot[slot_index].as<JsonObject>();
-    reg_slot->slot_info.setPlayMode(getPlayMode(slot_info["play_mode"].as<const char*>()));
     reg_slot->slot_info.setKeyOffset(slot_info["key_offset"].as<int>());
     reg_slot->slot_info.setStepPerBeat(slot_info["step_per_beat"].as<int>());
     auto chord_mode = slot_info["chord_mode"].as<JsonObject>();
@@ -1374,7 +1648,6 @@ static bool loadSongInternal(system_registry_t::song_data_t* song, JsonVariant &
   }
   return true;
 }
-
 
 size_t system_registry_t::song_data_t::saveSongJSON(uint8_t* data_buffer, size_t data_length)
 {
@@ -1434,12 +1707,12 @@ size_t system_registry_t::saveResumeJSON(uint8_t* data, size_t data_length)
 
   // 未変更のソングデータの情報を保存
   auto json_unchanged_song = json["unchanged_song"].to<JsonVariant>();
-  saveSongInternal(&unchanged_song_data, json_unchanged_song);
   {
     json_unchanged_song["filename"] =          file_manage.getLatestFileName();
     json_unchanged_song["datatype"] = (uint8_t)file_manage.getLatestDataType();
+    json_unchanged_song["song_crc32"] = unchanged_song_crc32;
+    json_unchanged_song["kmap_crc32"] = unchanged_kmap_crc32;
   }
-
 
   return serializeJson(json, (char*)data, data_length);
 }
@@ -1473,24 +1746,34 @@ bool system_registry_t::loadResumeJSON(const uint8_t* data, size_t data_length)
 
   bool result = false;
 
+  // 最後に開いたソングデータの情報
+  // 初期値として空の情報をセットしておく
+  auto song_datatype = kanplay_ns::def::app::data_type_t::data_song_preset;
+  file_manage.updateFileList(song_datatype);
+  const char* song_filename = file_manage.getDirManage(song_datatype)->getInfo(0)->filename;
+
   auto json_unchanged_song = json["unchanged_song"].as<JsonVariant>();
   if (!json_unchanged_song.isNull()) {
-    loadSongInternal(&unchanged_song_data, json_unchanged_song);
-
-    // 最後に開いたソングデータの情報
-    // 初期値として空の情報をセットしておく
-    file_manage.setLatestFileInfo("", kanplay_ns::def::app::data_type_t::data_song_preset);
-    auto song_filename = json_unchanged_song["filename"].as<const char*>();
-    if (song_filename != nullptr && song_filename[0] != 0) {
-      auto song_datatype = (def::app::data_type_t)(json_unchanged_song["datatype"].as<uint8_t>());
-      file_manage.setLatestFileInfo(song_filename, song_datatype);
+    if (json_unchanged_song["song_crc32"].isNull()) {
+      loadSongInternal(&song_data, json_unchanged_song);
+      unchanged_song_crc32 = system_registry->calcSongCRC32();
+    } else {
+      unchanged_song_crc32 = json_unchanged_song["song_crc32"].as<uint32_t>();
     }
-
-    song_data.assign(unchanged_song_data);
-    auto json_song = json["song"].as<JsonVariant>();
-    if (!json_song.isNull()) {
-      result = loadSongInternal(&song_data, json_song);
+    if (!json_unchanged_song["kmap_crc32"].isNull()) {
+      unchanged_kmap_crc32 = json_unchanged_song["kmap_crc32"].as<uint32_t>();
     }
+    // ファイル名情報があれば取り込む
+    auto fn = json_unchanged_song["filename"].as<const char*>();
+    if (fn != nullptr && fn[0] != 0) {
+      song_filename = fn;
+      song_datatype = (def::app::data_type_t)(json_unchanged_song["datatype"].as<uint8_t>());
+    }
+  }
+  file_manage.setLatestFileInfo(song_datatype, song_filename);
+  auto json_song = json["song"].as<JsonVariant>();
+  if (!json_song.isNull()) {
+    result = loadSongInternal(&song_data, json_song);
   }
 
   auto slot_index = json["slot_index"].as<int>();

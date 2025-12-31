@@ -105,6 +105,11 @@ IMPORT_FILE(.rodata, "Orchestra_2.json"         ,  preset_84 );
 
 namespace kanplay_ns {
 
+  
+void spi_lock(void);
+void spi_unlock(void);
+
+
 struct incbin_file_t {
   const char* filename;
   const uint8_t* data;
@@ -151,8 +156,7 @@ static const incbin_file_t incbin_files[] = {
   { filename_preset_83, preset_83, (size_t)sizeof_preset_83 },
   { filename_preset_84, preset_84, (size_t)sizeof_preset_84 },
 };
-  
-  
+
 // extern instance
 storage_sd_t storage_sd;
 storage_littlefs_t storage_littlefs;
@@ -164,8 +168,7 @@ static dir_manage_t dir_manage[def::app::data_type_t::data_type_max] =
   { &storage_sd      , def::app::data_path[0] }, // data_song_users
   { &storage_sd      , def::app::data_path[1] }, // data_song_extra
   { &storage_incbin  , def::app::data_path[2] }, // data_song_preset
-  { &storage_littlefs, def::app::data_path[3] }, // data_setting
-  { &storage_littlefs, def::app::data_path[4] }, // data_resume
+  { &storage_littlefs, def::app::data_path[3] }, // data_system (setting/resume/mappping)
 };
 
 static std::string trimExtension(const std::string& filename)
@@ -192,6 +195,8 @@ bool storage_sd_t::beginStorage(void)
 {
   if (_is_begin) { return true; }
 
+  spi_lock();
+
 #if __has_include(<SdFat.h>)
   SdSpiConfig spiConfig(M5.getPin(m5::pin_name_t::sd_spi_cs), SHARED_SPI, SD_SCK_MHZ(25), &SPI);
   _is_begin = SD.begin(spiConfig);
@@ -201,8 +206,10 @@ bool storage_sd_t::beginStorage(void)
   _is_begin = true;
 #endif
 
+  spi_unlock();
+
   if (!_is_begin) {
-    system_registry.popup_notify.setPopup(false, def::notify_type_t::NOTIFY_STORAGE_OPEN);
+    system_registry->popup_notify.setPopup(false, def::notify_type_t::NOTIFY_STORAGE_OPEN);
     M5_LOGE("SD card mount failed");
   } else {
     for (auto& dm : dir_manage) {
@@ -217,6 +224,9 @@ bool storage_sd_t::beginStorage(void)
 void storage_sd_t::endStorage(void)
 {
   if (!_is_begin) { return; }
+
+  spi_lock();
+
   _is_begin = false;
 #if __has_include(<SdFat.h>)
   SD.end();
@@ -224,65 +234,90 @@ void storage_sd_t::endStorage(void)
   SD.end();
 #else
 #endif
+  spi_unlock();
 }
 
-bool storage_sd_t::fileExists(const char* path)
+int storage_sd_t::getFileSize(const char* path)
 {
+  int res = -1;
+  spi_lock();
 #if __has_include(<SdFat.h>)
-  return SD.exists(path);
+  if (SD.exists(path)) {
+    auto file = SD.open(path, O_READ);
+    if (file) {
+      res = file.fileSize();
+      file.close();
+    }
+  }
 #elif __has_include (<SD.h>)
-  return SD.exists(path);
+  if (SD.exists(path)) {
+    auto file = SD.open(path, FILE_READ);
+    if (file) {
+      res = file.size();
+      file.close();
+    }
+  }
 #else
   if (path[0] == '/') { ++path; }
-  return std::filesystem::exists(path);
+  if (std::filesystem::exists(path)) {
+    res = std::filesystem::file_size(path);
+  }
 #endif
+  spi_unlock();
+  return res;
 }
 
-int storage_sd_t::loadFromFileToMemory(const char* path, uint8_t* dst, size_t max_length, int dir_index)
+int storage_sd_t::loadFromFileToMemory(const char* path, uint8_t* dst, size_t max_length)
 {
   if (!_is_begin) { return -1; }
+
+  spi_lock();
 
   int len = -1;
 #if __has_include(<SdFat.h>)
   auto file = SD.open(path, O_READ);
-  if (!file) { return len; }
-  len = file.dataLength();
-  if (len) {
-    if (len > max_length) {
-      len = max_length;
+  if (file != false) {
+    len = file.dataLength();
+    if (len) {
+      if (len > max_length) {
+        len = max_length;
+      }
+      len = file.read(dst, len);
     }
-    len = file.read(dst, len);
+    file.close();
   }
-  file.close();
 
 #elif __has_include (<SD.h>)
   auto file = SD.open(path, FILE_READ);
-  if (!file) { return len; }
-  len = file.size();
-  if (len) {
-    if (len > max_length) {
-      len = max_length;
+  if (file) {
+    len = file.size();
+    if (len) {
+      if (len > max_length) {
+        len = max_length;
+      }
+      len = file.read(dst, len);
     }
-    len = file.read(dst, len);
+    file.close();
   }
-  file.close();
 
 #else
   if (path[0] == '/') { ++path; }
   auto FP = fopen(path, "r");
-  if (!FP) { return len; }
-  fseek(FP, 0, SEEK_END);
-  len = ftell(FP);
-  if (len) {
-    if (len > max_length) {
-      len = max_length;
+M5_LOGV("sd:loadFromFileToMemory : %s  open:%d\n", path, FP != nullptr);
+  if (FP) {
+    fseek(FP, 0, SEEK_END);
+    len = ftell(FP);
+    if (len) {
+      if (len > max_length) {
+        len = max_length;
+      }
+      fseek(FP, 0, SEEK_SET);
+      len = fread(dst, 1, len, FP);
     }
-    fseek(FP, 0, SEEK_SET);
-    len = fread(dst, 1, len, FP);
+    fclose(FP);
   }
-  fclose(FP);
 #endif
-
+  spi_unlock();
   return len;
 }
 
@@ -290,126 +325,167 @@ int storage_sd_t::saveFromMemoryToFile(const char* path, const uint8_t* data, si
 {
   if (!_is_begin) { return -1; }
 
+  int result = -1;
+  spi_lock();
 #if __has_include(<SdFat.h>)
   auto file = SD.open(path, O_CREAT | O_WRITE | O_TRUNC);
-  if (!file) {
-    return -1;
+  if (file) {
+    result = file.write(data, length);
+  
+    auto now = time(nullptr);
+    auto tm = gmtime(&now);
+    file.timestamp(T_CREATE|T_WRITE, tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
+  
+    file.close();
   }
-  length = file.write(data, length);
-
-  auto now = time(nullptr);
-  auto tm = gmtime(&now);
-  file.timestamp(T_CREATE|T_WRITE, tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday, tm->tm_hour, tm->tm_min, tm->tm_sec);
-
-  file.close();
 
 #elif __has_include (<SD.h>)
   auto file = SD.open(path, FILE_WRITE);
-  if (!file) {
-    return -1;
+  if (file) {
+    result = file.write(data, length);
+    file.close();
   }
-  length = file.write(data, length);
-  file.close();
 
 #else
   if (path[0] == '/') { ++path; }
   auto FP = fopen(path, "w");
-  if (!FP) { return -1; }
-  length = fwrite(data, 1, length, FP);
-  fclose(FP);
+  if (FP) {
+    result = fwrite(data, 1, length, FP);
+    fclose(FP);
+  }
 #endif
-
-  return length;
+  spi_unlock();
+  return result;
 }
 
-int storage_sd_t::getFileList(const char* path, std::vector<file_info_t>& list)
+int storage_sd_t::getFileList(std::vector<file_info_string_t>& list, const char* path, const char* suffix)
 {
   if (!_is_begin) { return -1; }
 
-  file_info_t info;
+  file_info_string_t info;
 
+  int result = -1;
+
+  const size_t len_suffix = suffix ? strlen(suffix) : 0;
+
+  spi_lock();
 #if __has_include(<SdFat.h>)
   auto dir = SD.open(path);
-  if (false == dir) { return -1; }
-  if (dir.isDirectory()) {
-    FsFile file;
-    while (false != (file = dir.openNextFile())) {
-      char filename[256];
-      file.getName(filename, sizeof(filename));
-      // mac系不可視ファイル無視
-      if (memcmp(filename, "._", 2) == 0) { continue; }
-      info.filename = filename;
-      info.filesize = file.fileSize();
+  if (false != dir) {
+    if (dir.isDirectory()) {
+      FsFile file;
+      while (false != (file = dir.openNextFile())) {
+        char filename[256];
+        file.getName(filename, sizeof(filename));
+        // mac系不可視ファイル無視
+        if (memcmp(filename, "._", 2) == 0) { continue; }
+        auto len_name = strlen(filename);
+        if ( len_name < len_suffix) continue;
+        if (len_suffix > 0) {
+          if (strcmp(&filename[len_name - len_suffix], suffix) != 0) {
+            continue;
+          }
+        }
+        info.filename = filename;
+        info.filesize = file.fileSize();
+        list.push_back( info );
+  //M5_LOGV("file %s %d", filename, info.filesize);
+      }
+      dir.close();
+    } else {
+      info.filename = "";
+      info.filesize = dir.fileSize();
       list.push_back( info );
-M5_LOGV("file %s %d", filename, info.filesize);
     }
-    dir.close();
-  } else {
-    info.filename = "";
-    info.filesize = dir.fileSize();
-    list.push_back( info );
+    result = list.size();
   }
 #elif __has_include (<SD.h>)
   auto dir = SD.open(path);
-  if (false == dir) { return -1; }
-  if (dir.isDirectory()) {
-    fs::File file;
-    while (false != (file = dir.openNextFile())) {
-      info.filename = file.name();
-      info.filesize = file.size();
-      list.push_back( info );
+  if (dir) {
+    if (dir.isDirectory()) {
+      fs::File file;
+      while (false != (file = dir.openNextFile())) {
+        info.filename = file.name();
+        info.filesize = file.size();
+        list.push_back( info );
+      }
+      dir.close();
     }
-    dir.close();
+    result = list.size();
   }
 #else
 
-if (path[0] == '/') { ++path; }
-bool result = std::filesystem::exists(path);
-M5_LOGE("exists:%d , %s", result, path);
-  if (result) {
-    result = std::filesystem::is_directory(path);
-    M5_LOGE("is_dir:%d , %s", result, path);
-    if (result) {
+  if (path[0] == '/') { ++path; }
+  bool hit = std::filesystem::exists(path);
+  M5_LOGD("exists:%d , %s", hit, path);
+  if (hit) {
+    hit = std::filesystem::is_directory(path);
+    M5_LOGD("is_dir:%d , %s", hit, path);
+    if (hit) {
       for (const auto& file : std::filesystem::directory_iterator(path)) {
         // list.push_back({file.path().filename().u8string().c_str(), file.file_size()});
+        auto name = file.path().filename().string();
+        auto len_name = name.length();
+        if ( len_name < len_suffix) continue;
+        if (len_suffix > 0) {
+          if (strcmp(&name[len_name - len_suffix], suffix) != 0) {
+            continue;
+          }
+        }
         size_t size = file.file_size();
         list.push_back({file.path().filename().string(), size});
       }
     } else {
       size_t size = std::filesystem::file_size(path);
       list.push_back({ "", size });
-M5_LOGE("file size:%d , %s", size, path);
+M5_LOGD("file size:%d , %s", size, path);
     }
+    result = list.size();
   }
 #endif
 
+  spi_unlock();
   if (!list.empty()) {
-    std::sort(list.begin(), list.end(), [](const file_info_t& a, const file_info_t& b) { return a.filename < b.filename; });
+    std::sort(list.begin(), list.end(), [](const file_info_string_t& a, const file_info_string_t& b) { return a.filename < b.filename; });
   }
-
-  return list.size();
+  return result;
 }
 
 bool storage_sd_t::makeDirectory(const char* path)
 {
+  bool res = false;
+  spi_lock();
 #if __has_include (<SdFat.h>)
-  return SD.mkdir(path);
+  res = SD.mkdir(path);
 #elif __has_include (<SD.h>)
-  return SD.mkdir(path);
+  res = SD.mkdir(path);
 #else
   if (path[0] == '/') { ++path; }
-  return std::filesystem::create_directory(path);
+  res = std::filesystem::create_directory(path);
 #endif
+  spi_unlock();
+  return res;
 }
 
-int storage_sd_t::removeFile(const char* path)
+bool storage_sd_t::removeFile(const char* path)
 {
-  return 0;
+  bool res = false;
+  spi_lock();
+#if __has_include (<SdFat.h>)
+  res = SD.remove(path);
+#elif __has_include (<SD.h>)
+  res = SD.remove(path);
+#else
+  if (path[0] == '/') { ++path; }
+  res = std::filesystem::remove(path);
+#endif
+  spi_unlock();
+  return res;
 }
 
-int storage_sd_t::renameFile(const char* path, const char* newpath)
+bool storage_sd_t::renameFile(const char* path, const char* newpath)
 {
-  return 0;
+  return false;
 }
 
 //-------------------------------------------------------------------------
@@ -425,7 +501,7 @@ bool storage_littlefs_t::beginStorage(void)
 #endif
 
   if (!_is_begin) {
-    system_registry.popup_notify.setPopup(false, def::notify_type_t::NOTIFY_STORAGE_OPEN);
+    system_registry->popup_notify.setPopup(false, def::notify_type_t::NOTIFY_STORAGE_OPEN);
     M5_LOGE("LittleFS mount failed");
   }
 
@@ -441,24 +517,34 @@ void storage_littlefs_t::endStorage(void)
 #endif
 }
 
-bool storage_littlefs_t::fileExists(const char* path)
+int storage_littlefs_t::getFileSize(const char* path)
 {
+  int res = -1;
 #if __has_include(<LittleFS.h>)
-  return LittleFS.exists(path);
+  if (LittleFS.exists(path)) {
+    auto file = LittleFS.open(path);
+    if (file) {
+      res = file.size();
+      file.close();
+    }
+  }
 #else
   if (path[0] == '/') { ++path; }
-  return std::filesystem::exists(path);
+  if (std::filesystem::exists(path)) {
+    res = std::filesystem::file_size(path);
+  }
 #endif
+  return res;
 }
 
-int storage_littlefs_t::loadFromFileToMemory(const char* path, uint8_t* dst, size_t max_length, int dir_index)
+int storage_littlefs_t::loadFromFileToMemory(const char* path, uint8_t* dst, size_t max_length)
 {
   if (!_is_begin) { return -1; }
 
   int len = -1;
 #if __has_include(<LittleFS.h>)
-bool exists = LittleFS.exists(path);
-M5_LOGE("LittleFS open:%s exists:%d", path, exists);
+  bool exists = LittleFS.exists(path);
+  M5_LOGD("LittleFS open:%s exists:%d", path, exists);
   if (!LittleFS.exists(path)) { return len; }
   auto file = LittleFS.open(path);
   if (!file) { return len; }
@@ -473,6 +559,7 @@ M5_LOGE("LittleFS open:%s exists:%d", path, exists);
 #else
   if (path[0] == '/') { ++path; }
   auto FP = fopen(path, "r");
+M5_LOGV("littlefs:loadFromFileToMemory : %s  open:%d", path, FP != nullptr);
   if (!FP) { return len; }
   fseek(FP, 0, SEEK_END);
   len = ftell(FP);
@@ -519,33 +606,74 @@ int storage_littlefs_t::saveFromMemoryToFile(const char* path, const uint8_t* da
   return writelen;
 }
 
-int storage_littlefs_t::getFileList(const char* path, std::vector<file_info_t>& list)
+int storage_littlefs_t::getFileList(std::vector<file_info_string_t>& list, const char* path, const char* suffix)
 {
   if (!_is_begin) { return -1; }
 
-  file_info_t info;
+  file_info_string_t info;
+
+  const size_t len_suffix = suffix ? strlen(suffix) : 0;
 
 #if __has_include(<LittleFS.h>)
   if (LittleFS.exists(path)) {
+M5_LOGV("LittleFS check exists:%s found", path);
     auto dir = LittleFS.open(path);
     if (false == dir) { return -1; }
     if (dir.isDirectory()) {
+      fs::File file;
+      while (false != (file = dir.openNextFile())) {
+        info.filename = file.name();
+        info.filesize = file.size();
+        auto len_name = info.filename.length();
+        if (len_name < len_suffix) continue;
+        if (len_suffix > 0) {
+          if (strcmp(&info.filename[len_name - len_suffix], suffix) != 0) {
+            continue;
+          }
+        }
+        list.push_back( info );
+M5_LOGV("file %s %d", info.filename.c_str(), info.filesize);
+      }
       dir.close();
     } else {
       info.filename = "";
       info.filesize = dir.size();
       list.push_back( info );
     }
+  } else {
+    M5_LOGV("LittleFS check exists:%s not found", path);
   }
 #else
 
-if (path[0] == '/') { ++path; }
+if (path[0] == '/' && path[1] != '\0') { ++path; }
 bool result = std::filesystem::exists(path);
 M5_LOGD("exists:%d , %s", result, path);
   if (result) {
     result = std::filesystem::is_directory(path);
-    M5_LOGD("is_dir:%d , %s", result, path);
-    if (result == false) {
+M5_LOGD("is_dir:%d , %s", result, path);
+    if (result) {
+      const char* p = (path[0] == '/') ? "./" : path;
+      for (const auto& file : std::filesystem::directory_iterator(p)) {
+        if (std::filesystem::is_directory(file)) {
+          M5_LOGD(" skip dir:%s", file.path().filename().string().c_str());
+          continue;
+        }
+        // list.push_back({file.path().filename().u8string().c_str(), file.file_size()});
+
+        auto name = file.path().filename().string();
+        auto len_name = name.length();
+        if ( len_name < len_suffix) continue;
+        if (len_suffix > 0) {
+          if (strcmp(&name[len_name - len_suffix], suffix) != 0) {
+            continue;
+          }
+        }
+M5_LOGD("file found:%s", file.path().filename().string().c_str());
+
+        size_t size = file.file_size();
+        list.push_back({file.path().filename().string(), size});
+      }
+    } else {
       size_t size = std::filesystem::file_size(path);
       list.push_back({ "", size });
 M5_LOGD("file size:%d , %s", size, path);
@@ -561,14 +689,21 @@ bool storage_littlefs_t::makeDirectory(const char* path)
   return false;
 }
 
-int storage_littlefs_t::removeFile(const char* path)
+bool storage_littlefs_t::removeFile(const char* path)
 {
-  return 0;
+  bool res = false;
+#if __has_include(<LittleFS.h>)
+  res = LittleFS.remove(path);
+#else
+  if (path[0] == '/') { ++path; }
+  res = std::filesystem::remove(path);
+#endif
+  return res;
 }
 
-int storage_littlefs_t::renameFile(const char* path, const char* newpath)
+bool storage_littlefs_t::renameFile(const char* path, const char* newpath)
 {
-  return 0;
+  return false;
 }
 
 //-------------------------------------------------------------------------
@@ -582,21 +717,32 @@ void storage_incbin_t::endStorage(void)
 {
 }
 
-bool storage_incbin_t::fileExists(const char* path)
+int storage_incbin_t::getFileSize(const char* path)
 {
-  return true;
+  for (auto file : incbin_files) {
+    if (strcmp(file.filename, path) == 0) {
+      return file.size;
+    }
+  }
+  return -1;
 }
 
-int storage_incbin_t::loadFromFileToMemory(const char* path, uint8_t* dst, size_t max_length, int dir_index)
+int storage_incbin_t::loadFromFileToMemory(const char* path, uint8_t* dst, size_t max_length)
 {
-  if (dir_index < 0 || dir_index >= (int)sizeof(incbin_files) / sizeof(incbin_files[0])) {
-    return -1;
+  int index = -1;
+  for (const auto& file : incbin_files) {
+    if (strcmp(file.filename, path) == 0) {
+      index = &file - &incbin_files[0];
+M5_LOGV(" matched index:%d", index);
+      break;
+    }
   }
-  auto size = incbin_files[dir_index].size;
+  if (index < 0) { return -1; }
+  auto size = incbin_files[index].size;
   if (size > max_length) {
     size = max_length;
   }
-  memcpy(dst, incbin_files[dir_index].data, size);
+  memcpy(dst, incbin_files[index].data, size);
   return size;
 }
 
@@ -605,9 +751,9 @@ int storage_incbin_t::saveFromMemoryToFile(const char* path, const uint8_t* data
   return -1;
 }
 
-int storage_incbin_t::getFileList(const char* path, std::vector<file_info_t>& list)
+int storage_incbin_t::getFileList(std::vector<file_info_string_t>& list, const char* path, const char* suffix)
 {
-  file_info_t info;
+  file_info_string_t info;
   for (auto file : incbin_files) {
     info.filename = file.filename;
     info.filesize = file.size;
@@ -616,36 +762,88 @@ int storage_incbin_t::getFileList(const char* path, std::vector<file_info_t>& li
   return list.size();
 }
 
-bool storage_incbin_t::makeDirectory(const char* path)
-{
-  return false;
-}
-
-int storage_incbin_t::removeFile(const char* path)
-{
-  return 0;
-}
-
-int storage_incbin_t::renameFile(const char* path, const char* newpath)
-{
-  return 0;
-}
-
 //-------------------------------------------------------------------------
 
-bool dir_manage_t::update(void)
+bool dir_manage_t::updateFileList(void)
 {
-  std::vector<file_info_t> list;
-  int result = _storage->getFileList(_path.c_str(), list);
+  _file_list_count = 0;
+  std::vector<file_info_string_t> list;
+  int result = _storage->getFileList(list, _path, def::app::fileext_song);
+  if (result < 0) {
+    _storage->endStorage();
+    _storage->beginStorage();
+    result = _storage->getFileList(list, _path, def::app::fileext_song);
+  }
 
-  _files = list;
-  return result >= 0;
+  if (result <= 0) {
+    if (_file_list) {
+      m5gfx::heap_free(_file_list);
+      _file_list = nullptr;
+    }
+    if (_all_filenames) {
+      m5gfx::heap_free(_all_filenames);
+      _all_filenames = nullptr;
+    }
+    // マイナス値の場合はエラーとみなしてfalseを返す。
+    return result == 0;
+  }
+
+  // 以下、得られたデータを std::vector から PSRAM 上のバッファに変換して格納する。
+  {
+    // ファイルリスト構造体配列をPSRAMに確保する。
+    auto file_list = (file_info_t*)m5gfx::heap_alloc_psram(sizeof(file_info_t) * list.size());
+    if (file_list == nullptr) {
+      M5_LOGE("dir_manage_t::update:heap_alloc_psram failed. size:%d", sizeof(file_info_t) * list.size());
+      return false;
+    }
+
+    // ファイル名をヌル区切りで連結したバッファを作成する。
+    std::vector<char> all_filenames;
+    file_info_t* p = file_list;
+    for (auto& file : list) {
+      p->filename = (char*)all_filenames.size();
+      p->filesize = file.filesize;
+      ++p;
+      all_filenames.insert(all_filenames.end(), file.filename.begin(), file.filename.end());
+      all_filenames.insert(all_filenames.end(), 2, '\0'); // ヌル終端
+M5_LOGV("dir_manage_t::update file:%s size:%d", file.filename.c_str(), file.filesize);
+    }
+
+    // バッファをPSRAMにコピーする。
+    char* psram_buffer = (char*)m5gfx::heap_alloc_psram(all_filenames.size());
+    if (psram_buffer == nullptr) {
+      M5_LOGE("dir_manage_t::update:heap_alloc_psram failed. size:%d", all_filenames.size());
+      m5gfx::heap_free(file_list);
+      return false;
+    }
+    memcpy(psram_buffer, all_filenames.data(), all_filenames.size());
+    // ファイル名ポインタをPSRAM上のアドレスに変換する。
+    p = file_list;
+    for (size_t i = 0; i < list.size(); ++i) {
+      p->filename = psram_buffer + (size_t)(p->filename);
+      ++p;
+    }
+
+    auto prev_file_list = _file_list;
+    _file_list = file_list;
+    _file_list_count = list.size();
+    auto prev_all_filenames = _all_filenames;
+    _all_filenames = psram_buffer;
+    if (prev_file_list) {
+      m5gfx::heap_free(prev_file_list);
+    }
+    if (prev_all_filenames) {
+      m5gfx::heap_free(prev_all_filenames);
+    }
+  }
+
+  return true;
 }
 
-int dir_manage_t::search(const char* filename)
+int dir_manage_t::search(const char* filename) const
 {
-  for (size_t i = 0; i < _files.size(); ++i) {
-    if (_files[i].filename == filename) {
+  for (size_t i = 0; i < _file_list_count; ++i) {
+    if (strcmp(_file_list[i].filename, filename) == 0) {
       return i;
     }
   }
@@ -654,13 +852,13 @@ int dir_manage_t::search(const char* filename)
 
 std::string dir_manage_t::getFullPath(size_t index)
 {
-  if (index >= _files.size()) { return ""; }
-  return _path + _files[index].filename;
+  if (index >= _file_list_count) { return ""; }
+  return std::string(_path) + _file_list[index].filename;
 }
 
 std::string dir_manage_t::makeFullPath(const char* filename) const
 {
-  return _path + filename;
+  return std::string(_path) + filename;
 }
 
 //-------------------------------------------------------------------------
@@ -680,16 +878,10 @@ bool file_manage_t::updateFileList(def::app::data_type_t dir_type)
   M5_LOGV("updateFileList");
   auto dir = getDirManage(dir_type);
   if (dir == nullptr) { return false; }
-  if (!dir->update()) {
-    auto st = dir->getStorage();
-    st->endStorage();
-    st->beginStorage();
-    return !dir->update();
-  }
-  return true;
+  return dir->updateFileList();
 }
 
-void file_manage_t::setLatestFileInfo(const char* filename, def::app::data_type_t data_type)
+void file_manage_t::setLatestFileInfo(def::app::data_type_t data_type, const char* filename)
 {
   if (data_type == def::app::data_type_t::data_song_preset
    || data_type == def::app::data_type_t::data_song_users
@@ -697,6 +889,14 @@ void file_manage_t::setLatestFileInfo(const char* filename, def::app::data_type_
     _latest_data_type = data_type;
     _latest_file_name = (filename != nullptr) ? filename : "";
     _display_file_name = trimExtension(_latest_file_name);
+    _latest_file_index = -1;
+    auto dir = getDirManage(data_type);
+    if (dir != nullptr) {
+      if (dir->isEmpty()) {
+        updateFileList(data_type);
+      }
+      _latest_file_index = dir->search(_latest_file_name.c_str());
+    }
   }
 }
 
@@ -718,11 +918,12 @@ memory_info_t* file_manage_t::createMemoryInfo(size_t length)
   return &_memory_info[new_queue_index];
 }
 
-const memory_info_t* file_manage_t::loadFile(def::app::data_type_t dir_type, size_t index)
+memory_info_t* file_manage_t::loadFile(def::app::data_type_t dir_type, size_t index)
 {
   auto dir = getDirManage(dir_type);
+  if (dir == nullptr) { return nullptr; }
   if (index >= dir->getCount()) {
-    updateFileList(dir_type);
+    dir->updateFileList();
   }
   if ((int16_t)index < 0) { // マイナス指定されている場合は末尾側として扱えるようにindexを加算する
     index = ((int16_t)index) + dir->getCount();
@@ -730,20 +931,37 @@ const memory_info_t* file_manage_t::loadFile(def::app::data_type_t dir_type, siz
   if (index < dir->getCount())
   {
     auto info = dir->getInfo(index);
-    M5_LOGD("file_manage_t::loadFile : index:%d %s", index, info->filename.c_str());
-    if (info->filesize == 0) { return nullptr; }
-    auto memory = createMemoryInfo(info->filesize);
+    // M5_LOGV("file_manage_t::loadFile : index:%d %s", index, info->filename);
+    return loadFile(dir_type, info->filename);
+  }
+  return nullptr;
+}
+
+memory_info_t* file_manage_t::loadFile(def::app::data_type_t dir_type, const char* file_name)
+{
+  auto dir = getDirManage(dir_type);
+  if (dir == nullptr) { return nullptr; }
+  auto storage = dir->getStorage();
+  if (storage == nullptr) { return nullptr; }
+
+  if (storage->isBegin() == false) { storage->beginStorage(); }
+  auto fullpath = dir->makeFullPath(file_name);
+  auto filesize = storage->getFileSize(fullpath.c_str());
+// M5_LOGV("file_manage_t::loadFile : %s size:%d", fullpath.c_str(), filesize);
+  if (filesize > 0) {
+    auto memory = createMemoryInfo(filesize);
+// M5_LOGV("memory: create size:%d  result:%p", filesize, memory);
     if (memory != nullptr) {
       memory->dir_type = dir_type;
-      auto fullpath = dir->getFullPath(index);
-      memory->filename = fullpath;
-      auto storage = dir->getStorage();
-      if (0 <= storage->loadFromFileToMemory(fullpath.c_str(), memory->data, memory->size, index)) {
-        setLatestFileInfo(info->filename.c_str(), dir_type);
+      memory->filename = file_name;
+      if (0 <= storage->loadFromFileToMemory(fullpath.c_str(), memory->data, memory->size)) {
+M5_LOGV(" loaded:%s size:%d", fullpath.c_str(), memory->size);
         return memory;
       }
+      memory->release();
     }
   }
+M5_LOGE(" load failed:%s", fullpath.c_str());
   return nullptr;
 }
 
@@ -769,18 +987,21 @@ bool file_manage_t::saveFile(def::app::data_type_t dir_type, size_t memory_index
   }
 // M5_LOGV("save:%s size:%d result:%d", path.c_str(), mem->size, result);
 
-  dir->update();
-
   if (result != mem->size) {
     return false;
-  }
-  if (!mem->filename.empty()) {
-    setLatestFileInfo(mem->filename.c_str(), dir_type);
   }
 
   return true;
 }
 
-
+bool file_manage_t::removeFile(def::app::data_type_t dir_type, const char* filename)
+{
+  auto dir = getDirManage(dir_type);
+  if (dir == nullptr) { return false; }
+  auto storage = dir->getStorage();
+  if (storage == nullptr) { return false; }
+  auto fullpath = dir->makeFullPath(filename);
+  return storage->removeFile(fullpath.c_str());
+}
 //-------------------------------------------------------------------------
 }; // namespace kanplay_ns

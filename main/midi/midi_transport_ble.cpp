@@ -225,7 +225,8 @@ void MIDI_Transport_BLE::end(void)
 void MIDI_Transport_BLE::addMessage(const uint8_t* data, size_t length)
 {
   uint32_t msec = M5.millis();
-  if (_tx_data.size() + length >= _mtu_size - 3) {
+  int len = length + (_tx_runningStatus != data[0] ? 2 : 0);
+  if (_tx_data.size() + len >= _mtu_size - 1) {
     // If the tx_data size exceeds the buffer size, send it immediately
     sendFlush();
   }
@@ -353,7 +354,7 @@ void MIDI_Transport_BLE::updateState(void)
   } else if (_use_tx || _use_rx) {
     midiport_info = kanplay_ns::def::command::midiport_info_t::mp_enabled;
   }
-  kanplay_ns::system_registry.runtime_info.setMidiPortStateBLE(midiport_info);
+  kanplay_ns::system_registry->runtime_info.setMidiPortStateBLE(midiport_info);
 }
 
 void MIDI_Transport_BLE::setCentralConnected(bool connected)

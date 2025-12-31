@@ -71,35 +71,15 @@ Degree操作コマンド {
 }
 
 */
-  struct chord_option_t
-  {
-    uint8_t degree;
-    uint8_t bass_degree;
-    // int8_t semitone_shift;
-    // int8_t bass_semitone_shift;
-    // bool minor_swap;
-    // 比較演算子オペレータ
 
-    bool operator==(const chord_option_t& rhs) const
-    {
-      return rhs.degree == degree
-          && rhs.bass_degree == bass_degree
-          // && rhs.semitone_shift == semitone_shift
-          // && rhs.bass_semitone_shift == bass_semitone_shift
-          // && rhs.minor_swap == minor_swap;
-          ;
-    }
-    bool operator!=(const chord_option_t& rhs) const
-    {
-      return !(*this == rhs);
-    }
-  };
+  // ユーザー操作によって押されているオプション
+  sequence_chord_desc_t _pressed_option;
+
+  // 次回のオモテ拍から適用されるオプション
+  sequence_chord_desc_t _next_option;
   
-  // 次回のオモテ拍から適用されるオプション (自動演奏で先行入力した場合)
-  chord_option_t _next_option;
-  
-  // 現在の演奏オプション (演奏中の状態)
-  chord_option_t _current_option;
+  // オモテ拍のタイミングで確定した現在の演奏オプション (演奏中の状態)
+  sequence_chord_desc_t _current_option;
 
   // 自動演奏(オモテ拍)が次回発動するまでの残り時間 (usec)
   int32_t _auto_play_onbeat_remain_usec = -1;
@@ -121,18 +101,6 @@ Degree操作コマンド {
 
   // ステップのオン・オフ進行状況保持用 0==オンビート , 1~3==オフビート位置
   uint8_t _current_beat_index = 0;
-
-  // オモテ拍のタイミングで確定した演奏中のスロット番号
-  uint8_t _current_slot_index;
-
-  // オモテ拍のタイミングで確定したメジャー・マイナースワップ
-  bool _minor_swap;
-
-  // オモテ拍のタイミングで確定した半音上げ下げ
-  int8_t _semitone_shift;
-
-  // オモテ拍のタイミングで確定した半音上げ下げ(オンコード用)
-  int8_t _bass_semitone_shift;
 
   // 現在のサステインの状態
   def::play::sustain_state_t _sustain_state;
@@ -157,11 +125,16 @@ Degree操作コマンド {
   void sustainProc(void);
   void setSustain(bool sustain_on);
 
+  void updateNextOptions(void);
+  void addSequence(void);
+
   void chordStepReset(void);
   void chordNoteOff(int part);
   void resetStepAndMute(void);
   void resetStep(void);
   void allPartsNoteOff(void);
+  void procSequenceStepUd(const def::command::command_param_t& command_param, const bool is_pressed);
+//  void procSequencePlay(const def::command::command_param_t& command_param, const bool is_pressed);
   void procSoundEffect(const def::command::command_param_t& command_param, const bool is_pressed);
   void procNoteButton(const def::command::command_param_t& command_param, const bool is_pressed);
   void procDrumButton(const def::command::command_param_t& command_param, const bool is_pressed);
