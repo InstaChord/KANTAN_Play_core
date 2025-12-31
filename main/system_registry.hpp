@@ -195,7 +195,7 @@ protected:
 
     // 実行時に変化する保存されない情報 (設定画面が存在しない可変情報)
     struct reg_runtime_info_t : public registry_t {
-        reg_runtime_info_t(void) : registry_t(44, 0, DATA_SIZE_8) {}
+        reg_runtime_info_t(void) : registry_t(48, 0, DATA_SIZE_8) {}
         enum index_t : uint16_t {
             SEQUENCE_STEP_L,
             SEQUENCE_STEP_H,
@@ -219,9 +219,12 @@ protected:
             MASTER_KEY,
             PRESS_VELOCITY,
             PLAY_SLOT,
-            PLAY_MODE,
             SEQUENCE_MODE,
-            MENU_VISIBLE,
+            GUI_FLAG_MENU,
+            GUI_FLAG_PARTEDIT,
+            GUI_FLAG_SONGRECORDING,
+            GUI_PERFORM_STYLE,
+            NOTE_SCALE,
             CHORD_AUTOPLAY_STATE,
             SUSTAIN_STATE,
             EDIT_VELOCITY,
@@ -299,41 +302,50 @@ protected:
         }
         uint8_t getPlaySlot(void) const { return get8(PLAY_SLOT); }
 
-        // 現在の演奏モード
-        void setPlayMode(def::playmode::playmode_t mode) { set8(PLAY_MODE, mode); }
-        def::playmode::playmode_t getPlayMode(void) const { return (def::playmode::playmode_t)get8(PLAY_MODE); }
-
-        // メニューUIを表示しているか否か
-        void setMenuVisible(bool visible) { set8(MENU_VISIBLE, visible); }
-        bool getMenuVisible(void) const { return get8(MENU_VISIBLE); }
-
-        def::playmode::playmode_t getCurrentMode(void) const {
-            if (getMenuVisible()) { return def::playmode::menu_mode; }
+        def::gui_mode_t getGuiMode(void) const {
+            if (getGuiFlag_Menu()) { return def::gui_mode_t::gm_menu; }
+            if (getGuiFlag_PartEdit()) { return def::gui_mode_t::gm_part_edit; }
+            if (getGuiFlag_SongRecording()) { return def::gui_mode_t::gm_song_recording; }
             switch (getSequenceMode()) {
-            case def::seqmode::seq_song_edit:
-                return def::playmode::seq_edit_mode;
             case def::seqmode::seq_auto_song:
             case def::seqmode::seq_guide_play:
-                return def::playmode::seq_play_mode;
+                return def::gui_mode_t::gm_song_play;
             default:
                 break;
             }
-            return (def::playmode::playmode_t)get8(PLAY_MODE);
+            switch (getGui_PerformStyle()) {
+            default:
+            case def::perform_style_t::ps_chord:
+                return def::gui_mode_t::gm_perform_chord;
+            case def::perform_style_t::ps_note:
+                return def::gui_mode_t::gm_perform_note;
+            case def::perform_style_t::ps_drum:
+                return def::gui_mode_t::gm_perform_drum;
+            }
+            return def::gui_mode_t::gm_unknown;
         }
+
+        // メニューUIを表示しているか否か
+        void setGuiFlag_Menu(bool visible) { set8(GUI_FLAG_MENU, visible); }
+        bool getGuiFlag_Menu(void) const { return get8(GUI_FLAG_MENU); }
+
+        // パート編集モードか否か
+        void setGuiFlag_PartEdit(bool enabled) { set8(GUI_FLAG_PARTEDIT, enabled); }
+        bool getGuiFlag_PartEdit(void) const { return get8(GUI_FLAG_PARTEDIT); }
+
+        // シーケンス編集モードか否か
+        void setGuiFlag_SongRecording(bool enabled) { set8(GUI_FLAG_SONGRECORDING, enabled); }
+        bool getGuiFlag_SongRecording(void) const { return get8(GUI_FLAG_SONGRECORDING); }
+
+        void setGui_PerformStyle(def::perform_style_t style) { set8(GUI_PERFORM_STYLE, static_cast<uint8_t>(style)); }
+        def::perform_style_t getGui_PerformStyle(void) const { return static_cast<def::perform_style_t>(get8(GUI_PERFORM_STYLE)); }
+
+        // ノート演奏時のスケール
+        void setNoteScale(uint8_t scale) { set8(NOTE_SCALE, scale); }
+        uint8_t getNoteScale(void) const { return get8(NOTE_SCALE); }
 
         void setSequenceMode(def::seqmode::seqmode_t mode) { set8(SEQUENCE_MODE, mode); }
         def::seqmode::seqmode_t getSequenceMode(void) const { return (def::seqmode::seqmode_t)get8(SEQUENCE_MODE); }
-        def::seqmode::seqmode_t getGuiSequenceMode(void) const {
-            auto res = def::seqmode::seq_free_play;
-            if (!getMenuVisible()) {
-                res = getSequenceMode();
-                if (res == def::seqmode::seq_beat_play) {
-                    // ビート演奏モード時はGUI上ではシーケンス系機能は不要なのでフリープレイモードと同列に扱う
-                    res = def::seqmode::seq_free_play;
-                }
-            }
-            return res;
-        }
 
         // IMUによるボタン押下時のベロシティ
         void setPressVelocity(uint8_t level) { set8(PRESS_VELOCITY, level); }
@@ -343,15 +355,19 @@ protected:
         void setAutoplayState(def::play::auto_play_state_t mode) { set8(CHORD_AUTOPLAY_STATE, mode); }
         def::play::auto_play_state_t getAutoplayState(void) const { return (def::play::auto_play_state_t)get8(CHORD_AUTOPLAY_STATE); }
         def::play::auto_play_state_t getGuiAutoplayState(void) const {
-            auto seq = getSequenceMode();
             auto res = def::play::auto_play_state_t::auto_play_none;
+            auto seq = getSequenceMode();
+
+            // ソング記録モードはガイド演奏モードと同等扱いとする
+            if (getGuiFlag_SongRecording()) { seq = def::seqmode::seq_guide_play; }
+
             if (seq == def::seqmode::seq_beat_play || seq == def::seqmode::seq_auto_song) {
                 res = (def::play::auto_play_state_t)get8(CHORD_AUTOPLAY_STATE);
                 // ビート演奏モードと自動演奏モード時はnoneは無効化してwaitingにする
                 if (res == def::play::auto_play_state_t::auto_play_none) {
                     res = def::play::auto_play_state_t::auto_play_waiting;
                 }
-            } else if (seq == def::seqmode::seq_guide_play || seq == def::seqmode::seq_song_edit) {
+            } else if (seq == def::seqmode::seq_guide_play) {
                 res = (def::play::auto_play_state_t)get8(CHORD_AUTOPLAY_STATE);
                 // ガイド演奏モードとシーケンス編集モード時はビートモード以外は無効化
                 if (res != def::play::auto_play_state_t::auto_play_beatmode) {
@@ -759,41 +775,19 @@ protected:
     };
 
     struct reg_slot_info_t : public registry_t {
-        reg_slot_info_t(void) : registry_t(8, 0, DATA_SIZE_8) {}
+        reg_slot_info_t(void) : registry_t(6, 0, DATA_SIZE_8) {}
         enum index_t : uint16_t {
             TEMPO_BPM_L,
             TEMPO_BPM_H,
             SWING,
             KEY_OFFSET,
-            PLAY_MODE,
             STEP_PER_BEAT,
-            NOTE_SCALE,
             NOTE_PROGRAM,
         };
-        // void set8(uint16_t index, uint8_t value, bool force = false) {
-        //     system_registry->runtime_info.setSongModified(true);
-        //     registry_t::set8(index, value, force);
-        // }
-/*
-        // テンポ (BPM)
-        void setTempo(uint16_t bpm) {
-            if (bpm < def::app::tempo_bpm_min) { bpm = def::app::tempo_bpm_min; }
-            if (bpm > def::app::tempo_bpm_max) { bpm = def::app::tempo_bpm_max; }
-            set16(TEMPO_BPM_L, bpm);
-        }
-        uint16_t getTempo(void) const { return get16(TEMPO_BPM_L); }
 
-        // スウィング (swing)
-        void setSwing(uint8_t swing) { set8(SWING, swing); }
-        uint8_t getSwing(void) const { return get8(SWING); }
-*/
         // 基準キーに対するオフセット量
         void setKeyOffset(int8_t offset) { set8(KEY_OFFSET, offset); }
         int8_t getKeyOffset(void) const { return get8(KEY_OFFSET); }
-
-        // スロットの演奏モード
-        void setPlayMode(def::playmode::playmode_t mode) { set8(PLAY_MODE, mode); }
-        def::playmode::playmode_t getPlayMode(void) const { return (def::playmode::playmode_t)get8(PLAY_MODE); }
 
         // コード演奏時の１ビートあたりのステップ数 (1~4)
         void setStepPerBeat(uint8_t spb) {
@@ -809,19 +803,11 @@ protected:
             return spb;
         }
 
-        // ノート演奏時のスケール
-        void setNoteScale(uint8_t scale) { set8(NOTE_SCALE, scale); }
-        uint8_t getNoteScale(void) const { return get8(NOTE_SCALE); }
-
         void setNoteProgram(uint8_t program) { set8(NOTE_PROGRAM, program); }
         uint8_t getNoteProgram(void) const { return get8(NOTE_PROGRAM); }
 
         void reset(void) {
-            setPlayMode(def::playmode::playmode_t::chord_mode);
-            // setTempo(def::app::tempo_bpm_default);
-            // setSwing(def::app::swing_default);
             setStepPerBeat(def::app::step_per_beat_default);
-            setNoteScale(0);
             setKeyOffset(0);
             setNoteProgram(0);
         }
@@ -1279,7 +1265,7 @@ protected:
         bool loadText(uint8_t* data, size_t data_length);
 
         // メモリ上に文字列データを保存する(旧仕様)
-        size_t saveText(uint8_t* data, size_t data_length);
+        // size_t saveText(uint8_t* data, size_t data_length);
 
         bool assign(const song_data_t &src) {
             song_info.assign(src.song_info);

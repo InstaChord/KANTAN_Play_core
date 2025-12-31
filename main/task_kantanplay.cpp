@@ -174,13 +174,12 @@ bool task_kantanplay_t::commandProccessor(void)
             autoplay_state = def::play::auto_play_state_t::auto_play_running;
           }
 
-          // シーケンス編集モード以外の場合、オートプレイ停止/ポーズ時にシーケンス位置を先頭に戻す
           if (no_working && (
-              autoplay_state == def::play::auto_play_state_t::auto_play_none
-           || autoplay_state == def::play::auto_play_state_t::auto_play_paused
+            autoplay_state == def::play::auto_play_state_t::auto_play_none
+            || autoplay_state == def::play::auto_play_state_t::auto_play_paused
           )) {
-            if (seq_mode != def::seqmode::seq_song_edit) {
-              // シーケンス位置を先頭に戻す
+            // ソング記録モード以外の場合、オートプレイ停止/ポーズ時にシーケンス位置を先頭に戻す
+            if (!system_registry->runtime_info.getGuiFlag_SongRecording()) {
               system_registry->runtime_info.setSequenceStepIndex(0);
             }
           }
@@ -404,7 +403,7 @@ uint32_t task_kantanplay_t::chordProc(void)
   }
 
   // パターン編集モードでない場合 && 自動演奏の一時停止モードでない場合
-  if (system_registry->runtime_info.getPlayMode() != def::playmode::playmode_t::chord_edit_mode
+  if (!system_registry->runtime_info.getGuiFlag_PartEdit()
   &&  system_registry->runtime_info.getGuiAutoplayState() != def::play::auto_play_paused)
   {
     // アルペジエータのタイムアウト判定 (一定時間たつと強制的に先頭に戻す)
@@ -537,7 +536,7 @@ void task_kantanplay_t::procChordBeat(const def::command::command_param_t& comma
   auto seqmode = system_registry->runtime_info.getSequenceMode();
   if (seqmode == def::seqmode::seq_free_play
    || seqmode == def::seqmode::seq_beat_play
-   || seqmode == def::seqmode::seq_song_edit
+   || system_registry->runtime_info.getGuiFlag_SongRecording()
   ) {
     // 押されているボタンに基づいて次回オンビート時の演奏オプションを設定する
     updateNextOptions();
@@ -1016,10 +1015,10 @@ void task_kantanplay_t::chordStepPlay(void)
 
 void task_kantanplay_t::addSequence(void)
 {
-  auto mode = system_registry->runtime_info.getSequenceMode();
+  auto mode = system_registry->runtime_info.getGuiMode();
   auto stepindex = system_registry->runtime_info.getSequenceStepIndex();
   if (stepindex < def::app::max_sequence_step) {
-    if (mode == def::seqmode::seqmode_t::seq_song_edit) {
+    if (mode == def::gui_mode_t::gm_song_recording) {
       system_registry->current_sequence->setStepDescriptor(stepindex, _current_option);
       ++stepindex;
       system_registry->runtime_info.setSequenceStepIndex(stepindex);
@@ -1406,7 +1405,7 @@ void task_kantanplay_t::procNoteButton(const def::command::command_param_t& comm
   }
 
   int32_t master_key = (int8_t)system_registry->runtime_info.getMasterKey();
-  uint8_t note_scale = system_registry->current_slot->slot_info.getNoteScale();
+  uint8_t note_scale = system_registry->runtime_info.getNoteScale();
   int32_t offset_key = (int8_t)system_registry->current_slot->slot_info.getKeyOffset();
   note = def::play::note::note_scale_note_table[note_scale][button_index];
 

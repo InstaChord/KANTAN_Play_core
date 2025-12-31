@@ -25,6 +25,7 @@ static bool isSubButtonSlotSwap(void)
 static uint32_t getColorByCommand(const def::command::command_param_t &command_param)
 {
   uint32_t color = system_registry->color_setting.getButtonDefaultColor(); //0x555555u;
+  auto param = command_param.getParam();
   switch (command_param.getCommand()) {
   default:
       break;
@@ -40,6 +41,17 @@ static uint32_t getColorByCommand(const def::command::command_param_t &command_p
   case def::command::autoplay_switch:
   case def::command::chord_semitone:
     color = system_registry->color_setting.getButtonSemitoneColor();
+    break;
+  case def::command::recording_control:
+    switch ((def::command::recording_control_t)param) {
+    default:
+    case def::command::recording_control_t::rec_stop:
+      // color = system_registry->color_setting.getButtonDefaultColor();
+      break;
+    case def::command::recording_control_t::rec_start:
+      color = system_registry->color_setting.getButtonMinorSwapColor();
+      break;
+    }
     break;
   case def::command::note_button:
     color = system_registry->color_setting.getButtonNoteColor();
@@ -74,6 +86,8 @@ static uint32_t getColorByCommand(const def::command::command_param_t &command_p
 
   case def::command::slot_select:
     {
+      color = system_registry->color_setting.getButtonDegreeColor();
+/*
       auto play_mode = system_registry->song_data.slot[command_param.getParam() - 1].slot_info.getPlayMode();
       switch (play_mode) {
       case def::playmode::chord_mode:
@@ -88,20 +102,20 @@ static uint32_t getColorByCommand(const def::command::command_param_t &command_p
       default:
         break;
       }
+//*/
     }
     break;
 
-  case def::command::play_mode_set:
+  case def::command::perform_style_set:
     {
-      auto play_mode = command_param.getParam();
-      switch (play_mode) {
-      case def::playmode::chord_mode:
+      switch ((def::perform_style_t)param) {
+      case def::perform_style_t::ps_chord:
         color = system_registry->color_setting.getButtonDegreeColor();
         break;
-      case def::playmode::note_mode:
+      case def::perform_style_t::ps_note:
         color = system_registry->color_setting.getButtonNoteColor();
         break;
-      case def::playmode::drum_mode:
+      case def::perform_style_t::ps_drum:
         color = system_registry->color_setting.getButtonDrumColor();
         break;
       default:
@@ -395,7 +409,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
   case def::command::slot_select:
     if (is_pressed) {
       // パターン編集モードの場合、スロット切替を許可しない
-      if (system_registry->runtime_info.getPlayMode() != def::playmode::playmode_t::chord_edit_mode) {
+      if (!system_registry->runtime_info.getGuiFlag_PartEdit()) {
         uint8_t slot_index = param - 1;
         setSlotIndex(slot_index);
         changeCommandMapping();
@@ -408,7 +422,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
 // InstaChord側からのスロット選択は、スロット番号を相対移動で行う。
     if (is_pressed) {
       // パターン編集モードの場合、スロット切替を許可しない
-      if (system_registry->runtime_info.getPlayMode() != def::playmode::playmode_t::chord_edit_mode) {
+      if (!system_registry->runtime_info.getGuiFlag_PartEdit()) {
         auto slot_index = (int)system_registry->runtime_info.getPlaySlot();
         switch (param) {
         case def::command::slot_select_ud_t::slot_next:  slot_index += 1; break;
@@ -435,7 +449,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
       // system_registry->working_command.set(def::command::swap_sub_button);
 
       // コード演奏モードの場合、アルペジエータのステップを先頭に戻す
-      if (system_registry->runtime_info.getCurrentMode() == def::playmode::playmode_t::chord_mode) {
+      if (system_registry->runtime_info.getGuiMode() == def::gui_mode_t::gm_perform_chord) {
         system_registry->player_command.addQueue( { def::command::chord_step_reset_request, 1 } );
       }
 
@@ -511,7 +525,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
   case def::command::note_scale_ud:
     if (is_pressed) {
       // ノートスケール上下動作
-      int32_t tmp = system_registry->current_slot->slot_info.getNoteScale();
+      int32_t tmp = system_registry->runtime_info.getNoteScale();
       tmp += param;
       while (tmp < 0) { tmp += def::play::note::max_note_scale; }
       while (tmp >= def::play::note::max_note_scale) { tmp -= def::play::note::max_note_scale; }
@@ -522,7 +536,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
   case def::command::note_scale_set:
     if (is_pressed) {
       int scale_index = param - 1;
-      system_registry->current_slot->slot_info.setNoteScale(scale_index);
+      system_registry->runtime_info.setNoteScale(scale_index);
       M5_LOGV("note scale %d %s", scale_index, def::play::note::note_scale_name_table[scale_index]);
     }
     break;
@@ -604,33 +618,38 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
       bool en = def::command::part_off != command;
       system_registry->current_slot->chord_part[part_index].part_info.setEnabled(en);
 
-      auto seqmode = system_registry->runtime_info.getGuiSequenceMode();
-      if (seqmode == def::seqmode::seq_free_play) {
+      auto gui_mode = system_registry->runtime_info.getGuiMode();
+      if (gui_mode == def::gui_mode_t::gm_perform_chord) {
         if (def::command::part_edit == command)
         { // 編集に入る前にバックアップする
           system_registry->backup_song_data.assign(system_registry->song_data);
           system_registry->chord_play.setEditTargetPart(part_index);
-          system_registry->operator_command.addQueue( { def::command::play_mode_set, def::playmode::playmode_t::chord_edit_mode } );
+
+          // system_registry->operator_command.addQueue( { def::command::perform_style_set, (int)def::perform_style_t::ps_chord } );
 
           // 編集に入る際にオートプレイは無効にする
           system_registry->runtime_info.setAutoplayState(def::play::auto_play_state_t::auto_play_none);
 
           // 編集に入る際に、カーソル位置を左下原点に移動させる
           system_registry->operator_command.addQueue( { def::command::edit_function, def::command::edit_function_t::backhome } );
+
+          system_registry->runtime_info.setGuiFlag_PartEdit(true);
+          changeCommandMapping();
         }
       }
     }
     break;
 
-  case def::command::play_mode_set:
+  case def::command::recording_control:
     if (is_pressed) {
-      auto play_mode = (def::playmode::playmode_t)param;
-      system_registry->runtime_info.setPlayMode(play_mode);
-      if (def::playmode::playmode_t::chord_mode <= play_mode && play_mode <= def::playmode::playmode_t::drum_mode) {
-        system_registry->current_slot->slot_info.setPlayMode(play_mode);
-        auto slot_index = system_registry->runtime_info.getPlaySlot();
-        system_registry->song_data.slot[slot_index].slot_info.setPlayMode(play_mode);
-      }
+      bool rec_start = (def::command::recording_control_t::rec_start == (def::command::recording_control_t)param);
+      system_registry->runtime_info.setGuiFlag_SongRecording(rec_start);
+    }
+    break;
+  case def::command::perform_style_set:
+    if (is_pressed) {
+      auto perform_style = (def::perform_style_t)param;
+      system_registry->runtime_info.setGui_PerformStyle(perform_style);
 
       int mapping_switch = 0;
       if (system_registry->working_command.check( { def::command::mapping_switch, 1 } )) { mapping_switch = 1; }
@@ -841,14 +860,19 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
         }
         break;
       }
+      system_registry->checkSongModified();
+
       // 編集の終了時にレジューム情報も更新しておく
       system_registry->operator_command.addQueue( { def::command::system_control, def::command::sc_save } );
 
       // コード演奏モードに戻す
-      system_registry->operator_command.addQueue( { def::command::play_mode_set, def::playmode::playmode_t::chord_mode } );
+      // system_registry->operator_command.addQueue( { def::command::perform_style_set, (int)def::perform_style_t::ps_chord } );
       // 演奏ステップを先頭に戻す
       system_registry->player_command.addQueue( { def::command::chord_step_reset_request, 1 } );
-      system_registry->checkSongModified();
+
+      // 編集フラグをオフにする
+      system_registry->runtime_info.setGuiFlag_PartEdit(false);
+      changeCommandMapping();
     }
     break;
 
@@ -904,7 +928,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
 // 最上位メニューから抜けた時の処理
 void task_operator_t::afterMenuClose(void)
 {
-  system_registry->runtime_info.setMenuVisible( false );
+  system_registry->runtime_info.setGuiFlag_Menu( false );
   changeCommandMapping();
 
  // メニューから抜ける時はオートプレイは無効にする
@@ -1220,14 +1244,12 @@ void task_operator_t::setSlotIndex(uint8_t slot_index)
   }
   system_registry->runtime_info.setPlaySlot(slot_index);
   system_registry->working_command.set( { def::command::slot_select, 1 + slot_index } );
-
-  system_registry->runtime_info.setPlayMode(system_registry->current_slot->slot_info.getPlayMode());
 }
 
 // 現在の状態に合わせてボタンのコマンドマッピングを変更する
 void task_operator_t::changeCommandMapping(void)
 {
-  auto mode = system_registry->runtime_info.getCurrentMode();
+  auto mode = system_registry->runtime_info.getGuiMode();
   auto map_index = system_registry->runtime_info.getButtonMappingSwitch();
   auto sub_map = def::command::command_mapping_sub_button_normal_table;
   auto main_map = def::command::command_mapping_chord_play_table;
@@ -1235,7 +1257,7 @@ void task_operator_t::changeCommandMapping(void)
 
   switch (mode) {
   default:
-  case def::playmode::playmode_t::chord_mode:
+  case def::gui_mode_t::gm_perform_chord:
     {
       static constexpr const def::command::command_param_array_t* tbl[] = {
         def::command::command_mapping_chord_play_table,
@@ -1248,7 +1270,7 @@ void task_operator_t::changeCommandMapping(void)
     }
     break;
 
-  case def::playmode::playmode_t::note_mode:
+  case def::gui_mode_t::gm_perform_note:
     {
       static constexpr const def::command::command_param_array_t* tbl[] = {
         def::command::command_mapping_note_play_table,
@@ -1260,7 +1282,7 @@ void task_operator_t::changeCommandMapping(void)
     }
     break;
 
-  case def::playmode::playmode_t::drum_mode:
+  case def::gui_mode_t::gm_perform_drum:
     {
       static constexpr const def::command::command_param_array_t* tbl[] = {
         def::command::command_mapping_drum_play_table,
@@ -1272,7 +1294,7 @@ void task_operator_t::changeCommandMapping(void)
     }
     break;
 
-  case def::playmode::playmode_t::chord_edit_mode:
+  case def::gui_mode_t::gm_part_edit:
     {
       static constexpr const def::command::command_param_array_t* tbl[] = {
         def::command::command_mapping_chord_edit_table,
@@ -1286,7 +1308,7 @@ void task_operator_t::changeCommandMapping(void)
     sub_map = def::command::command_mapping_sub_button_edit_table;
     break;
 
-  case def::playmode::playmode_t::seq_edit_mode:
+  case def::gui_mode_t::gm_song_recording:
     {
       static constexpr const def::command::command_param_array_t* tbl[] = {
         def::command::command_mapping_sequence_edit_table,
@@ -1299,7 +1321,7 @@ void task_operator_t::changeCommandMapping(void)
     }
     break;
 
-  case def::playmode::playmode_t::seq_play_mode:
+  case def::gui_mode_t::gm_song_play:
     {
       static constexpr const def::command::command_param_array_t* tbl[] = {
         def::command::command_mapping_sequence_play_table,
@@ -1312,7 +1334,7 @@ void task_operator_t::changeCommandMapping(void)
     }
     break;
 
-  case def::playmode::playmode_t::menu_mode:
+  case def::gui_mode_t::gm_menu:
     {
       static constexpr const def::command::command_param_array_t* tbl[] = {
         def::command::command_mapping_menu_table,

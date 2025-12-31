@@ -1159,16 +1159,6 @@ bool system_registry_t::song_data_t::loadText(uint8_t* data, size_t data_length)
           break;
 
         case datafile_key_t::kwd_Mode:
-          {
-            auto m = def::playmode::playmode_t::chord_mode;
-            switch (c) {
-            case 'n':  case 'N':  m = def::playmode::playmode_t::note_mode;    break;
-            case 'd':  case 'D':  m = def::playmode::playmode_t::drum_mode;    break;
-            default: break;
-            }
-M5_LOGV("mode change: %02x", c);
-            ps->slot_info.setPlayMode(m);
-          }
           break;
 
         case datafile_key_t::kwd_Part:
@@ -1251,136 +1241,6 @@ M5_LOGV("mode change: %02x", c);
   return true;
 }
 
-size_t system_registry_t::song_data_t::saveText(uint8_t* data_buffer, size_t data_length)
-{
-  size_t result = 0;
-
-  auto buf = (char*)data_buffer;
-
-  for (int setidx = 0; setidx < def::app::max_slot; ++setidx)
-  {
-    // partset_info_t* ps = &partset_list[setidx];
-    auto ps = &slot[setidx];
-    int len = 0;
-    len = snprintf(buf, data_length - result, "%s\t%d\n", datafile_key[datafile_key_t::kwd_Slot], setidx);
-    buf += len;
-    result += len;
-
-    len = snprintf(buf, data_length - result, "%s\t%s\n", datafile_key[datafile_key_t::kwd_Mode], def::playmode::playmode_name_table[ps->slot_info.getPlayMode()]);
-// M5_LOGI("%s\t%s", datafile_key[datafile_key_t::kwd_Mode], def::playmode::playmode_name_table[ps->slot_info.getPlayMode()]);
-    buf += len;
-    result += len;
-
-    for (int partidx = 0; partidx < def::app::max_chord_part; ++partidx)
-    {
-      auto pi = &(ps->chord_part[partidx]);
-      auto gp = &(chord_part_drum[partidx]);
-
-      for (int k = 0; k < kwd_max; ++k) {
-        auto kwd = (datafile_key_t)k;
-
-        int32_t val = INT32_MAX;
-        int len = 0;
-        switch (kwd) {
-        case datafile_key_t::kwd_Part:     val = partidx;                               break;
-        case datafile_key_t::kwd_Tone:     val = pi->part_info.getTone() + 1;  break;
-        case datafile_key_t::kwd_Volume:   val = pi->part_info.getVolume();             break;
-        case datafile_key_t::kwd_BanLift:  val = pi->part_info.getAnchorStep();       break;
-        case datafile_key_t::kwd_End:      val = pi->part_info.getLoopStep() + 1;       break;
-        case datafile_key_t::kwd_Position: val = pi->part_info.getPosition();           break;
-        case datafile_key_t::kwd_Voicing:
-          {
-            len = snprintf(buf, 32, "%s\t%s\n", datafile_key[k], def::play::GetVoicingName(pi->part_info.getVoicing()));
-            buf += len;
-            result += len;
-            len = 0;
-          }
-          break;
-
-        case datafile_key_t::kwd_Pitch:
-          for (int pitch = 0; pitch < def::app::max_pitch_with_drum; ++pitch) {
-            len = snprintf(buf, 16, "%s%d", datafile_key[k], pitch);
-            buf += len;
-            result += len;
-            len = 0;
-            for (int step = 0; step < def::app::max_arpeggio_step; ++step) {
-              snprintf(buf, 8, "\t%d  ", pi->arpeggio.getVelocity(step, pitch));
-              buf += 4;
-              result += 4;
-            }
-            buf[0] = '\n';
-            buf += 1;
-            result += 1;
-          }
-          break;
-
-        case kwd_Drum:
-          if (setidx == 0)
-          {
-            for (int pitch = 0; pitch < def::app::max_pitch_with_drum; ++pitch) {
-              len = snprintf(buf, 16, "%s%d", datafile_key[k], pitch);
-              buf += len;
-              result += len;
-              len = snprintf(buf, 8, "\t%d\n", gp->getDrumNoteNumber(pitch));
-              buf += len;
-              result += len;
-            }
-          }
-          break;
-
-        case datafile_key_t::kwd_Style:
-          {
-            len = snprintf(buf, 16, "%s", datafile_key[k]);
-            buf += len;
-            result += len;
-            len = 0;
-            for (int step = 0; step < def::app::max_arpeggio_step; ++step) {
-              const char* style_name = "\t ";
-              switch (pi->arpeggio.getStyle(step))
-              {
-              default:
-              case def::play::arpeggio_style_t::same_time: break;
-              case def::play::arpeggio_style_t::high_to_low:
-                style_name = "\tU";
-              break;
-
-              case def::play::arpeggio_style_t::low_to_high:
-                style_name = "\tD";
-                break;
-
-              case def::play::arpeggio_style_t::mute:
-                style_name = "\tM";
-                break;
-              }
-              snprintf(buf, 3, "%s", style_name);
-              buf += 2;
-              result += 2;
-            }
-            buf[0] = '\n';
-            buf += 1;
-            result += 1;
-          }
-          break;
-
-        default:
-          break;
-
-        }
-        if (val != INT32_MAX) {
-          len = snprintf(buf, 16, "%s\t%d\n", datafile_key[k], (int)val);
-          buf += len;
-          result += len;
-        }
-      }
-      buf[0] = '\n';
-      buf += 1;
-      result += 1;
-    }
-  }
-  return result;
-}
-
-
 
 static KANTANMusic_Voicing getVoicing(const char* voicing)
 {
@@ -1392,31 +1252,6 @@ static KANTANMusic_Voicing getVoicing(const char* voicing)
     }
   }
   return KANTANMusic_Voicing_Close;
-}
-
-static const char* getPlayModeName(def::playmode::playmode_t mode)
-{
-  switch (mode)
-  {
-  case def::playmode::playmode_t::chord_mode: return "Chord";
-  case def::playmode::playmode_t::note_mode: return "Note";
-  case def::playmode::playmode_t::drum_mode: return "Drum";
-  default: break;
-  }
-  return "Unknown";
-}
-
-static def::playmode::playmode_t getPlayMode(const char* name)
-{
-  if (name != nullptr) {
-    for (int i = 0; i < def::playmode::playmode_max; ++i) {
-      auto mode = def::playmode::playmode_t(i);
-      if (strcmp(name, getPlayModeName(mode)) == 0) {
-        return (def::playmode::playmode_t)i;
-      }
-    }
-  }
-  return def::playmode::playmode_t::chord_mode;
 }
 
 static int degree_param_to_str(const degree_param_t& param, char* buf, size_t bufsize)
@@ -1636,7 +1471,6 @@ static bool saveSongInternal(system_registry_t::song_data_t* song, JsonVariant &
     if (*reg_slot == slot_default) { continue; }
     if (slot_index != 0 && *reg_slot == song->slot[slot_index - 1]) { continue; }
 
-    slot_info["play_mode"] = getPlayModeName(reg_slot->slot_info.getPlayMode());
     slot_info["key_offset"] = reg_slot->slot_info.getKeyOffset();
     slot_info["step_per_beat"] = reg_slot->slot_info.getStepPerBeat();
     auto chord_mode = slot_info["chord_mode"].to<JsonObject>();
@@ -1761,7 +1595,6 @@ static bool loadSongInternal(system_registry_t::song_data_t* song, const JsonVar
 
     auto reg_chord_part = reg_slot->chord_part;
     auto slot_info = json_slot[slot_index].as<JsonObject>();
-    reg_slot->slot_info.setPlayMode(getPlayMode(slot_info["play_mode"].as<const char*>()));
     reg_slot->slot_info.setKeyOffset(slot_info["key_offset"].as<int>());
     reg_slot->slot_info.setStepPerBeat(slot_info["step_per_beat"].as<int>());
     auto chord_mode = slot_info["chord_mode"].as<JsonObject>();

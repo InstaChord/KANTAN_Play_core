@@ -242,6 +242,7 @@ namespace def {
     NOTIFY_CLEAR_AFTER_CURSOR,
     NOTIFY_COPY_CONTROL_MAPPING,
     NOTIFY_DELETE_CONTROL_MAPPING,
+    NOTIFY_SEQ_CURSOR_MOVE,
     NOTIFY_DEVELOPER_MODE,
     MESSAGE_NEED_RESTART,
     NOTIFY_MAX,
@@ -260,6 +261,7 @@ namespace def {
     { "Clear After Cursor", nullptr },
     { "Copy Control Mapping", nullptr },
     { "Delete Control Mapping", nullptr },
+    { "Cursor Move"       , nullptr },
     { "Developer"         , nullptr },
     { "Please restart now", nullptr },
   }};
@@ -323,31 +325,35 @@ Button Index mapping
       ENC3_UP   = 0x80000000,
     };
   };
-  // かんぷれアプリの演奏モード
-  namespace playmode {
-    enum playmode_t : uint8_t {
-      unknown = 0,
-      chord_mode,       // コード演奏モード
-      note_mode,        // ノート演奏モード
-      drum_mode,        // ドラム演奏モード
-      chord_edit_mode,  // コード編集モード (厳密には演奏モードではないが処理の都合上ここに含める)
-      menu_mode,        // メニュー表示モード(厳密には演奏モードではないが処理の都合上ここに含める)
-      seq_edit_mode,    // シーケンス編集モード
-      seq_play_mode,    // シーケンス再生モード
-      playmode_max,
-    };
 
-    static constexpr const char* playmode_name_table[] = {
-      "-", "Chord", "Note", "Drum", "ChordEdit",
-    };
+  // GUIの表示状態
+  enum class gui_mode_t : uint8_t {
+    gm_unknown = 0,
+    gm_perform_chord,  // 通常の演奏
+    gm_perform_note,   // ノート演奏
+    gm_perform_drum,   // ドラム演奏
+    gm_song_play,      // ソング演奏 (ガイドプレイ・オートソング)
+    gm_song_recording, // ソングレコーディング
+    gm_part_edit,      // パート編集
+    gm_menu,           // メニュー表示モード
+    gm_max,
   };
-  namespace seqmode {
+
+  // 演奏スタイル
+  enum class perform_style_t : uint8_t {
+    ps_unknown = 0,
+    ps_chord,
+    ps_note,
+    ps_drum,
+    ps_max,
+  };
+
+  namespace seqmode { // (Play Mode に変更？)
     enum seqmode_t : uint8_t {
       seq_free_play = 0,
       seq_beat_play,
       seq_guide_play, // シーケンスガイド表示付きの演奏
       seq_auto_song,
-      seq_song_edit,
       seqmode_max,
     };
   };
@@ -463,7 +469,7 @@ Button Index mapping
       none = 0,
       menu_function,
       slot_select,
-      play_mode_set,
+      perform_style_set,
       part_off,
       part_on,
       part_edit,
@@ -479,6 +485,7 @@ Button Index mapping
       edit_exit,
       edit_enc2_target,
       autoplay_switch,
+      recording_control,
       note_scale_set, note_scale_ud,
       sound_effect,
       sub_button,
@@ -507,7 +514,7 @@ Button Index mapping
       (const char*[]){ nullptr, },    // none
       (const char*[]){ "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "Back", "OK", "Down", "Up", "Exit" }, // menu_function
       (const char*[]){ "-", "Slot 1", "Slot 2", "Slot 3", "Slot 4", "Slot 5", "Slot 6", "Slot 7", "Slot 8", }, // slot_select
-      (const char*[]){ "-", "Chord", "Note", "Drum", "ChordEdit", },                  // play_mode_set
+      (const char*[]){ "-", "Chord", "Note", "Drum", },                               // perform_style_set
       (const char*[]){ "-", "1 off", "2 off", "3 off", "4 off", "5 off", "6 off", },  // part_off
       (const char*[]){ "-", "1 ON", "2 ON", "3 ON", "4 ON", "5 ON", "6 ON", },        // part_on
       (const char*[]){ "-", "1 Edt", "2 Edt", "3 Edt", "4 Edt", "5 Edt", "6 Edt", },  // part_edit
@@ -523,6 +530,7 @@ Button Index mapping
       (const char*[]){ "-", "Exit", "Save" },            // edit_exit
       (const char*[]){ "-", "Vol %", "Oct", "Voicing", "Velo %", "Tone", "Anchor", "LoopLen", "Stroke" },   // edit_enc2_target
       (const char*[]){ "-", "Auto", "Play", "Stop", "Pause" },  // autoplay_switch
+      (const char*[]){ "Stop", "Rec", },  // recording_control
       (const char*[]){ "-", "Penta", "Major", "Chroma", "Blues", "Japan", }, // note_scale_set
     };
     enum menu_function_t : uint8_t {
@@ -539,6 +547,9 @@ Button Index mapping
     };
     enum autoplay_switch_t : uint8_t {
       autoplay_off = 0, autoplay_toggle, autoplay_start, autoplay_stop, autoplay_pause, autoplay_beat,
+    };
+    enum recording_control_t : uint8_t {
+      rec_stop = 0, rec_start,
     };
     enum sound_effect_t : uint8_t {
       single = 1, testplay,
@@ -794,7 +805,7 @@ Button Index mapping
       { menu_open, menu_system }, { menu_open, menu_seqmode }, // SIDE_1, SIDE_2 右側面ボタンでモード切替メニュー表示
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
       { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
-      { sequence_step_ud, -1 }, { sequence_step_ud, 1 }, { menu_open, menu_seqplay },  // ENC2_DOWN, ENC2_UP, ENC2_PUSH
+      { sequence_step_ud, -1 }, { sequence_step_ud, 1 }, { menu_open, menu_system },  // ENC2_DOWN, ENC2_UP, ENC2_PUSH
       { master_key_ud, -1}, { master_key_ud,  1 }, // ENC3_DOWN, ENC3_UP
     };
     // ノート演奏モードのボタン-コマンドマッピング
@@ -823,9 +834,9 @@ Button Index mapping
     };
     // ボタンマッピングチェンジ状態(レバー手前)でのコマンドマッピング
     static constexpr const command_param_array_t command_mapping_chord_alt1_table[] = {
-      { part_on, 4 }, { part_on, 5 }, { part_on, 6 }, { none }, { none },
+      { part_on, 4 }, { part_on, 5 }, { part_on, 6 }, { none }, { recording_control, recording_control_t::rec_start },
       { part_on, 1 }, { part_on, 2 }, { part_on, 3 }, { none }, { none },
-      { play_mode_set, playmode::chord_mode}, { play_mode_set, playmode::note_mode}, { play_mode_set, playmode::drum_mode }, { none }, { none },
+      { perform_style_set, (int)perform_style_t::ps_chord}, { perform_style_set, (int)perform_style_t::ps_note}, { perform_style_set, (int)perform_style_t::ps_drum }, { none }, { none },
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
       { menu_open, menu_system }, { none }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
@@ -835,9 +846,9 @@ Button Index mapping
     };
     // ボタンマッピングチェンジ状態(レバー奥)でのコマンドマッピング
     static constexpr const command_param_array_t command_mapping_chord_alt2_table[] = {
-      { part_off, 4 }, { part_off, 5 }, { part_off, 6 }, { none }, { none },
+      { part_off, 4 }, { part_off, 5 }, { part_off, 6 }, { none }, { recording_control, recording_control_t::rec_stop },
       { part_off, 1 }, { part_off, 2 }, { part_off, 3 }, { none }, { none },
-      { play_mode_set, playmode::chord_mode}, { play_mode_set, playmode::note_mode}, { play_mode_set, playmode::drum_mode }, { none }, { none },
+      { perform_style_set, (int)perform_style_t::ps_chord}, { perform_style_set, (int)perform_style_t::ps_note}, { perform_style_set, (int)perform_style_t::ps_drum }, { none }, { none },
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
       { menu_open, menu_system }, { none }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
@@ -849,7 +860,7 @@ Button Index mapping
     static constexpr const command_param_array_t command_mapping_chord_alt3_table[] = {
       { part_edit, 4 }, { part_edit, 5 }, { part_edit, 6 }, { none }, { none },
       { part_edit, 1 }, { part_edit, 2 }, { part_edit, 3 }, { none }, { none },
-      { play_mode_set, playmode::chord_mode}, { play_mode_set, playmode::note_mode}, { play_mode_set, playmode::drum_mode }, { none }, { none },
+      { perform_style_set, (int)perform_style_t::ps_chord}, { perform_style_set, (int)perform_style_t::ps_note}, { perform_style_set, (int)perform_style_t::ps_drum }, { none }, { none },
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
       { menu_open, menu_system }, { none }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
@@ -861,7 +872,7 @@ Button Index mapping
     static constexpr const command_param_array_t command_mapping_note_alt1_table[] = {
       { note_scale_set, 1 }, { note_scale_set, 2 }, { note_scale_set, 3 }, { note_scale_set, 4 }, { note_scale_set, 5 },
       { none }, { none }, { none }, { none }, { none },
-      { play_mode_set, playmode::chord_mode}, { play_mode_set, playmode::note_mode}, { play_mode_set, playmode::drum_mode }, { none }, { none },
+      { perform_style_set, (int)perform_style_t::ps_chord}, { perform_style_set, (int)perform_style_t::ps_note}, { perform_style_set, (int)perform_style_t::ps_drum }, { none }, { none },
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
       { menu_open, menu_system }, { none }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K
@@ -873,7 +884,7 @@ Button Index mapping
     static constexpr const command_param_array_t command_mapping_drum_alt1_table[] = {
       { none }, { none }, { none }, { none }, { none },
       { none }, { none }, { none }, { none }, { none },
-      { play_mode_set, playmode::chord_mode}, { play_mode_set, playmode::note_mode}, { play_mode_set, playmode::drum_mode }, { none }, { none },
+      { perform_style_set, (int)perform_style_t::ps_chord}, { perform_style_set, (int)perform_style_t::ps_note}, { perform_style_set, (int)perform_style_t::ps_drum }, { none }, { none },
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
       { menu_open, menu_system }, { none }, // SIDE_1, SIDE_2
       { mapping_switch, 1}, { mapping_switch, 2 }, { mapping_switch, 3}, // KNOB_L, KNOB_R, KNOB_K

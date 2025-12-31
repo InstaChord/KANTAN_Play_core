@@ -46,6 +46,7 @@ static int smooth_move(int dst, int src, int step) {
     } else {
       int diff = abs(dst - src);
       int mul = mul_table[step];
+      // diff = (2047 + diff * mul) >> 11;
       diff = (255 + diff * mul) >> 8;
       src += (dst < src) ? -(diff) : diff;
     }
@@ -1098,12 +1099,12 @@ static ui_midiport_info_t ui_midiport_info;
 struct ui_icon_auto_play_t : public ui_base_t
 {
 protected:
-  def::play::auto_play_state_t _autoplay_style;
+  def::play::auto_play_state_t _autoplay_state;
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     auto mode = system_registry->runtime_info.getGuiAutoplayState();
-    if (_autoplay_style != mode) {
-      _autoplay_style = mode;
+    if (_autoplay_state != mode) {
+      _autoplay_state = mode;
       if (mode == def::play::auto_play_state_t::auto_play_none) {
         _target_rect.w = 0;
       } else {
@@ -1125,7 +1126,7 @@ public:
 
     x = x + (w >> 1);
     y = y + (h >> 1);
-    switch (_autoplay_style) {
+    switch (_autoplay_state) {
     default:
       canvas->fillTriangle(x - 5, y - 5, x - 5, y + 5, x + 5, y, TFT_GREEN);
       break;
@@ -1236,7 +1237,7 @@ public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     bool updated = false;
 
-    if (system_registry->runtime_info.getCurrentMode() == def::playmode::menu_mode) {
+    if (system_registry->runtime_info.getGuiMode() == def::gui_mode_t::gm_menu) {
       close();
     } else {
       auto master_key = system_registry->runtime_info.getMasterKey();
@@ -1317,7 +1318,7 @@ struct ui_main_buttons_t : public ui_base_t
     uint32_t _text_color[def::hw::max_main_button] = { 0, };
     uint8_t _text_width[def::hw::max_main_button] = { 0, };
     uint32_t _btn_bitmask = 0x00;
-    uint8_t _play_mode = 0x80;
+    def::gui_mode_t _gui_mode = def::gui_mode_t::gm_unknown;
     uint8_t _master_key = 0x80;
     uint8_t _minor_swap = 0x80;
     int8_t _semitone = 0x80;
@@ -1331,17 +1332,17 @@ struct ui_main_buttons_t : public ui_base_t
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     ui_base_t::update_impl(param, offset_x, offset_y);
     bool flg_update = false;
-    uint8_t play_mode = system_registry->runtime_info.getCurrentMode();
+    def::gui_mode_t gui_mode = system_registry->runtime_info.getGuiMode();
     uint8_t master_key = system_registry->runtime_info.getMasterKey();
     uint8_t minor_swap = system_registry->chord_play.getChordMinorSwap();
     int8_t semitone = system_registry->chord_play.getChordSemitoneShift();
     uint8_t modifier = system_registry->chord_play.getChordModifier();
     int8_t offset_key = system_registry->current_slot->slot_info.getKeyOffset();
 
-    uint8_t note_scale = system_registry->current_slot->slot_info.getNoteScale();
+    uint8_t note_scale = system_registry->runtime_info.getNoteScale();
     auto mapping_history_code = system_registry->command_mapping_current.getHistoryCode();
     auto working_command_change_count = system_registry->working_command.getChangeCounter();
-    if (_play_mode != play_mode
+    if (_gui_mode != gui_mode
      || _master_key != master_key
      || _minor_swap != minor_swap
      || _semitone != semitone
@@ -1350,7 +1351,7 @@ struct ui_main_buttons_t : public ui_base_t
      || _note_scale != note_scale
      || _mapping_history_code != mapping_history_code
      ) {
-      _play_mode = play_mode;
+      _gui_mode = gui_mode;
       _master_key = master_key;
       _minor_swap = minor_swap;
       _semitone = semitone;
@@ -1918,7 +1919,8 @@ public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     ui_base_t::update_impl(param, offset_x, offset_y);
     if (_parent->getClientRect().empty()) { return; }
-    if (system_registry->runtime_info.getPlayMode() != def::playmode::chord_edit_mode) {
+    if (_need_draw == false) { return; }
+    if (system_registry->runtime_info.getGuiMode() != def::gui_mode_t::gm_part_edit) {
       _isDetailMode = system_registry->user_setting.getGuiDetailMode();
       update_inner(param, offset_x, offset_y);
     }
@@ -1939,6 +1941,9 @@ public:
     canvas->setColor(0x000033u);
     canvas->writeFastHLine(offset_x, offset_y+_client_rect.h-1, _client_rect.w-1);
     canvas->writeFastVLine(offset_x+_client_rect.w-1, offset_y+1, _client_rect.h-2);
+
+    int y = offset_y + getY((7 << 8) + 128)-2;
+    if (y + 16 > clip_rect->top() && y < clip_rect->bottom())
     {/// 楽器名の表示
       auto name = def::midi::program_name_table.at(partinfo->getTone())->get();
       // auto name = draw_param_t::program_name_tbl[partinfo->program_number];
@@ -1950,10 +1955,7 @@ public:
       canvas->setTextSize(fx, fy);
       canvas->setTextDatum(m5gfx::textdatum_t::top_center);
       canvas->setTextColor(isEnabled ? 0xFFFFFFu : 0x7F7F7Fu);
-      {
-        int y = offset_y + getY((7 << 8) + 128)-2;
-        canvas->drawString(name, offset_x + 1 + (_client_rect.w >> 1), y);
-      }
+      canvas->drawString(name, offset_x + 1 + (_client_rect.w >> 1), y);
     }
   }
 
@@ -2006,16 +2008,18 @@ public:
     { // 背景ドット描画
       canvas->setColor(system_registry->color_setting.getArpeggioNoteBackColor());
       // canvas->setColor(param->color_set->arpeggio_note_back);
+      const int dr = r >> 1;
       for (int j = 0; j < def::app::max_arpeggio_step; j += 2)
       // for (int j = 0; j < arpeggio_step_number_max; j += 2)
       {
-        int x = getX(j << 8);
-        if (x < 0) { continue; }
-        if (x > _client_rect.w) { break; }
-        x += offset_x;
+        int x = offset_x + getX(j << 8);
+        if (x+dr < clip_rect->left()) { continue; }
+        if (x-dr > clip_rect->right()) { break; }
         for (int i = 7; i > 0; --i) {
           int y = offset_y + getY(i << 8);
-          canvas->fillCircle(x, y, r >> 1);
+          if (y-dr > clip_rect->bottom()) { continue; }
+          if (y+dr < clip_rect->top()) { break; }
+          canvas->fillCircle(x, y, dr);
         }
       }
     }
@@ -2036,6 +2040,8 @@ public:
     if (je >= def::app::max_arpeggio_step) { je = def::app::max_arpeggio_step - 1; }
     for (; j <= je; ++j) {
       int x = getX(j << 8) + offset_x;
+      if (x + r < clip_rect->left()) { continue; }
+      if (x - r > clip_rect->right()) { break; }
 
       {
         int y = offset_y + getY(0);
@@ -2123,10 +2129,13 @@ public:
       // auto step = &(partinfo->arpeggio_pattern.step[j]);
       canvas->setColor(fore_color);
       for (int i = 5 + partinfo->isDrumPart(); i >= 0; --i) {
+        int y = offset_y + getY((i + 1) << 8);
+
+        if (y - r > clip_rect->bottom()) { continue; }
+        if (y + r < clip_rect->top()) { break; }
+
         auto v = system_registry->current_slot->chord_part[_part_index].arpeggio.getVelocity(j, i);
-        // auto v = step->velocity[i];
         if (v) {
-          int y = offset_y + getY((i + 1) << 8);
           if (v < 0) {
             if (!clear_confirm) {
               canvas->fillRect(x - (r >> 1), y - (r >> 1), r, r, 0x999999u);
@@ -2190,6 +2199,7 @@ protected:
 static ui_partinfo_t ui_partinfo_list[def::app::max_chord_part];
 
 static void setPartInfoNeedDraw(bool need_draw) {
+M5_LOGD("setPartInfoNeedDraw(%d)\n", need_draw);
   for (int i = 0; i < def::app::max_chord_part; ++i) {
     ui_partinfo_list[i].setNeedDraw(need_draw);
   }
@@ -2229,11 +2239,13 @@ public:
     ui_base_t::update_impl(param, offset_x, offset_y);
     update_inner(param, offset_x, offset_y);
     bool flg_update = false;
-    auto mode = system_registry->runtime_info.getPlayMode();
+
+    const bool is_partedit = system_registry->runtime_info.getGuiFlag_PartEdit();
+
     auto target_index = system_registry->chord_play.getEditTargetPart();
 
     if (!moving) {
-      if (!visible && mode == def::playmode::chord_edit_mode) {
+      if (!visible && is_partedit) {
         _isDetailMode = true;
         _is_follow_highlight = true;
         _part_index = target_index;
@@ -2244,7 +2256,7 @@ public:
         _cursor_x = 0x80;
         _cursor_y = 0x80;
       } else
-      if (visible && (mode != def::playmode::chord_edit_mode || _part_index != target_index)) {
+      if (visible && (!is_partedit || _part_index != target_index)) {
         flg_update = true;
         _is_enabled = false;
         setTargetRect(ui_partinfo_list[_part_index].getTargetRect());
@@ -2443,97 +2455,98 @@ public:
       }
     }
 
-
-    const uint32_t fore_color = 0xFFFF44u;
-    const uint32_t unfocus_color = 0xCCDDEEu;
-
-    canvas->setTextSize(1);
     const int y = offset_y + getY(9 << 8);
-    for (int i = 0; i < def::hw::max_sub_button; ++i)
-    { // サブボタン機能の描画
-      auto command_param = _command_param[i];
-      auto param = command_param.getParam();
+    if (y + 8 > clip_rect->top() && y - 8 < clip_rect->bottom()) {
+      const uint32_t fore_color = 0xFFFF44u;
+      const uint32_t unfocus_color = 0xCCDDEEu;
 
-      uint32_t color = (param == _enc2_target) ? fore_color : unfocus_color;
-      canvas->setColor(color);
-      canvas->setTextColor(color);
-      canvas->setTextDatum(textdatum_t::middle_center);
+      canvas->setTextSize(1);
+      for (int i = 0; i < def::hw::max_sub_button; ++i)
+      { // サブボタン機能の描画
+        auto command_param = _command_param[i];
+        auto param = command_param.getParam();
 
-      // int x = offset_x + getX(x_scroll_current + ((i*2) << 8));
-      int left = (i * _client_rect.w) >> 2;
-      int right = ((i+1) * _client_rect.w) >> 2;
-      int x = offset_x + left;
-      int w = right - left;
-      int x1 = x + (w>>2);
-      int x2 = x + (w>>1);
-      int x3 = x + (w*3>>2);
+        uint32_t color = (param == _enc2_target) ? fore_color : unfocus_color;
+        canvas->setColor(color);
+        canvas->setTextColor(color);
+        canvas->setTextDatum(textdatum_t::middle_center);
 
-      switch (param) {
-      case def::command::edit_enc2_target_t::part_vol:
-        {
-          int v = _part_volume;
-          canvas->fillArc(x1, y, r, 0, 90, 90 + v * 36 / 10);
-          canvas->drawNumber(v, x3, y);
-        }
-        break;
+        // int x = offset_x + getX(x_scroll_current + ((i*2) << 8));
+        int left = (i * _client_rect.w) >> 2;
+        int right = ((i+1) * _client_rect.w) >> 2;
+        int x = offset_x + left;
+        int w = right - left;
+        int x1 = x + (w>>2);
+        int x2 = x + (w>>1);
+        int x3 = x + (w*3>>2);
 
-      case def::command::edit_enc2_target_t::velocity:
-        {
-          int v = _edit_velocity;
-          if (v < 0) {
-            canvas->fillRect(x1 - (r >> 1), y - (r >> 1), r, r, color);
-            canvas->drawString("mute", x3, y);
-          } else {
-            canvas->fillArc(x1, y, r, 0, 90, 90 + v * 36 / 10, color);
+        switch (param) {
+        case def::command::edit_enc2_target_t::part_vol:
+          {
+            int v = _part_volume;
+            canvas->fillArc(x1, y, r, 0, 90, 90 + v * 36 / 10);
             canvas->drawNumber(v, x3, y);
           }
+          break;
+
+        case def::command::edit_enc2_target_t::velocity:
+          {
+            int v = _edit_velocity;
+            if (v < 0) {
+              canvas->fillRect(x1 - (r >> 1), y - (r >> 1), r, r, color);
+              canvas->drawString("mute", x3, y);
+            } else {
+              canvas->fillArc(x1, y, r, 0, 90, 90 + v * 36 / 10, color);
+              canvas->drawNumber(v, x3, y);
+            }
+          }
+          break;
+
+        case def::command::edit_enc2_target_t::program:
+          {
+            // プログラムナンバーは 1~128 として表示する
+            int p = _program + 1;
+            canvas->drawNumber(p, x2, y);
+          }
+          break;
+
+        case def::command::edit_enc2_target_t::endpoint:
+          {
+            int p = (_end_point>>1) + 1;
+            canvas->drawNumber(p, x2, y);
+          }
+          break;
+
+        case def::command::edit_enc2_target_t::banlift:
+          {
+            int p = (_anchor_step>>1) + 1;
+            canvas->drawNumber(p, x2, y);
+          }
+          break;
+
+        case def::command::edit_enc2_target_t::displacement:
+          {
+            int p = _displacement;
+            canvas->drawNumber(p, x2, y);
+          }
+          break;
+
+        case def::command::edit_enc2_target_t::position:
+          {
+            int pos = _position + def::app::position_table_offset;
+            canvas->drawString(def::app::position_name_table.at(pos)->get(), x2, y);
+          }
+          break;
+
+        case def::command::edit_enc2_target_t::voicing:
+          {
+            canvas->drawString(_voicing_name, x2, y);
+          }
+          break;
+
+        default: break;
+
         }
-        break;
-
-      case def::command::edit_enc2_target_t::program:
-        {
-          // プログラムナンバーは 1~128 として表示する
-          int p = _program + 1;
-          canvas->drawNumber(p, x2, y);
-        }
-        break;
-
-      case def::command::edit_enc2_target_t::endpoint:
-        {
-          int p = (_end_point>>1) + 1;
-          canvas->drawNumber(p, x2, y);
-        }
-        break;
-
-      case def::command::edit_enc2_target_t::banlift:
-        {
-          int p = (_anchor_step>>1) + 1;
-          canvas->drawNumber(p, x2, y);
-        }
-        break;
-
-      case def::command::edit_enc2_target_t::displacement:
-        {
-          int p = _displacement;
-          canvas->drawNumber(p, x2, y);
-        }
-        break;
-
-      case def::command::edit_enc2_target_t::position:
-        {
-          int pos = _position + def::app::position_table_offset;
-          canvas->drawString(def::app::position_name_table.at(pos)->get(), x2, y);
-        }
-        break;
-
-      case def::command::edit_enc2_target_t::voicing:
-        {
-          canvas->drawString(_voicing_name, x2, y);
-        }
-        break;
-
-      default: break;
-
       }
     }
   }
@@ -2543,27 +2556,26 @@ static ui_arpeggio_edit_t ui_arpeggio_edit;
 struct ui_chord_part_container_t : public ui_container_t
 {
 protected:
-  def::playmode::playmode_t _prev_mode;
+  def::gui_mode_t _prev_mode;
 
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override
   {
-    auto mode = system_registry->runtime_info.getCurrentMode();
+    auto mode = system_registry->runtime_info.getGuiMode();
     if (_prev_mode != mode) {
-M5_LOGV("ui_chord_part_container_t::update_impl: mode changed %d -> %d", _prev_mode, mode);
+M5_LOGV("ui_chord_part_container_t::update_impl: mode changed %d -> %d", (int)_prev_mode, (int)mode);
       _prev_mode = mode;
       switch (mode) {
-      case def::playmode::chord_mode:
-      case def::playmode::chord_edit_mode:
-      case def::playmode::note_mode:
-      case def::playmode::drum_mode:
-      case def::playmode::seq_edit_mode:
-      case def::playmode::seq_play_mode:
+      default:
+      // case def::gui_mode_t::chord_edit_mode:
+      // case def::gui_mode_t::note_mode:
+      // case def::gui_mode_t::drum_mode:
+      // case def::gui_mode_t::seq_edit_mode:
+      // case def::gui_mode_t::seq_play_mode:
         setTargetRect({0, header_height, main_area_width, main_area_height}); // TODO: 仮の値
         break;
 
-      default:
-      case def::playmode::menu_mode:
-        setTargetRect({0, header_height, 0, main_area_height}); // TODO: 仮の値
+      case def::gui_mode_t::gm_menu:
+        setTargetRect({0, header_height, 0, main_area_height});
         break;
       }
     }
@@ -2584,24 +2596,31 @@ protected:
   uint8_t _offset_step = 0;
   uint8_t _highlight_index = 0;
   bool _no_data = false;
-  def::seqmode::seqmode_t _prev_mode = def::seqmode::seq_free_play;
+  def::gui_mode_t _prev_mode = def::gui_mode_t::gm_unknown;
 
   sequence_chord_desc_t _desc[max_visible_step + 2];
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
-    auto mode = system_registry->runtime_info.getGuiSequenceMode();
-
-    bool visible = mode != def::seqmode::seq_free_play;
-    bool need_init = _prev_mode != mode;
-    if (need_init) {
+    auto mode = system_registry->runtime_info.getGuiMode();
+    bool visible = false;
+    switch (mode) {
+    case def::gui_mode_t::gm_song_play:
+    case def::gui_mode_t::gm_song_recording:
+      visible = true;
+      break;
+    default:
+      break;
+    }
+    bool need_init = false;
+    if (_prev_mode != mode) {
+      need_init = visible;
       _prev_mode = mode;
-      if (mode == def::seqmode::seq_song_edit) {
-        _offset_step = 2;
-      } else {
-        _offset_step = 0;
-      }
-
       auto r = getTargetRect();
       if (visible) {
+        if (mode == def::gui_mode_t::gm_song_recording) {
+          _offset_step = 2;
+        } else {
+          _offset_step = 0;
+        }
         // r.x = 0;
         // r.w = disp_width;
         r.y = disp_height - main_btns_height;
@@ -2624,7 +2643,7 @@ protected:
 
     int32_t current_stepindex = (int32_t)system_registry->runtime_info.getSequenceStepIndex();
     _x_scroll_target = current_stepindex * step_icon_width * 256;
-    if (need_init) {
+    if (need_init && visible) {
       _x_scroll_current = _x_scroll_target;
     } else {
       _x_scroll_current = smooth_move(_x_scroll_target, _x_scroll_current, (param->smooth_step + 2) >> 2);
@@ -2654,7 +2673,7 @@ protected:
 
     canvas->setTextDatum(m5gfx::textdatum_t::middle_center);
     canvas->setTextColor(TFT_WHITE);
-    int32_t y_degree = offset_y + (main_btns_height >> 1);
+    int32_t y_degree = offset_y + (main_btns_height >> 1) - 1;
     int32_t xe = offset_x + _x_scroll_offset;
 
     // image_dark_shift(canvas, offset_x + _offset_step * step_icon_width, offset_y, step_icon_width, main_btns_height);
@@ -2685,32 +2704,36 @@ protected:
       if (degree)
       {
         int32_t x_center = x + (step_icon_width >> 1);
+
+        int32_t y_mod = y_degree + (main_btns_height / 3);
+        if (y_mod+12 > clip_rect->top() && y_mod-12 < clip_rect->bottom())
         {
           auto modifier = desc.getModifier();
           auto name_tbl = def::command::command_name_table[def::command::command_t::chord_modifier];
-          int32_t y_mod = offset_y + main_btns_height - (main_btns_height / 6);
           int32_t x_mod = x + (step_icon_width >> 1);
           const char* mod_str = name_tbl[modifier];
           canvas->setTextSize(1, 2);
           canvas->drawString(mod_str, x_mod, y_mod);
         }
 
-        auto x_degree = x_center;
-        auto semitone = desc.getSemitoneShift();
-        auto minor_swap = desc.getMinorSwap();
-        if (semitone || minor_swap) {
-          canvas->setTextSize(1, 1);
-          x_degree -= 8;
-          if (semitone) {
-            auto text = (semitone < 0) ? "♭" : "♯";
-            canvas->drawString(text, x_degree + 16, y_degree - 6);
+        if (y_degree+12 > clip_rect->top() && y_degree-12 < clip_rect->bottom()) {
+          auto x_degree = x_center;
+          auto semitone = desc.getSemitoneShift();
+          auto minor_swap = desc.getMinorSwap();
+          if (semitone || minor_swap) {
+            canvas->setTextSize(1, 1);
+            x_degree -= 8;
+            if (semitone) {
+              auto text = (semitone < 0) ? "♭" : "♯";
+              canvas->drawString(text, x_degree + 16, y_degree - 6);
+            }
+            if (minor_swap) {
+              canvas->drawString("〜", x_degree + 16, y_degree + 6);
+            }
           }
-          if (minor_swap) {
-            canvas->drawString("〜", x_degree + 16, y_degree + 6);
-          }
+          canvas->setTextSize(2, 2);
+          canvas->drawNumber(degree, x_degree, y_degree);
         }
-        canvas->setTextSize(2, 2);
-        canvas->drawNumber(degree, x_degree, y_degree);
 
         if (prev_desc.getPartBits() != desc.getPartBits() || prev_desc.getSlotIndex() != desc.getSlotIndex())
         {
@@ -2770,7 +2793,7 @@ protected:
 
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override
   {
-    auto show = system_registry->runtime_info.getCurrentMode() == def::playmode::menu_mode;
+    auto show = system_registry->runtime_info.getGuiMode() == def::gui_mode_t::gm_menu;
     auto category = static_cast<def::menu_category_t>(system_registry->menu_status.getMenuCategory());
 
     if (_is_visible && !_is_closing && (!show || _category != category)) {
@@ -3225,7 +3248,7 @@ protected:
   {
     ui_base_t::update_impl(param, offset_x, offset_y);
 
-    auto show = system_registry->runtime_info.getCurrentMode() == def::playmode::menu_mode;
+    auto show = system_registry->runtime_info.getGuiMode() == def::gui_mode_t::gm_menu;
     auto category = static_cast<def::menu_category_t>(system_registry->menu_status.getMenuCategory());
     int current_level = system_registry->menu_status.getCurrentLevel();
 
@@ -3407,8 +3430,18 @@ protected:
   bool _is_visible = false;
 public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
-    auto visible = system_registry->user_setting.getGuiWaveView();
-    visible &= system_registry->runtime_info.getCurrentMode() == def::playmode::playmode_t::chord_mode;
+    bool visible;
+    switch (system_registry->runtime_info.getGuiMode()) {
+    case def::gui_mode_t::gm_menu:
+    case def::gui_mode_t::gm_part_edit:
+    case def::gui_mode_t::gm_song_play:
+    case def::gui_mode_t::gm_song_recording:
+      visible = false;
+      break;
+    default:
+      visible = system_registry->user_setting.getGuiWaveView();
+      break;
+    }
     if (_is_visible != visible) {
       if (visible) {
         setTargetRect({ 0, disp_height - main_btns_height, disp_width, main_btns_height });
@@ -3742,7 +3775,7 @@ bool gui_t::update(void)
 
   auto param = &_draw_param;
   param->resetInvalidatedRect();
-  param->is_menu_mode = (system_registry->runtime_info.getCurrentMode() == def::playmode::menu_mode);
+  param->is_menu_mode = (system_registry->runtime_info.getGuiMode() == def::gui_mode_t::gm_menu);
   uint32_t msec = M5.millis();
   uint32_t prev_msec = param->current_msec;
   int diff = msec - prev_msec;
