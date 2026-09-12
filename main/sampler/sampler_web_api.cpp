@@ -33,7 +33,7 @@ static constexpr const web_dir_t web_dirs[] = {
   { "samples", "/sampler/samples", nullptr, 3200 * 1024, nullptr, true },
   { "loops",   "/sampler/loops",   nullptr, 1600 * 1024, nullptr, true },
   { "music",   "/sampler/music",   nullptr, 128 * 1024 * 1024, nullptr, true },
-  { "kits",    "/sampler/kits",    ".json", 128 * 1024, "application/json", false },
+  { "kits",    "/sampler/kits",    nullptr, 7 * 1024 * 1024, "application/vnd.instachord.ktkit", false },
   { "projects", "/sampler/projects", ".json", 128 * 1024, "application/json", false },
 };
 
@@ -96,6 +96,7 @@ static bool is_asset_directory(const web_dir_t& dir, const std::string& name)
 
 static bool is_mp3_name(const std::string& name) { return has_suffix(name, ".mp3"); }
 static bool is_ktsynth_name(const std::string& name) { return has_suffix(name, ".ktsynth"); }
+static bool is_ktkit_name(const std::string& name) { return has_suffix(name, ".ktkit"); }
 static bool is_midi_name(const std::string& name)
 {
   return has_suffix(name, ".mid") || has_suffix(name, ".midi");
@@ -106,6 +107,9 @@ static bool valid_web_file_name(const web_dir_t& dir, const std::string& name)
   if (!valid_relative_path(name, nullptr)) { return false; }
   const bool beat_midi = strcmp(dir.token, "loops") == 0 && is_midi_name(name);
   const bool synth_tone = strcmp(dir.token, "samples") == 0 && is_ktsynth_name(name);
+  const bool kit_file = strcmp(dir.token, "kits") == 0
+                     && (is_ktkit_name(name) || has_suffix(name, ".json"));
+  if (strcmp(dir.token, "kits") == 0) { return kit_file; }
   return dir.audio ? (has_suffix(name, ".wav") || is_mp3_name(name) || beat_midi || synth_tone)
                    : valid_relative_path(name, dir.suffix);
 }
@@ -155,7 +159,7 @@ static std::string full_path(const web_dir_t& dir, const std::string& name)
 
 static bool is_asset_document(const web_dir_t& dir)
 {
-  return strcmp(dir.token, "projects") == 0 || strcmp(dir.token, "kits") == 0;
+  return strcmp(dir.token, "projects") == 0;
 }
 
 static void remove_document_assets(const std::string& document_path)
@@ -338,7 +342,8 @@ static esp_err_t get_file(httpd_req_t* req, const web_dir_t& dir, const std::str
   if (!kanplay_ns::storage_sd.openReadStream(path.c_str(), &stream)) {
     return send_error(req, "500 Internal Server Error", "read failed");
   }
-  httpd_resp_set_type(req, dir.audio
+  httpd_resp_set_type(req, is_ktkit_name(name) ? "application/vnd.instachord.ktkit"
+    : has_suffix(name, ".json") ? "application/json" : dir.audio
     ? (is_mp3_name(name) ? "audio/mpeg"
        : is_midi_name(name) ? "audio/midi"
        : is_ktsynth_name(name) ? "application/vnd.instachord.ktsynth"
@@ -396,7 +401,7 @@ static esp_err_t put_file(httpd_req_t* req, const web_dir_t& dir, const std::str
     }
 
     size_t chunk_size = (size_t)got;
-    const size_t header_size = dir.audio ? 12 : 1;
+    const size_t header_size = is_ktkit_name(name) ? 8 : dir.audio ? 12 : 1;
     int header_retries = 0;
     while (first_chunk && chunk_size < header_size && received + chunk_size < (size_t)req->content_len) {
       int extra = httpd_req_recv(req, (char*)data + chunk_size,
@@ -421,7 +426,10 @@ static esp_err_t put_file(httpd_req_t* req, const web_dir_t& dir, const std::str
         } else {
           valid = chunk_size >= 12 && memcmp(data, "RIFF", 4) == 0 && memcmp(data + 8, "WAVE", 4) == 0;
         }
-      } else if (strcmp(dir.suffix, ".json") == 0) {
+      } else if (is_ktkit_name(name)) {
+        static constexpr uint8_t magic[8] = {'K','T','K','I','T','\r','\n',0x1a};
+        valid = chunk_size >= sizeof(magic) && memcmp(data, magic, sizeof(magic)) == 0;
+      } else if (has_suffix(name, ".json")) {
         size_t offset = 0;
         while (offset < chunk_size && std::isspace((unsigned char)data[offset])) { ++offset; }
         valid = offset < chunk_size && data[offset] == '{';
@@ -476,7 +484,9 @@ static esp_err_t delete_file(httpd_req_t* req, const web_dir_t& dir, const std::
   // Remove the document first. If that fails, its assets remain intact and
   // the saved Kit/Project can still be loaded. A failed asset cleanup after a
   // successful delete leaves only harmless orphan data, never broken JSON.
-  if (is_asset_document(dir)) { remove_document_assets(path); }
+  if ((is_asset_document(dir) || (strcmp(dir.token, "kits") == 0 && has_suffix(name, ".json")))) {
+    remove_document_assets(path);
+  }
   httpd_resp_set_type(req, "application/json");
   return httpd_resp_sendstr(req, "{\"result\":\"ok\"}");
 }
@@ -491,10 +501,15 @@ static esp_err_t rename_file(httpd_req_t* req, const web_dir_t& dir, const std::
   if (httpd_query_key_value(query.data(), "to", target_raw, sizeof(target_raw)) != ESP_OK) { return send_error(req, "400 Bad Request", "new name required"); }
   std::string target = url_decode(target_raw, strlen(target_raw));
   if (!valid_web_file_name(dir, target) || target == name || !ensure_dirs()) { return send_error(req, "400 Bad Request", "invalid file name"); }
+  if (strcmp(dir.token, "kits") == 0 && is_ktkit_name(name) != is_ktkit_name(target)) {
+    return send_error(req, "400 Bad Request", "kit format extension cannot be changed");
+  }
   std::string source_path = full_path(dir, name);
   std::string target_path = full_path(dir, target);
   if (kanplay_ns::storage_sd.getFileSize(target_path.c_str()) >= 0) { return send_error(req, "409 Conflict", "file already exists"); }
-  const bool renamed = is_asset_document(dir)
+  const bool legacy_asset_document = is_asset_document(dir)
+    || (strcmp(dir.token, "kits") == 0 && has_suffix(name, ".json"));
+  const bool renamed = legacy_asset_document
     ? rename_asset_document(source_path, target_path)
     : kanplay_ns::storage_sd.renameFile(source_path.c_str(), target_path.c_str());
   if (!renamed) { return send_error(req, "500 Internal Server Error", "rename failed"); }

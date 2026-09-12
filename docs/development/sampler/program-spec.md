@@ -304,13 +304,15 @@ LEDは `system_registry->rgbled_control.setColor()` で制御します。
 構成:
 
 - Sample Kit: `Load Sample Kit` / `Save Sample Kit` / `Import Sample` / `New Kit` / `Reset Kit`
-  - Sample Kitは12個のSampler Padの波形と編集設定だけを `/sampler/kits/` に保存する。Beat、Recシーケンス、FX、各シンセパートの設定は変更しない。
+  - Sample Kitは12個のSampler Padの波形と編集設定だけを自己完結型`.ktkit`として `/sampler/kits/` に保存する。Beat、Recシーケンス、FX、各シンセパートの設定は変更しない。
+  - Pattern Beatの`Select Kit`は内蔵Kitに加え、`Load Beat Kit` / `Save Beat Kit`で種類付き`.ktkit`を扱う。Sample Kitとの相互誤読込は拒否する。
+  - `.ktkit`の詳細は[KTKIT file format](ktkit-format.md)を参照。旧JSON Kitは読込専用で維持し、次回保存時に`.ktkit`へ移行する。
   - Sample Kitを読み込むと、演奏途中のRecデータを残したまま音色セットだけを入れ替えられる。
 - Project: `Load` / `Save` / `File Editor` / `Clear Project`
   - トップメニューの現在パート直後に常時表示し、Recだけに属さない楽曲全体のファイル操作として扱う
   - `Clear Project` は二度押しで確定し、現在のSampler、Beat、Rec、Key/Scale、シンセ音色、FX、Mixerを空の新規状態へ戻す。SD上のProject、WiFi、外部入力、Input Assign、本体表示設定は変更しない
   - Input Assignなどの機器設定はProjectへ保存せず、電源断復帰用Resumeだけに保存する
-  - File EditorにはProject専用タブを用意し、SDフォルダ整理、ダウンロード、アップロード、Rename、削除を行う。現在状態のSave、Load、Clearなど、本体の演奏状態を変える操作は本体メニューで行う。ProjectとKitのRename/削除はJSONと対応する`_assets`フォルダを一括管理し、RenameではJSON内の参照も更新する。`_assets`フォルダは内部データとして一覧から隠す
+  - File EditorにはProject専用タブを用意し、SDフォルダ整理、ダウンロード、アップロード、Rename、削除を行う。現在状態のSave、Load、Clearなど、本体の演奏状態を変える操作は本体メニューで行う。`.ktkit`は単一ファイルとして管理する。Projectと旧JSON KitのRename/削除は対応する`_assets`フォルダを一括管理し、RenameではJSON内の参照も更新する。`_assets`フォルダは内部データとして一覧から隠す
 - Music Player: `Track Volume` / `Load Music` / `Play-Pause` / `Rewind 10 sec` / `Forward 10 sec` / `Stop` / `File Editor`
   - `/sampler/music/`のWAV/MP3を一覧表示する。サブフォルダはFile Editorで管理する
   - SDファイルを開いたまま24KB単位で読み、2秒分のstereoリングへ供給する。曲全体をPSRAMへ展開しない

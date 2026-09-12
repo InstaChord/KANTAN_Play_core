@@ -93,7 +93,7 @@ Beat Kitは、Pattern Beatが発音する12個のドラム・パーカッショ�
 
 Beat Kitは音色であり、リズムの並び方ではありません。同じBeat Patternでも、Beat Kitを変えると別のジャンルや雰囲気にできます。
 
-現行フォーマットでは、Beat Kitは独立したユーザー保存JSONではなく、Project内の`beat.pads`と対応Assetとして保存されます。
+Beat Kitは独立した種類付き`.ktkit`として保存・配布できます。Projectへ保存した場合は、従来どおり`beat.pads`と対応AssetとしてProject内にも自己完結して保存されます。
 
 ### 3.3 Beat Pattern
 
@@ -157,7 +157,7 @@ Projectは、上記のパートや設定をまとめた「楽曲・セッショ�
 - 必要であればRecデータが用意され、ミュート解除や生演奏で展開できる
 - FXとMixerが音割れや過度な音量を起こさない
 
-Projectは、Sample Kit JSON、Beat Kit JSON、Patternファイルへの単なるリンク集ではありません。
+Projectは、Sample Kit / Beat Kitの`.ktkit`やPatternファイルへの単なるリンク集ではありません。
 
 保存時に、現在選ばれている波形、Beat Kit、Patternイベント、Synth設定、Key / Scaleなどを、そのProjectの完成状態として保存します。
 
@@ -169,12 +169,8 @@ SDカード内の基本構成：
 /sampler/
 ├── samples/                  # 単体Sample、Synth素材
 ├── loops/                    # Audio Beat、MIDI Pattern（互換性のためフォルダ名はloops）
-├── kits/                     # Sample Kit
-│   ├── Example_Kit.json
-│   └── Example_Kit_assets/
-│       ├── pad01.wav
-│       ├── pad02.wav
-│       └── ...
+├── kits/                     # Sample Kit / Beat Kit（自己完結）
+│   └── Example_Kit.ktkit
 └── projects/                 # 完成Project
     ├── Example_Project.json
     └── Example_Project_assets/

@@ -72,7 +72,7 @@
       {name:'Song Intro.wav',size:80896,folder:'Song1'}
     ],
     loops:[{name:'night-drive.wav',size:704000}],
-    kits:[{name:'Starter Beat.json',size:2148}, {name:'Pentatonic Jam.json',size:2331}],
+    kits:[{name:'Starter Beat.ktkit',size:184320}, {name:'Pentatonic Jam.ktkit',size:233472}],
     projects:[{name:'First Jam.json',size:8420}, {name:'Night Session.json',size:9172}],
     music:[{name:'Demo Track.mp3',size:3840000}]
   };
@@ -283,7 +283,8 @@
     }
   }
   function fileDisplayLabel(kind, file) {
-    return String(file.name || file.file || '');
+    const name = String(file.name || file.file || '');
+    return kind === 'kits' ? name.replace(/\.(ktkit|json)$/i,'') : name;
   }
   function padCard(pad) {
     return el('button', {
@@ -329,11 +330,15 @@
     const root = $('#kit-view');
     if (!root) return;
     root.innerHTML='';
-    root.append(el('div',{class:'panel'},el('h2',{},'Sample Kit files'),folderPanel('kits'),filePanel('kits','.json')));
+    root.append(el('div',{class:'panel'},el('h2',{},'Kit package files'),folderPanel('kits'),filePanel('kits','.ktkit,.json')));
   }
   function cleanJsonName(name, fallback='New_Project') {
     const clean = String(name || fallback).replace(/[\\/]/g,'_').trim();
     return (clean || fallback).replace(/\.json$/i,'') + '.json';
+  }
+  function cleanKitName(name, legacy=false, fallback='New_Kit') {
+    const clean = String(name || fallback).replace(/[\\/]/g,'_').trim();
+    return (clean || fallback).replace(/\.(ktkit|json)$/i,'') + (legacy ? '.json' : '.ktkit');
   }
   function renderProject() {
     const root = $('#project-view');
@@ -382,6 +387,7 @@
       const rename = el('button',{onclick:async()=>{
         let next=prompt('New file name',file.name);
         if(kind==='projects'&&next!==null)next=cleanJsonName(next);
+        if(kind==='kits'&&next!==null)next=cleanKitName(next,/\.json$/i.test(file.name));
         if(!next||next===file.name)return;
         try { await renameFile(kind,file.name,next); status('Renamed to '+next); }
         catch(err) { status('Rename failed: '+err.message,true); }

@@ -457,7 +457,7 @@ Loop再生と最終ミックス録音を開始します。もう一度Fn1を押�
 - Save Sample Kit: Copy / New / Save as Default
 - New Kit
 - Reset Kit
-- Default Kit: `/sampler/kits/Default/Default_Kit.json`
+- Default Kit: `/sampler/kits/Default/Default_Kit.ktkit`（旧JSONは読込互換）
 
 Sample KitはBeat、Rec、FX、Mixer、Key / Scaleを置き換えません。音色セットだけを交換できます。
 
@@ -495,7 +495,8 @@ SDがない場合、未保存録音は電源断後に復元できません。
 - Sample: WAV / MP3
 - Audio Beat: WAV / MP3
 - Pattern Beat: MID / MIDI
-- Project / Kit: JSONと対応する`_assets`フォルダ
+- Project: JSONと対応する`_assets`フォルダ
+- Sample Kit / Beat Kit: 設定とユーザーPCMを含む単一`.ktkit`パッケージ。内蔵音源はID参照
 - Music Player: WAV / MP3（SDからストリーミング再生）
 - 内部PCM: mono / PCM16
 - 再生出力: 48kHz
@@ -537,8 +538,8 @@ File Editorはファイル管理を中心とし、演奏状態やRec設定を操
 - 選択したPadへのSample割り当てとSampleのPreview
 - Start / End、Pitch、Volume、RepeatなどのSample編集は本体で行う
 - BeatのLoad / Clear / Volume、Rec設定、ProjectのSave / Load / Clearなど、演奏状態を変える操作は本体で行う
-- Kit / Project削除時は対応する`_assets`フォルダも削除
-- Kit / Project Rename時はJSON内のAsset参照も更新
+- `.ktkit`は単一ファイルとしてUpload / Download / Rename / Deleteする
+- 旧JSON Kit / Project削除時は対応する`_assets`フォルダも削除し、Rename時はJSON内のAsset参照も更新する
 - Upload中は操作付近に進行表示を出し、完了まで二重操作を防止
 - スマートフォン向けレスポンシブレイアウト
 - 実機がない場合はGitHub Pages上のDemo UIでレイアウトを確認可能

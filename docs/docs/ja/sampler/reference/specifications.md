@@ -30,7 +30,8 @@
 | オーディオビート | WAV、MP3 |
 | パターンビート | MID、MIDI |
 | Music Player | WAV、MP3 |
-| サンプルキット / Project | JSONと対応する音声フォルダー |
+| サンプルキット / ビートキット | 自己完結型 `.ktkit` 単一ファイル |
+| Project | JSONと対応する音声フォルダー |
 | Performance Recording | WAV |
 
 WAV / MP3はmono / stereoを受け付けます。本体内部では用途に合わせて変換されます。

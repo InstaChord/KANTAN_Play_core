@@ -50,6 +50,7 @@
 #include "sampler_pool.hpp"
 #include "sampler_mp3.hpp"
 #include "sampler_music_player.hpp"
+#include "sampler_ktkit.hpp"
 
 #if defined(KANPLAY_RELEASE_SYNTH_SAM_PCM) && defined(KANPLAY_AMY_INTEGRATION)
 #error "The public SAM2695 + PCM backend and AMY integration are mutually exclusive"
@@ -1811,12 +1812,15 @@ static int load_sd_samples(void);
 static void clear_kit(bool redraw = true);
 static void clear_sample_kit(void);
 static bool save_current_kit(const char* path);
+static bool save_current_beat_kit(const char* path);
 static bool save_current_project(const char* path);
 static bool save_kit_to_storage(kp::storage_base_t& storage, const char* path);
 static bool save_sample_kit_to_storage(kp::storage_base_t& storage, const char* path);
+static bool save_beat_kit_to_storage(const char* path);
 static bool save_session_pad(uint8_t pad);
 static bool save_session_sound_pad(performance_page_t page, uint8_t pad);
 static bool load_kit_file(const char* path);
+static bool load_beat_kit_file(const char* path);
 static bool load_project_file(const char* path);
 static bool load_kit_from_storage(kp::storage_base_t& storage, const char* path, bool allow_sd_assets = true);
 static bool load_resume_kit(void);
@@ -7486,6 +7490,8 @@ enum class menu_action_t : uint8_t {
   music_remove,
   kit_load,
   kit_save,
+  beat_kit_load,
+  beat_kit_save,
   project_load,
   project_save,
   project_new,
@@ -7768,6 +7774,8 @@ static constexpr const sampler_menu_item_t menu_beat_select_items[] = {
 };
 
 static constexpr const sampler_menu_item_t menu_beat_kit_items[] = {
+  { "Load Beat Kit", menu_item_kind_t::action, menu_page_t::root, menu_value_t::none, menu_action_t::beat_kit_load },
+  { "Save Beat Kit", menu_item_kind_t::action, menu_page_t::root, menu_value_t::none, menu_action_t::beat_kit_save },
   { "Acoustic", menu_item_kind_t::action, menu_page_t::root, menu_value_t::none, menu_action_t::beat_kit_acoustic },
   { "Dance",    menu_item_kind_t::action, menu_page_t::root, menu_value_t::none, menu_action_t::beat_kit_dance },
   { "Chiptune", menu_item_kind_t::action, menu_page_t::root, menu_value_t::none, menu_action_t::beat_kit_chiptune },
@@ -8036,13 +8044,16 @@ struct beat_rec_snapshot_t {
 static uint8_t beat_select_return_cursor = 0;
 static char sampler_sd_folders[3][80] = { "/sampler/samples", "/sampler/loops", "/sampler/kits" };
 static constexpr const char* sampler_default_kit_dir = "/sampler/kits/Default";
-static constexpr const char* sampler_default_kit_path = "/sampler/kits/Default/Default_Kit.json";
+static constexpr const char* sampler_default_kit_path = "/sampler/kits/Default/Default_Kit.ktkit";
+static constexpr const char* sampler_legacy_default_kit_path = "/sampler/kits/Default/Default_Kit.json";
 static constexpr const char* sampler_projects_dir = "/sampler/projects";
 static constexpr const char* sampler_music_dir = "/sampler/music";
 // SDから読んだ、または直前に保存したKIT。内蔵KIT/新規KITでは空のままにし、
 // 意図しない上書き候補を出さない。
 static char current_kit_path[96] = {};
+static char current_beat_kit_path[96] = {};
 static char current_project_path[96] = {};
+static bool kit_dialog_is_beat = false;
 struct kit_save_candidate_t {
   char label[48] = {};
   char path[96] = {};
@@ -10720,8 +10731,8 @@ static const char* menu_dynamic_title(void)
   if (ble_device_ui_state == ble_device_ui_state_t::confirm) { return "Allow Connection"; }
   switch (kit_edit_state) {
   case kit_edit_state_t::select_music_file: return "Select Track";
-  case kit_edit_state_t::select_kit_file: return "Load Sample Kit";
-  case kit_edit_state_t::select_kit_save: return "Save Sample Kit";
+  case kit_edit_state_t::select_kit_file: return kit_dialog_is_beat ? "Load Beat Kit" : "Load Sample Kit";
+  case kit_edit_state_t::select_kit_save: return kit_dialog_is_beat ? "Save Beat Kit" : "Save Sample Kit";
   case kit_edit_state_t::select_project_file: return "Load Project";
   case kit_edit_state_t::select_project_save: return "Save Project";
   case kit_edit_state_t::select_sample_category: return "Sample Category";
@@ -12371,10 +12382,11 @@ static void menu_back(void)
               || prev_state == kit_edit_state_t::select_project_save) ? menu_page_t::project
       : (prev_state == kit_edit_state_t::select_kit_file
        || prev_state == kit_edit_state_t::select_kit_save
-       || prev_state == kit_edit_state_t::select_sample_category) ? menu_page_t::kit
+       || prev_state == kit_edit_state_t::select_sample_category)
+          ? (kit_dialog_is_beat ? menu_page_t::beat_kit : menu_page_t::kit)
       : menu_page_t::kit_edit;
     switch (prev_state) {
-    case kit_edit_state_t::select_kit_save: menu_cursor = 2; break;
+    case kit_edit_state_t::select_kit_save: menu_cursor = kit_dialog_is_beat ? 1 : 2; break;
     case kit_edit_state_t::select_project_save: menu_cursor = 1; break;
     case kit_edit_state_t::select_project_file: menu_cursor = 0; break;
     case kit_edit_state_t::select_sample_category: menu_cursor = 3; break;
@@ -12677,9 +12689,43 @@ static bool begin_kit_file_select(void)
     return false;
   }
   ensure_sampler_sd_dirs();
-  load_menu_file_list_from(sampler_sd_folders[2], ".json");
+  kit_dialog_is_beat = false;
+  kit_wav_list.clear();
+  snprintf(kit_wav_dir, sizeof(kit_wav_dir), "%s", sampler_sd_folders[2]);
+  kp::storage_sd.getFileList(kit_wav_list, sampler_sd_folders[2], "");
+  kit_wav_list.erase(std::remove_if(kit_wav_list.begin(), kit_wav_list.end(),
+    [](const kp::file_info_string_t& file) {
+      return !has_lower_suffix(file.filename, ".ktkit")
+          && !has_lower_suffix(file.filename, ".json");
+    }), kit_wav_list.end());
+  std::sort(kit_wav_list.begin(), kit_wav_list.end(),
+    [](const kp::file_info_string_t& a, const kp::file_info_string_t& b) {
+      return a.filename < b.filename;
+    });
   if (kit_wav_list.empty()) {
     show_status_message("No kit", 1600, true);
+    return false;
+  }
+  kit_edit_state = kit_edit_state_t::select_kit_file;
+  menu_cursor = 0;
+  menu_depth = menu_dynamic_depth();
+  menu_sound_cursor(1);
+  draw_menu_page_transition(1);
+  draw_menu_keypad();
+  return true;
+}
+
+static bool begin_beat_kit_file_select(void)
+{
+  if (!kp::storage_sd.beginStorage()) {
+    show_status_message("No SD", 1600, true);
+    return false;
+  }
+  ensure_sampler_sd_dirs();
+  kit_dialog_is_beat = true;
+  load_menu_file_list_from(sampler_sd_folders[2], ".ktkit");
+  if (kit_wav_list.empty()) {
+    show_status_message("No Beat Kit", 1600, true);
     return false;
   }
   kit_edit_state = kit_edit_state_t::select_kit_file;
@@ -12781,7 +12827,7 @@ static void kit_path_stem(const char* path, char* out, size_t out_len)
   name = name ? name + 1 : (path ? path : "");
   snprintf(out, out_len, "%s", name);
   char* dot = strrchr(out, '.');
-  if (dot && strcmp(dot, ".json") == 0) { *dot = 0; }
+  if (dot && (!strcmp(dot, ".json") || !strcmp(dot, ".ktkit"))) { *dot = 0; }
 }
 
 static void kit_path_directory(const char* path, char* out, size_t out_len)
@@ -12793,11 +12839,12 @@ static void kit_path_directory(const char* path, char* out, size_t out_len)
 }
 
 static void make_unique_kit_path(const char* directory, const char* stem,
-                                 const char* suffix, char* out, size_t out_len)
+                                 const char* suffix, const char* extension,
+                                 char* out, size_t out_len)
 {
   std::string base = std::string(directory) + "/" + stem + suffix;
   for (uint8_t extra = 0; extra < 32; ++extra) {
-    std::string candidate = base + std::string(extra, '_') + ".json";
+    std::string candidate = base + std::string(extra, '_') + extension;
     if (candidate.size() >= out_len) { break; }
     if (kp::storage_sd.getFileSize(candidate.c_str()) < 0) {
       snprintf(out, out_len, "%s", candidate.c_str());
@@ -12805,8 +12852,8 @@ static void make_unique_kit_path(const char* directory, const char* stem,
     }
   }
   // 異常に多い重複時も、既存ファイルを上書きしない連番へ退避する。
-  snprintf(out, out_len, "%s/%s%s%lu.json", directory, stem, suffix,
-           (unsigned long)M5.millis());
+  snprintf(out, out_len, "%s/%s%s%lu%s", directory, stem, suffix,
+           (unsigned long)M5.millis(), extension);
 }
 
 static bool begin_save_dialog(bool project)
@@ -12823,11 +12870,14 @@ static bool begin_save_dialog(bool project)
   kit_save_candidate_count = 0;
   char directory[96];
   char stem[48];
-  const char* current_path = project ? current_project_path : current_kit_path;
+  const char* current_path = project ? current_project_path
+    : kit_dialog_is_beat ? current_beat_kit_path : current_kit_path;
+  const char* extension = project ? ".json" : ".ktkit";
   kit_path_directory(current_path, directory, sizeof(directory));
   if (project && !current_path[0]) { snprintf(directory, sizeof(directory), "%s", sampler_projects_dir); }
   kit_path_stem(current_path, stem, sizeof(stem));
-  if (!stem[0]) { snprintf(stem, sizeof(stem), project ? "NEW_PROJECT" : "NEW_KIT"); }
+  if (!stem[0]) { snprintf(stem, sizeof(stem), project ? "NEW_PROJECT"
+    : kit_dialog_is_beat ? "NEW_BEAT_KIT" : "NEW_KIT"); }
 
   if (current_path[0] && kit_save_candidate_count < 4) {
     auto& candidate = kit_save_candidates[kit_save_candidate_count++];
@@ -12837,7 +12887,7 @@ static bool begin_save_dialog(bool project)
 
   if ((!project || current_path[0]) && kit_save_candidate_count < 4) {
     auto& candidate = kit_save_candidates[kit_save_candidate_count++];
-    make_unique_kit_path(directory, stem, "_", candidate.path, sizeof(candidate.path));
+    make_unique_kit_path(directory, stem, "_", extension, candidate.path, sizeof(candidate.path));
     char copy_stem[48];
     kit_path_stem(candidate.path, copy_stem, sizeof(copy_stem));
     snprintf(candidate.label, sizeof(candidate.label), "Copy: %s", copy_stem);
@@ -12852,18 +12902,19 @@ static bool begin_save_dialog(bool project)
       snprintf(date_stem, sizeof(date_stem), "%04d%02d%02d_%02d%02d",
                local->tm_year + 1900, local->tm_mon + 1, local->tm_mday,
                local->tm_hour, local->tm_min);
-      make_unique_kit_path(directory, date_stem, "", candidate.path, sizeof(candidate.path));
+      make_unique_kit_path(directory, date_stem, "", extension, candidate.path, sizeof(candidate.path));
     } else {
       // Wi-Fi未設定などで時計が未取得でも新規保存できる連番名。
       for (uint8_t number = 1; number < 100; ++number) {
-        snprintf(date_stem, sizeof(date_stem), project ? "PROJECT_%02u" : "KIT_%02u", (unsigned)number);
-        snprintf(candidate.path, sizeof(candidate.path), "%s/%s.json", directory, date_stem);
+        snprintf(date_stem, sizeof(date_stem), project ? "PROJECT_%02u"
+          : kit_dialog_is_beat ? "BEAT_KIT_%02u" : "KIT_%02u", (unsigned)number);
+        snprintf(candidate.path, sizeof(candidate.path), "%s/%s%s", directory, date_stem, extension);
         if (kp::storage_sd.getFileSize(candidate.path) < 0) { break; }
         candidate.path[0] = 0;
       }
       if (!candidate.path[0]) {
         snprintf(date_stem, sizeof(date_stem), "KIT_99");
-        make_unique_kit_path(directory, date_stem, "_", candidate.path, sizeof(candidate.path));
+        make_unique_kit_path(directory, date_stem, "_", extension, candidate.path, sizeof(candidate.path));
       }
     }
     char new_stem[48];
@@ -12871,7 +12922,7 @@ static bool begin_save_dialog(bool project)
     snprintf(candidate.label, sizeof(candidate.label), "New: %s", new_stem);
   }
 
-  if (!project && kit_save_candidate_count < 4) {
+  if (!project && !kit_dialog_is_beat && kit_save_candidate_count < 4) {
     auto& candidate = kit_save_candidates[kit_save_candidate_count++];
     snprintf(candidate.path, sizeof(candidate.path), "%s", sampler_default_kit_path);
     snprintf(candidate.label, sizeof(candidate.label), "Save as Default");
@@ -12886,8 +12937,9 @@ static bool begin_save_dialog(bool project)
   return true;
 }
 
-static bool begin_kit_save(void) { return begin_save_dialog(false); }
-static bool begin_project_save(void) { return begin_save_dialog(true); }
+static bool begin_kit_save(void) { kit_dialog_is_beat = false; return begin_save_dialog(false); }
+static bool begin_beat_kit_save(void) { kit_dialog_is_beat = true; return begin_save_dialog(false); }
+static bool begin_project_save(void) { kit_dialog_is_beat = false; return begin_save_dialog(true); }
 
 static bool begin_background_wav_select(bool include_builtin, bool include_sd)
 {
@@ -13436,12 +13488,12 @@ static void select_kit_file(void)
   std::string path = std::string(kit_wav_dir) + "/" + f.filename;
   clear_menu_preview();
   kit_edit_state = kit_edit_state_t::idle;
-  menu_page = menu_page_t::kit;
-  menu_cursor = 1;
+  menu_page = kit_dialog_is_beat ? menu_page_t::beat_kit : menu_page_t::kit;
+  menu_cursor = kit_dialog_is_beat ? 0 : 1;
   menu_depth = menu_page_depth(menu_page);
   menu_sound_navigate(1);
   show_loading_message();
-  bool ok = load_kit_file(path.c_str());
+  bool ok = kit_dialog_is_beat ? load_beat_kit_file(path.c_str()) : load_kit_file(path.c_str());
   show_status_message(ok ? "Kit loaded" : "Load failed", 1600, false);
   draw_menu(true);
 }
@@ -13496,19 +13548,27 @@ static void select_kit_save(void)
   if (!candidate.path[0]) { return; }
 
   kit_edit_state = kit_edit_state_t::idle;
-  menu_page = menu_page_t::kit;
-  menu_cursor = 2;
+  menu_page = kit_dialog_is_beat ? menu_page_t::beat_kit : menu_page_t::kit;
+  menu_cursor = kit_dialog_is_beat ? 1 : 2;
   menu_depth = menu_page_depth(menu_page);
   menu_sound_navigate(1);
   show_loading_message("SAVING KIT");
-  bool saved = save_current_kit(candidate.path);
-  const bool saved_default = strcmp(candidate.path, sampler_default_kit_path) == 0;
+  bool saved = kit_dialog_is_beat ? save_current_beat_kit(candidate.path)
+                                  : save_current_kit(candidate.path);
+  const bool saved_default = !kit_dialog_is_beat
+                          && strcmp(candidate.path, sampler_default_kit_path) == 0;
   // Saving a personal default must not turn it into the current editable
   // filename. A later ordinary Save should offer New/Copy, never overwrite it.
-  if (saved && !saved_default) { snprintf(current_kit_path, sizeof(current_kit_path), "%s", candidate.path); }
+  if (saved && !saved_default) {
+    snprintf(kit_dialog_is_beat ? current_beat_kit_path : current_kit_path,
+             kit_dialog_is_beat ? sizeof(current_beat_kit_path) : sizeof(current_kit_path),
+             "%s", candidate.path);
+  }
   char message[64];
+  char saved_stem[48] = {};
+  if (saved && !saved_default) { kit_path_stem(candidate.path, saved_stem, sizeof(saved_stem)); }
   snprintf(message, sizeof(message), saved ? (saved_default ? "Default saved" : "Saved: %s") : "Save failed",
-           saved && !saved_default ? strrchr(candidate.path, '/') + 1 : "");
+           saved && !saved_default ? saved_stem : "");
   show_status_message(message, 1800, false);
   draw_menu(true);
 }
@@ -13762,6 +13822,12 @@ static void menu_execute_action(menu_action_t action)
     return; }
   case menu_action_t::kit_save: {
     begin_kit_save();
+    return; }
+  case menu_action_t::beat_kit_load: {
+    begin_beat_kit_file_select();
+    return; }
+  case menu_action_t::beat_kit_save: {
+    begin_beat_kit_save();
     return; }
   case menu_action_t::project_load:
     begin_project_file_select();
@@ -14081,6 +14147,7 @@ static void menu_execute_action(menu_action_t action)
     // Built-in DISCO Beat Project used by a device with no Resume data.
     if (ensure_sampler_sd_dirs()) {
       kp::storage_sd.removeFile(sampler_default_kit_path);
+      kp::storage_sd.removeFile(sampler_legacy_default_kit_path);
     }
     reset_sampler_sd_folder_selection();
     show_loading_message();
@@ -29481,14 +29548,19 @@ static void reset_builtin_sample_kit(void)
 
 // A saved Default Kit is a user-owned startup point. It is intentionally not
 // assigned to current_kit_path, so Reset Kit can never make later Save update
-// Default_Kit.json by accident. A bad/missing default always falls back to the
+// Default_Kit.ktkit by accident. A bad/missing default always falls back to the
 // immutable embedded factory kit.
 static bool reset_default_or_builtin_kit(void)
 {
   bool loaded_default = false;
-  if (ensure_sampler_sd_dirs()
-   && kp::storage_sd.getFileSize(sampler_default_kit_path) > 0) {
-    loaded_default = load_kit_file(sampler_default_kit_path);
+  if (ensure_sampler_sd_dirs()) {
+    if (kp::storage_sd.getFileSize(sampler_default_kit_path) > 0) {
+      loaded_default = load_kit_file(sampler_default_kit_path);
+    } else if (kp::storage_sd.getFileSize(sampler_legacy_default_kit_path) > 0) {
+      // Read-only compatibility. The next Save as Default writes the new
+      // self-contained file and leaves the legacy source recoverable.
+      loaded_default = load_kit_file(sampler_legacy_default_kit_path);
+    }
   }
   if (loaded_default) {
     current_kit_path[0] = 0;
@@ -29502,6 +29574,12 @@ static bool save_current_kit(const char* path)
 {
   if (!path || !ensure_sampler_sd_dirs()) { return false; }
   return save_sample_kit_to_storage(kp::storage_sd, path);
+}
+
+static bool save_current_beat_kit(const char* path)
+{
+  if (!path || !ensure_sampler_sd_dirs()) { return false; }
+  return save_beat_kit_to_storage(path);
 }
 
 static bool save_current_project(const char* path)
@@ -30015,28 +30093,46 @@ static bool save_json_document(kp::storage_base_t& storage, const char* path,
 static bool save_sample_kit_to_storage(kp::storage_base_t& storage, const char* path)
 {
   if (!path || !storage.beginStorage()) { return false; }
-  std::string asset_dir;
-  if (!make_kit_asset_directory(storage, path, asset_dir)) { return false; }
-
+  // Legacy JSON remains load-only. Every new Kit is a self-contained KTKIT.
+  if (!has_lower_suffix(path, ".ktkit") || &storage != &kp::storage_sd) { return false; }
   JsonDocument doc;
-  doc["version"] = sample_kit_format_version;
+  doc["formatVersion"] = ktkit_format_version;
   doc["kind"] = "sample-kit";
-  doc["assets"] = asset_dir;
   JsonObject sampler = doc["sampler"].to<JsonObject>();
   sampler["volume"] = sampler_volume;
   JsonArray samples = doc["samples"].to<JsonArray>();
+  std::vector<ktkit_asset_source_t> assets;
+  auto asset_id_for = [&](const sample_slot_t& slot, uint32_t* offset_frames) -> uint32_t {
+    const int16_t* data = slot.asset && slot.asset->isValid() ? slot.asset->pcm : slot.pcm;
+    const uint32_t frames = slot.asset && slot.asset->isValid() ? slot.asset->frames : slot.frames;
+    *offset_frames = (uint32_t)(slot.pcm - data);
+    const uint32_t bytes = frames * sizeof(int16_t);
+    for (const auto& asset : assets) {
+      if (asset.size == bytes && asset.sample_rate == slot.sample_rate
+       && (asset.data == reinterpret_cast<const uint8_t*>(data)
+        || memcmp(asset.data, data, bytes) == 0)) { return asset.id; }
+    }
+    const uint32_t id = (uint32_t)assets.size() + 1u;
+    assets.push_back({id, reinterpret_cast<const uint8_t*>(data), bytes,
+                      slot.sample_rate, frames});
+    return id;
+  };
   for (uint8_t pad = 0; pad < def::pad::pad_count; ++pad) {
     const auto& slot = sampler_pool_t::slot[pad];
     if (!slot.isValid()) { continue; }
-    char asset_path[128] = {};
-    snprintf(asset_path, sizeof(asset_path), "%s/pad%02u.wav", asset_dir.c_str(), (unsigned)(pad + 1));
-    if (!save_pcm_as_wav(storage, asset_path, slot.pcm, slot.frames, slot.sample_rate)) { return false; }
     JsonObject s = samples.add<JsonObject>();
     s["internalPad"] = pad;
     s["name"] = slot.name;
-    s["file"] = asset_path;
+    if (!strncmp(slot.file_path, "builtin:", 8)) {
+      s["builtinId"] = slot.file_path + 8;
+    } else {
+      uint32_t asset_offset = 0;
+      s["assetId"] = asset_id_for(slot, &asset_offset);
+      if (asset_offset) { s["assetOffsetFrames"] = asset_offset; }
+    }
     s["start"] = slot.start_frame;
     s["end"] = slot.end_frame;
+    s["frames"] = slot.frames;
     s["volume"] = slot.volume_q8;
     s["pitch"] = slot.pitch_q8;
     s["baseNote"] = slot.base_note;
@@ -30058,7 +30154,68 @@ static bool save_sample_kit_to_storage(kp::storage_base_t& storage, const char* 
     s["beatAnchorFrame"] = slot.beat_anchor_frame;
     save_chop_metadata(s, slot);
   }
-  return save_json_document(storage, path, doc);
+  const size_t manifest_capacity = measureJson(doc) + 1u;
+  uint8_t* manifest = temp_alloc(manifest_capacity);
+  if (!manifest) { return false; }
+  const size_t manifest_size = serializeJson(doc, reinterpret_cast<char*>(manifest), manifest_capacity);
+  const bool saved = manifest_size != 0
+    && ktkit_write_atomic(path, ktkit_kind_t::sampler, manifest, manifest_size, assets);
+  free(manifest);
+  return saved;
+}
+
+static bool save_beat_kit_to_storage(const char* path)
+{
+  if (!path || !has_lower_suffix(path, ".ktkit") || !kp::storage_sd.beginStorage()
+   || beat_format != beat_format_t::pattern) { return false; }
+  JsonDocument doc;
+  doc["formatVersion"] = ktkit_format_version;
+  doc["kind"] = "beat-kit";
+  doc["drumKit"] = beat_drum_kit_token(beat_drum_kit);
+  JsonArray pads_json = doc["pads"].to<JsonArray>();
+  std::vector<ktkit_asset_source_t> assets;
+  auto asset_id_for = [&](const sample_slot_t& slot) -> uint32_t {
+    const uint32_t bytes = slot.frames * sizeof(int16_t);
+    const uint8_t* data = reinterpret_cast<const uint8_t*>(slot.pcm);
+    for (const auto& asset : assets) {
+      if (asset.size == bytes && asset.sample_rate == slot.sample_rate
+       && (asset.data == data || memcmp(asset.data, data, bytes) == 0)) { return asset.id; }
+    }
+    const uint32_t id = (uint32_t)assets.size() + 1u;
+    assets.push_back({id, data, bytes, slot.sample_rate, slot.frames});
+    return id;
+  };
+  for (uint8_t pad = 0; pad < def::pad::pad_count; ++pad) {
+    const auto& slot = beat_pool_t::slot[pad];
+    if (!slot.isValid()) { continue; }
+    JsonObject item = pads_json.add<JsonObject>();
+    item["internalPad"] = pad;
+    item["name"] = slot.name;
+    if (!strncmp(slot.file_path, "builtin:", 8)) {
+      item["builtinId"] = slot.file_path + 8;
+    } else {
+      item["assetId"] = asset_id_for(slot);
+    }
+    item["volume"] = slot.volume_q8;
+    item["pitch"] = slot.pitch_q8;
+    item["overlap"] = beat_pad_overlap[pad];
+    item["start"] = slot.start_frame;
+    item["end"] = slot.end_frame;
+    item["reverse"] = slot.reverse;
+    item["hold"] = slot.hold_enabled;
+    item["choke"] = slot.choke_enabled;
+    item["loop"] = slot.loop_enabled;
+    item["loopWholeSample"] = slot.loop_whole_sample;
+    item["loopGridHalfSteps"] = slot.loop_grid_half_steps;
+  }
+  const size_t manifest_capacity = measureJson(doc) + 1u;
+  uint8_t* manifest = temp_alloc(manifest_capacity);
+  if (!manifest) { return false; }
+  const size_t manifest_size = serializeJson(doc, reinterpret_cast<char*>(manifest), manifest_capacity);
+  const bool saved = manifest_size != 0
+    && ktkit_write_atomic(path, ktkit_kind_t::beat, manifest, manifest_size, assets);
+  free(manifest);
+  return saved;
 }
 
 static bool save_kit_to_storage(kp::storage_base_t& storage, const char* path)
@@ -30361,9 +30518,243 @@ static bool save_kit_to_storage(kp::storage_base_t& storage, const char* path)
   return save_json_document(storage, path, doc);
 }
 
+static void restore_ktkit_slot_settings(JsonObjectConst s, sample_slot_t& slot)
+{
+  slot.start_frame = std::min<uint32_t>(s["start"] | 0u, slot.frames);
+  slot.end_frame = std::min<uint32_t>(s["end"] | slot.frames, slot.frames);
+  if (slot.end_frame <= slot.start_frame) { slot.end_frame = slot.frames; }
+  slot.volume_q8 = std::clamp<uint16_t>(s["volume"] | 256u, 0u, 512u);
+  slot.pitch_q8 = std::clamp<uint16_t>(s["pitch"] | 256u, 32u, 2048u);
+  slot.base_note = std::min<uint8_t>(s["baseNote"] | slot.base_note, 127);
+  slot.base_note_auto = s["baseNoteAuto"] | slot.base_note_auto;
+  slot.reverse = s["reverse"] | false;
+  slot.hold_enabled = s["hold"] | false;
+  slot.choke_enabled = s["choke"] | false;
+  slot.loop_enabled = s["loop"] | false;
+  slot.loop_whole_sample = s["loopWholeSample"] | false;
+  slot.loop_grid_half_steps = loop_repeat_half_steps[
+    sample_loop_grid_index(s["loopGridHalfSteps"] | 8)];
+  slot.beat_anchor_enabled = s["beatAnchorEnabled"] | false;
+  slot.beat_anchor_frame = std::min<uint32_t>(s["beatAnchorFrame"] | 0u,
+                                               slot.frames ? slot.frames - 1 : 0);
+  load_chop_metadata(s, slot);
+  slot.synth_sustain_mode = (sample_sustain_mode_t)std::min<uint8_t>(
+    s["synthSustainMode"] | (uint8_t)sample_sustain_mode_t::automatic,
+    (uint8_t)sample_sustain_mode_t::manual);
+  slot.synth_attack_ms = std::clamp<uint16_t>(s["synthAttackMs"] | 0u, 0u, 5000u);
+  slot.synth_release_ms = std::clamp<uint16_t>(s["synthReleaseMs"] | 120u, 10u, 2000u);
+  set_sample_synth_tune(slot, std::clamp<int16_t>(s["synthTuneCents"] | 0, -100, 100));
+  if (slot.synth_sustain_mode == sample_sustain_mode_t::manual) {
+    const uint32_t begin = s["synthLoopStart"] | 0u;
+    const uint32_t end = s["synthLoopEnd"] | 0u;
+    if (begin >= slot.playStart() && end > begin + 31u && end <= slot.playEnd()) {
+      slot.synth_loop_start = begin;
+      slot.synth_loop_end = end;
+      slot.synth_loop_crossfade = std::min<uint16_t>(
+        s["synthLoopCrossfade"] | 0u, (uint16_t)((end - begin) / 4u));
+    } else {
+      initialize_manual_sustain(slot);
+    }
+  }
+}
+
+static bool validate_ktkit_manifest(const ktkit_package_t& package, JsonDocument& doc)
+{
+  if (deserializeJson(doc, package.manifest.data(), package.manifest.size())) { return false; }
+  const char* expected = package.kind == ktkit_kind_t::sampler ? "sample-kit" : "beat-kit";
+  if ((doc["formatVersion"] | -1) != ktkit_format_version
+   || strcmp(doc["kind"] | "", expected) != 0) { return false; }
+  JsonArray items = package.kind == ktkit_kind_t::sampler
+    ? doc["samples"].as<JsonArray>() : doc["pads"].as<JsonArray>();
+  bool used_pad[def::pad::pad_count] = {};
+  for (JsonObjectConst item : items) {
+    const int pad = item["internalPad"] | -1;
+    if (pad < 0 || pad >= (int)def::pad::pad_count || used_pad[pad]) { return false; }
+    used_pad[pad] = true;
+    const char* builtin_id = item["builtinId"] | "";
+    const uint32_t asset_id = item["assetId"] | 0u;
+    if ((builtin_id[0] != 0) == (asset_id != 0)) { return false; }
+    if (asset_id) {
+      const auto* asset = ktkit_find_asset(package, asset_id);
+      const uint32_t offset = item["assetOffsetFrames"] | 0u;
+      const uint32_t frames = item["frames"] | (asset ? asset->frames : 0u);
+      if (!asset || frames < 16 || offset > asset->frames
+       || frames > asset->frames - offset) { return false; }
+    } else if (package.kind == ktkit_kind_t::sampler) {
+      if (!find_builtin_sample_source(builtin_id)) { return false; }
+    } else {
+      const uint8_t order = pad_display_number((uint8_t)pad) - 1u;
+      if (!find_builtin_beat_sound(builtin_id, order)
+       && !find_builtin_sample_source(builtin_id)) { return false; }
+    }
+  }
+  return true;
+}
+
+static bool load_sample_ktkit(const char* path, bool create_rollback)
+{
+  ktkit_package_t package;
+  if (!ktkit_open_validate(path, ktkit_kind_t::sampler,
+                           sampler_pool_t::pool_budget_bytes, package)) { return false; }
+  JsonDocument doc;
+  if (!validate_ktkit_manifest(package, doc)) { return false; }
+
+  static constexpr const char* rollback_path = "/sampler/session/.kit_rollback.ktkit";
+  char previous_path[sizeof(current_kit_path)] = {};
+  snprintf(previous_path, sizeof(previous_path), "%s", current_kit_path);
+  if (create_rollback && !save_sample_kit_to_storage(kp::storage_sd, rollback_path)) {
+    return false;
+  }
+  clear_sample_kit();
+  struct loaded_asset_t { uint32_t id; uint8_t pad; };
+  std::vector<loaded_asset_t> loaded_assets;
+  bool ok = true;
+  for (JsonObjectConst s : doc["samples"].as<JsonArrayConst>()) {
+    const uint8_t pad = s["internalPad"].as<uint8_t>();
+    const char* builtin_id = s["builtinId"] | "";
+    if (builtin_id[0]) {
+      std::string id = std::string("builtin:") + builtin_id;
+      ok = load_builtin_sample_to_pad(pad, id.c_str());
+    } else {
+      const uint32_t id = s["assetId"].as<uint32_t>();
+      const auto* asset = ktkit_find_asset(package, id);
+      const uint32_t offset = s["assetOffsetFrames"] | 0u;
+      const uint32_t frames = s["frames"] | asset->frames;
+      sample_asset_t* shared = nullptr;
+      for (const auto& loaded : loaded_assets) {
+        if (loaded.id == id) { shared = sampler_pool_t::slot[loaded.pad].asset; break; }
+      }
+      if (shared) {
+        ok = sampler_pool_t::loadSharedSlice(pad, s["name"] | "Sample",
+                                             shared, offset, frames, asset->sample_rate);
+      } else {
+        int16_t* pcm = audio_pcm_alloc(asset->size);
+        ok = pcm && ktkit_read_asset(path, *asset, reinterpret_cast<uint8_t*>(pcm), asset->size)
+          && sampler_pool_t::loadPcmOwnedPreserved(pad, s["name"] | "Sample",
+                                                    pcm, asset->frames, asset->sample_rate);
+        if (!ok && pcm) { free(pcm); }
+        if (ok && (offset != 0 || frames != asset->frames)) {
+          ok = sampler_pool_t::loadSharedSlice(pad, s["name"] | "Sample",
+                                               sampler_pool_t::slot[pad].asset,
+                                               offset, frames, asset->sample_rate);
+        }
+        if (ok) { loaded_assets.push_back({id, pad}); }
+      }
+      if (ok) {
+        snprintf(sampler_pool_t::slot[pad].file_path,
+                 sizeof(sampler_pool_t::slot[pad].file_path), "ktkit:%lu",
+                 (unsigned long)id);
+      }
+    }
+    if (!ok) { break; }
+    restore_ktkit_slot_settings(s, sampler_pool_t::slot[pad]);
+  }
+  if (ok) {
+    sampler_volume = part_volume_percent_from_step(part_volume_step_from_percent(
+      std::min<int>(100, doc["sampler"]["volume"] | 100)));
+    snprintf(current_kit_path, sizeof(current_kit_path), "%s", path);
+    repair_pitched_pad_sources();
+    apply_synth_tones(true);
+    apply_mixer_part(mixer_part_t::sampler);
+  } else if (create_rollback) {
+    (void)load_sample_ktkit(rollback_path, false);
+    snprintf(current_kit_path, sizeof(current_kit_path), "%s", previous_path);
+  }
+  if (create_rollback) { kp::storage_sd.removeFile(rollback_path); }
+  return ok;
+}
+
+static bool load_beat_ktkit(const char* path, bool create_rollback)
+{
+  ktkit_package_t package;
+  if (!ktkit_open_validate(path, ktkit_kind_t::beat,
+                           beat_pool_t::pool_budget_bytes, package)) { return false; }
+  JsonDocument doc;
+  if (!validate_ktkit_manifest(package, doc)) { return false; }
+  uint64_t runtime_bytes = 0;
+  for (JsonObjectConst item : doc["pads"].as<JsonArrayConst>()) {
+    const uint32_t id = item["assetId"] | 0u;
+    if (id) { runtime_bytes += ktkit_find_asset(package, id)->size; }
+  }
+  if (runtime_bytes > beat_pool_t::pool_budget_bytes) { return false; }
+  static constexpr const char* rollback_path = "/sampler/session/.beat_kit_rollback.ktkit";
+  char previous_path[sizeof(current_beat_kit_path)] = {};
+  snprintf(previous_path, sizeof(previous_path), "%s", current_beat_kit_path);
+  if (create_rollback && !save_beat_kit_to_storage(rollback_path)) { return false; }
+  // All corruption/capacity checks happen above. The rollback package covers
+  // an unexpected fragmented-memory allocation failure during application.
+  const beat_drum_kit_t previous_kit = beat_drum_kit;
+  stop_beat_voices();
+  beat_pool_t::clear();
+  bool ok = true;
+  for (JsonObjectConst item : doc["pads"].as<JsonArrayConst>()) {
+    const uint8_t pad = item["internalPad"].as<uint8_t>();
+    const char* builtin_id = item["builtinId"] | "";
+    if (builtin_id[0]) {
+      const uint8_t order = pad_display_number(pad) - 1u;
+      if (const auto* source = find_builtin_beat_sound(builtin_id, order)) {
+        ok = load_builtin_beat_sound(pad, item["name"] | builtin_id, *source);
+      } else if (const auto* source = find_builtin_sample_source(builtin_id)) {
+        ok = beat_pool_t::loadWav(pad, item["name"] | builtin_id,
+                                  source->data, source->size());
+      } else { ok = false; }
+    } else {
+      const auto* asset = ktkit_find_asset(package, item["assetId"].as<uint32_t>());
+      uint8_t* pcm = reinterpret_cast<uint8_t*>(audio_pcm_alloc(asset->size));
+      ok = pcm && ktkit_read_asset(path, *asset, pcm, asset->size)
+        && beat_pool_t::loadPcmOwned(pad, item["name"] | "Beat",
+                                     reinterpret_cast<int16_t*>(pcm), asset->frames,
+                                     asset->sample_rate);
+      if (!ok && pcm) { free(pcm); }
+    }
+    if (!ok) { break; }
+    auto& slot = beat_pool_t::slot[pad];
+    slot.volume_q8 = item["volume"] | 256u;
+    slot.pitch_q8 = item["pitch"] | 256u;
+    slot.start_frame = std::min<uint32_t>(item["start"] | 0u, slot.frames);
+    slot.end_frame = std::min<uint32_t>(item["end"] | slot.frames, slot.frames);
+    slot.reverse = item["reverse"] | false;
+    slot.hold_enabled = item["hold"] | false;
+    slot.choke_enabled = item["choke"] | false;
+    slot.loop_enabled = item["loop"] | false;
+    slot.loop_whole_sample = item["loopWholeSample"] | false;
+    slot.loop_grid_half_steps = item["loopGridHalfSteps"] | 8;
+    beat_pad_overlap[pad] = item["overlap"] | !slot.choke_enabled;
+  }
+  if (!ok) {
+    if (create_rollback && load_beat_ktkit(rollback_path, false)) {
+      snprintf(current_beat_kit_path, sizeof(current_beat_kit_path), "%s", previous_path);
+    } else {
+      beat_drum_kit = previous_kit;
+      select_builtin_beat_kit(previous_kit);
+    }
+    if (create_rollback) { kp::storage_sd.removeFile(rollback_path); }
+    return false;
+  }
+  beat_drum_kit = parse_beat_drum_kit(doc["drumKit"] | "acoustic");
+  beat_format = beat_format_t::pattern;
+  snprintf(current_beat_kit_path, sizeof(current_beat_kit_path), "%s", path);
+  if (create_rollback) { kp::storage_sd.removeFile(rollback_path); }
+  return true;
+}
+
 static bool load_kit_file(const char* path)
 {
-  return load_kit_from_storage(kp::storage_sd, path);
+  if (has_lower_suffix(path ? path : "", ".ktkit")) {
+    return load_sample_ktkit(path, true);
+  }
+  const bool loaded = load_kit_from_storage(kp::storage_sd, path);
+  if (loaded && has_lower_suffix(path ? path : "", ".json")) {
+    snprintf(current_kit_path, sizeof(current_kit_path), "%s", path);
+    char* extension = strrchr(current_kit_path, '.');
+    if (extension) { snprintf(extension, sizeof(current_kit_path) - (extension - current_kit_path), ".ktkit"); }
+  }
+  return loaded;
+}
+
+static bool load_beat_kit_file(const char* path)
+{
+  return has_lower_suffix(path ? path : "", ".ktkit") && load_beat_ktkit(path, true);
 }
 
 static bool load_project_file(const char* path)
@@ -31076,6 +31467,12 @@ static bool sampler_web_audio_path_is_in(const char* path, const char* directory
         && has_lower_suffix(path, ".ktsynth")));
 }
 
+static bool sampler_web_kit_path_is_in(const char* path)
+{
+  return sampler_web_path_is_in(path, "/sampler/kits", ".ktkit")
+      || sampler_web_path_is_in(path, "/sampler/kits", ".json");
+}
+
 bool sampler_web_enqueue_command(const uint8_t* data, size_t size)
 {
   if (data == nullptr || size == 0 || size > 32 * 1024) { return false; }
@@ -31357,12 +31754,12 @@ static void service_sampler_web_command(void)
   }
   if (strcmp(action, "loadKit") == 0) {
     const char* path = doc["file"] | "";
-    if (sampler_web_path_is_in(path, "/sampler/kits", ".json")) { load_kit_file(path); }
+    if (sampler_web_kit_path_is_in(path)) { load_kit_file(path); }
     return;
   }
   if (strcmp(action, "saveKit") == 0) {
     const char* path = doc["file"] | "";
-    if (sampler_web_path_is_in(path, "/sampler/kits", ".json") && kp::storage_sd.beginStorage()) {
+    if (sampler_web_path_is_in(path, "/sampler/kits", ".ktkit") && kp::storage_sd.beginStorage()) {
       ensure_sampler_sd_dirs();
       if (save_sample_kit_to_storage(kp::storage_sd, path)) {
         snprintf(current_kit_path, sizeof(current_kit_path), "%s", path);
@@ -31402,9 +31799,12 @@ static void service_sampler_web_command(void)
   if (strcmp(action, "kitRenamed") == 0) {
     const char* old_path = doc["old"] | "";
     const char* new_path = doc["file"] | "";
-    if (strcmp(current_kit_path, old_path) == 0
-     && sampler_web_path_is_in(new_path, "/sampler/kits", ".json")) {
+    if (strcmp(current_kit_path, old_path) == 0 && sampler_web_kit_path_is_in(new_path)) {
       snprintf(current_kit_path, sizeof(current_kit_path), "%s", new_path);
+      save_resume_kit();
+    } else if (strcmp(current_beat_kit_path, old_path) == 0
+            && sampler_web_path_is_in(new_path, "/sampler/kits", ".ktkit")) {
+      snprintf(current_beat_kit_path, sizeof(current_beat_kit_path), "%s", new_path);
       save_resume_kit();
     }
     return;
@@ -31418,6 +31818,9 @@ static void service_sampler_web_command(void)
       changed = true;
     } else if (strcmp(kind, "kits") == 0 && strcmp(current_kit_path, path) == 0) {
       current_kit_path[0] = 0;
+      changed = true;
+    } else if (strcmp(kind, "kits") == 0 && strcmp(current_beat_kit_path, path) == 0) {
+      current_beat_kit_path[0] = 0;
       changed = true;
     }
     if (changed) { save_resume_kit(); }
