@@ -21,6 +21,7 @@
 #if !defined(M5UNIFIED_PC_BUILD)
 #include <esp_attr.h>
 #include <esp_heap_caps.h>
+#include <esp_system.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <freertos/semphr.h>
@@ -44,9 +45,15 @@
 
 #include "sampler_define.hpp"
 #include "sampler_audio.hpp"
+#include "sampler_amy_engine.hpp"
+#include "sampler_amy_probe.hpp"
 #include "sampler_pool.hpp"
 #include "sampler_mp3.hpp"
 #include "sampler_music_player.hpp"
+
+#if defined(KANPLAY_RELEASE_SYNTH_SAM_PCM) && defined(KANPLAY_AMY_INTEGRATION)
+#error "The public SAM2695 + PCM backend and AMY integration are mutually exclusive"
+#endif
 #include "sampler_samples.hpp"
 #include "sampler_text.hpp"
 #include "sampler_wav.hpp"
@@ -88,6 +95,12 @@ static kp::task_wifi_t task_wifi;
 
 static void send_sam_midi(uint8_t status, uint8_t data1, uint8_t data2 = 0)
 {
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+  if (sampler_amy_engine::handlesMidi(status)) {
+    (void)sampler_amy_engine::sendMidi(status, data1, data2);
+    return;
+  }
+#endif
   if (!task_midi.sendInternalRealtime(status, data1, data2)) {
     kp::system_registry->midi_out_control.setMessage(status, data1, data2);
   }
@@ -121,6 +134,8 @@ static constexpr uint8_t sample_kit_format_version = 2;
 enum class synth_tone_source_t : uint8_t {
   general_midi,
   pad,
+  file,
+  kantan_synth,
 };
 
 enum class pitch_bend_range_t : uint8_t {
@@ -143,17 +158,57 @@ static performance_page_t current_page = performance_page_t::sample;
 // Internal pad indexes are top-to-bottom. Pad 1 is index 8; Pad 9 is index
 // 0 and is intentionally empty in the factory kit.
 static constexpr uint8_t factory_pad_sound_pad = 8;
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+static constexpr const char* firmware_synth_backend_label = "AMY + PCM";
+static constexpr const char* internal_synth_source_label = "AMY Synth";
+static constexpr const char* melody_tone_page_title = "Melody AMY Synth";
+static constexpr const char* chord_tone_page_title = "Chord AMY Synth";
+static constexpr const char* bass_tone_page_title = "Bass AMY Synth";
+static constexpr uint8_t factory_melody_program = 0;
+static constexpr uint8_t factory_chord_program = 0;
+static constexpr uint8_t factory_bass_program = 0;
+static constexpr uint8_t factory_melody_volume = 90;
+static constexpr uint8_t factory_chord_volume = 80;
+static constexpr uint8_t factory_bass_volume = 90;
+#else
+static constexpr const char* firmware_synth_backend_label = "SAM2695 + PCM";
+static constexpr const char* internal_synth_source_label = "General MIDI";
+static constexpr const char* melody_tone_page_title = "Melody General MIDI";
+static constexpr const char* chord_tone_page_title = "Chord General MIDI";
+static constexpr const char* bass_tone_page_title = "Bass General MIDI";
+static constexpr uint8_t factory_melody_program = 81;
+static constexpr uint8_t factory_chord_program = 90;
+static constexpr uint8_t factory_bass_program = 38;
+static constexpr uint8_t factory_melody_volume = 80;
+static constexpr uint8_t factory_chord_volume = 60;
+static constexpr uint8_t factory_bass_volume = 80;
+#endif
 // GM programs are zero-based internally: displayed 82 / 91 are 81 / 90 here.
 static pitched_page_settings_t melody_settings = {
-  synth_tone_source_t::general_midi, 81, factory_pad_sound_pad, 0, 0, 0, 80,
+  synth_tone_source_t::general_midi, factory_melody_program, factory_pad_sound_pad,
+  0, 0, 0, factory_melody_volume,
 };
 static pitched_page_settings_t chord_settings = {
-  synth_tone_source_t::general_midi, 90, factory_pad_sound_pad, 0, 0, 0, 60,
+  synth_tone_source_t::general_midi, factory_chord_program, factory_pad_sound_pad,
+  0, 0, 0, factory_chord_volume,
 };
 // GM programs are zero-based: 38 is displayed as 39 Synth Bass 1.
 static pitched_page_settings_t bass_settings = {
-  synth_tone_source_t::general_midi, 38, factory_pad_sound_pad, 0, 0, 0, 80,
+  synth_tone_source_t::general_midi, factory_bass_program, factory_pad_sound_pad,
+  0, 0, 0, factory_bass_volume,
 };
+
+static const char* pitched_tone_name(performance_page_t page, uint8_t program)
+{
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+  const uint8_t part = page == performance_page_t::chord ? 1
+                     : page == performance_page_t::bass ? 2 : 0;
+  return sampler_amy_engine::toneName(part, program);
+#else
+  (void)page;
+  return kp::def::midi::program_name_table.at(std::min<uint8_t>(program, 127))->get();
+#endif
+}
 // Bass Octave 0 is musically one octave below Melody Octave 0. Keep this
 // separate from the user value so Bass still offers the full -2..+2 range.
 static constexpr int8_t bass_base_octave = -1;
@@ -176,7 +231,12 @@ enum class beat_format_t : uint8_t {
 static beat_format_t beat_format = beat_format_t::none;
 static uint8_t beat_volume = 100;
 enum class beat_drum_kit_t : uint8_t { acoustic, dance, chiptune };
-static beat_drum_kit_t beat_drum_kit = beat_drum_kit_t::acoustic;
+#if defined(KANPLAY_AMY_INTEGRATION)
+static constexpr beat_drum_kit_t default_beat_drum_kit = beat_drum_kit_t::dance;
+#else
+static constexpr beat_drum_kit_t default_beat_drum_kit = beat_drum_kit_t::acoustic;
+#endif
+static beat_drum_kit_t beat_drum_kit = default_beat_drum_kit;
 
 static const char* beat_drum_kit_token(beat_drum_kit_t kit)
 {
@@ -445,29 +505,59 @@ static bool beat_pad_overlap[def::pad::pad_count] = {
 static constexpr uint8_t beat_midi_note_map[def::pad::pad_count] = {
   36, 40, 37, 39,  // Kick, Snare, Side Stick, Clap
   41, 43, 45, 42,  // Low/Mid/High Tom, Closed Hi-Hat
-  70, 49, 51, 46,  // Shaker (Maracas), Crash, Ride, Open Hi-Hat
+  70, 56, 49, 46,  // Shaker (Maracas), Cowbell, Crash, Open Hi-Hat
 };
 static constexpr const char* beat_pad_labels[def::pad::pad_count] = {
   "KICK", "SNARE", "SIDE", "CLAP",
   "TOM-L", "TOM-M", "TOM-H", "HH-C",
-  "SHAKER", "CRASH", "RIDE", "HH-O",
+  "SHAKER", "COWBELL", "CRASH", "HH-O",
 };
-struct beat_sound_t { const char* source; uint16_t pitch_q8; };
+struct beat_sound_t {
+  const char* source;
+  uint16_t pitch_q8;
+  uint8_t amy_pcm = 0xFF;
+};
+#if defined(KANPLAY_AMY_INTEGRATION)
+// AMY's tiny ROM bank supplies eleven short TR-808 one-shots. The acoustic
+// Kit keeps compact, sampled WAV one-shots; the electronic Kits select
+// kick/snare tunings from that single ~100 KiB AMY bank already linked by the
+// synth engine. Pad 9-12 stay Shaker/Cowbell/Crash/Open Hat across all Kits.
 static constexpr beat_sound_t acoustic_beat_sounds[def::pad::pad_count] = {
   { "KICK", 256 }, { "SNARE", 256 }, { "RIM", 256 }, { "CLAP", 256 },
   { "TOM LOW", 256 }, { "TOM MID", 256 }, { "TOM HIGH", 256 }, { "HAT CLOSE", 256 },
-  { "SHAKER", 256 }, { "CRASH", 256 }, { "RIDE", 256 }, { "HAT", 256 },
+  { "SHAKER", 256 }, { "COWBELL", 256 }, { "CRASH", 256 }, { "HAT", 256 },
+};
+static constexpr beat_sound_t chiptune_beat_sounds[def::pad::pad_count] = {
+  { "AMY KICK TIGHT", 330, 1 }, { "AMY SNARE SNAP", 320, 4 },
+  { "AMY SIDE", 330, 3 }, { "AMY CLAP", 320, 9 },
+  { "AMY TOM LOW", 286, 8 }, { "AMY TOM MID", 360, 8 }, { "AMY TOM HIGH", 440, 8 },
+  { "AMY HAT CLOSED", 360, 6 }, { "AMY SHAKER", 384, 0 },
+  { "AMY COWBELL", 384, 10 }, { "AMY COWBELL LOW", 360, 10 }, { "AMY HAT OPEN", 384, 7 },
+};
+static constexpr beat_sound_t dance_beat_sounds[def::pad::pad_count] = {
+  { "AMY KICK PUNCH", 256, 1 }, { "AMY SNARE BRIGHT", 256, 5 },
+  { "AMY SIDE", 288, 3 }, { "AMY CLAP", 256, 9 },
+  { "AMY TOM LOW", 226, 8 }, { "AMY TOM MID", 270, 8 }, { "AMY TOM HIGH", 322, 8 },
+  { "AMY HAT CLOSED", 288, 6 }, { "AMY SHAKER", 288, 0 },
+  { "AMY COWBELL", 288, 10 }, { "AMY HAT ACCENT", 256, 7 }, { "AMY HAT OPEN", 288, 7 },
+};
+#else
+static constexpr beat_sound_t acoustic_beat_sounds[def::pad::pad_count] = {
+  { "KICK", 256 }, { "SNARE", 256 }, { "RIM", 256 }, { "CLAP", 256 },
+  { "TOM LOW", 256 }, { "TOM MID", 256 }, { "TOM HIGH", 256 }, { "HAT CLOSE", 256 },
+  { "SHAKER", 256 }, { "COWBELL", 256 }, { "CRASH", 256 }, { "HAT", 256 },
 };
 static constexpr beat_sound_t chiptune_beat_sounds[def::pad::pad_count] = {
   { "CHIP KICK", 256 }, { "CHIP SNARE", 256 }, { "CHIP RIM", 256 }, { "CHIP CLAP", 256 },
   { "CHIP TOM", 220 }, { "CHIP TOM", 256 }, { "CHIP TOM", 304 }, { "CHIP HAT C", 256 },
-  { "CHIP COWBELL", 256 }, { "CHIP COWBELL", 288 }, { "CHIP RIM", 320 }, { "CHIP HAT O", 256 },
+  { "SHAKER", 256 }, { "CHIP COWBELL", 256 }, { "CRASH", 256 }, { "CHIP HAT O", 256 },
 };
 static constexpr beat_sound_t dance_beat_sounds[def::pad::pad_count] = {
   { "DANCE KICK", 256 }, { "DANCE SNARE", 256 }, { "DANCE RIM", 256 }, { "DANCE CLAP", 256 },
   { "DANCE TOM L", 256 }, { "DANCE TOM M", 256 }, { "DANCE TOM H", 256 }, { "DANCE HAT C", 256 },
-  { "DANCE SHAKER", 256 }, { "DANCE CRASH", 256 }, { "DANCE RIDE", 256 }, { "DANCE HAT O", 256 },
+  { "DANCE SHAKER", 256 }, { "COWBELL", 256 }, { "DANCE CRASH", 256 }, { "DANCE HAT O", 256 },
 };
+#endif
 
 static const beat_sound_t* selected_beat_sounds(void)
 {
@@ -676,6 +766,11 @@ static bool recording_standby_external_candidate = false;
 static bool recording_standby_internal_candidate = false;
 static bool recording_standby_output_guarded = false;
 static bool recording_started_from_preroll = false;
+static bool recording_ui_resources_released = false;
+#if !defined(M5UNIFIED_PC_BUILD)
+static void* recording_internal_dma_reserve = nullptr;
+static constexpr size_t recording_internal_dma_reserve_bytes = 12u * 1024u;
+#endif
 static uint32_t recording_capture_started_msec = 0;
 // Mic_Class accepts two 128ms destinations. Queue submission time is not the
 // exact PCM start time on CoreS3, so calibrate it when the first destination
@@ -921,9 +1016,21 @@ enum class recording_source_mode_t : uint8_t {
   internal_mic,
   external_input,
 };
+enum class recording_prepare_error_t : uint8_t {
+  none,
+  standby_memory,
+  recording_memory,
+  mic_begin,
+  mic_warmup_queue,
+  mic_warmup_timeout,
+  mic_record_queue,
+  external_route,
+  external_record,
+};
 static recording_source_t recording_source = recording_source_t::internal_mic;
 static recording_source_mode_t recording_source_mode = recording_source_mode_t::internal_mic;
 static uint32_t recording_sample_rate_current = 16000;
+static recording_prepare_error_t recording_prepare_error = recording_prepare_error_t::none;
 
 static uint32_t prev_bitmask = 0;
 // Physical input is sampled by the I2C task. Keep that edge time while the
@@ -1033,6 +1140,12 @@ static TaskHandle_t touch_render_task_handle = nullptr;
 // Every page switch invalidates queued Pad/Fn/grid transfers from the prior
 // page. The renderer checks this token before touching the LCD.
 static volatile uint32_t ui_page_generation = 1;
+
+static void advance_ui_surface_generation()
+{
+  const uint32_t next = ui_page_generation + 1u;
+  ui_page_generation = next ? next : 1u;
+}
 static std::vector<loop_event_t> loop_events;
 // Undo is intentionally a short, page-local performance history. Events stay
 // in the loop when changing pages, but the former page's Undo entries do not.
@@ -1042,6 +1155,10 @@ static uint32_t loop_record_full_notice_cooldown_msec = 0;
 static bool loop_playing = false;
 static uint32_t loop_start_msec = 0;
 static uint32_t loop_prev_pos_ms = 0;
+#if !defined(M5UNIFIED_PC_BUILD)
+static TaskHandle_t loop_clock_task_handle = nullptr;
+static volatile bool loop_service_busy = false;
+#endif
 // A running Music deck is a more accurate long-term clock than millisecond
 // polling. Rec adopts its exact output-frame position when both start together.
 static bool music_loop_sync_active = false;
@@ -1121,6 +1238,9 @@ static uint32_t cpu_last_activity_msec = 0;
 static bool cpu_performance_clock = true;
 static uint16_t dirty_pad_mask = 0;
 static uint16_t dirty_pad_state_mask = 0;
+// FX controls need tactile visual feedback even while the audio-priority
+// window is active. Keep that small exception separate from ordinary tiles.
+static uint16_t urgent_pad_mask = 0;
 static uint8_t dirty_fn_mask = 0;
 static bool dirty_wave = false;
 static bool dirty_header = false;
@@ -1139,6 +1259,8 @@ static bool ui_surface_exclusive = false;
 // 変化した横帯だけをSPI転送する。発音中の全面転送を避けるための状態。
 static bool wave_transfer_active = false;
 static bool wave_transfer_full_frame = false;
+static volatile bool wave_transfer_page_switch = false;
+static bool wave_canvas_uses_psram = false;
 static int16_t wave_transfer_y = 0;
 static int16_t wave_transfer_h = 0;
 static volatile bool wave_transfer_job_pending = false;
@@ -1270,7 +1392,8 @@ static volatile bool master_scratch_active = false;
 static volatile bool master_scratch_return_pending = false;
 static int16_t master_scratch_rate_q8 = 256;
 static int16_t master_scratch_target_q8 = 256;
-static uint32_t master_scratch_last_msec = 0;
+static int16_t master_scratch_ramp_from_q8 = 256;
+static uint32_t master_scratch_ramp_started_msec = 0;
 static uint32_t master_scratch_gesture_until_msec = 0;
 static bool master_scratch_rejoin_after_stop = false;
 static constexpr const uint32_t master_scratch_ramp_msec = 70;
@@ -1456,6 +1579,7 @@ static bool loop_is_muted(performance_page_t page, uint8_t pad)
   return performance_page_part_muted(page) || loop_mute(page, pad);
 }
 static constexpr const char* sampler_resume_path = "/sampler_resume.json";
+static constexpr const char* sampler_input_config_path = "/sampler_input.bin";
 static constexpr const char* sampler_folder_settings_path = "/sampler_folder_settings.json";
 static constexpr const char* sampler_session_dir = "/sampler/session";
 static constexpr uint8_t fixed_output_gain_percent = 175;
@@ -1532,6 +1656,7 @@ static bool menu_file_preview_owned = false;
 static constexpr uint8_t synth_menu_preview_channel = kp::def::midi::channel_15;
 static uint8_t synth_menu_preview_note = 60;
 static bool synth_menu_preview_note_active = false;
+static bool synth_menu_preview_uses_amy = false;
 static bool synth_menu_preview_sample_active = false;
 static uint32_t synth_menu_preview_stop_msec = 0;
 // SOUND Fn1 uses the menu audition voice so preview never steals a Pad voice
@@ -1562,10 +1687,9 @@ static bool page_selector_dirty = false;
 static bool page_selector_slide_in = false;
 static bool page_selector_restore_pending = false;
 static uint8_t page_selector_index = 0;
+static uint8_t page_selector_presented_index = 0xFF;
+static uint8_t page_selector_presented_count = 0;
 static uint32_t page_selector_until_msec = 0;
-static uint32_t page_selector_last_draw_msec = 0;
-static M5Canvas wifi_qr_canvas(&M5.Display);
-static bool wifi_qr_canvas_ready = false;
 // Pad/Fn全体の更新用。LCDへ多数の小さな描画命令を送らず、固定DMAバッファで
 // 合成してから一回だけ転送する。再生中の枠だけ更新は従来の直接描画を維持する。
 static M5Canvas ui_dirty_canvas[2] = { M5Canvas(&M5.Display), M5Canvas(&M5.Display) };
@@ -1633,9 +1757,11 @@ static void draw_live_wave_frame(void);
 static void service_wifi_setup_qr(void);
 static void service_wifi_setup_result(void);
 static void service_wifi_radio_start(void);
+static void draw_wifi_qr_preparing(void);
 static void suspend_performance_ui_arena(void);
 static void request_performance_ui_arena_resume(void);
 static void service_performance_ui_arena(uint32_t now);
+static void retain_internal_mic_dma_reserve(void);
 static const chord_template_entry_t& chord_template_entry(uint8_t degree);
 static const char* chord_quality_suffix(chord_quality_t base, bool swap);
 static bool wifi_sta_connected(void);
@@ -1643,7 +1769,7 @@ static void service_wifi_update(void);
 static void service_ble_device_ui(uint32_t now);
 static void start_wifi_update(void);
 static void cancel_wifi_update(void);
-static void stop_file_server_session(void);
+static void stop_file_server_session(const char* reason = "user");
 static void draw_menu(bool redraw_keypad);
 static void draw_menu_keypad(bool force = false);
 static void reset_wifi_qr_canvas(void);
@@ -1721,6 +1847,14 @@ static bool play_menu_builtin_background_preview(const char* builtin_id, uint32_
 static const background_source_t* find_builtin_audio_beat(const char* builtin_id);
 static bool has_lower_suffix(const std::string& n, const char* suffix);
 static bool is_audio_file_name(const std::string& name);
+static bool is_sampler_file_name(const std::string& name);
+static void select_synth_file(void);
+static const sample_source_t* find_builtin_sample_source(const char* name);
+static const ktsynth_source_t* find_builtin_ktsynth_source(const char* name);
+static bool load_builtin_ktsynth(uint8_t synth_index,
+                                 const ktsynth_source_t& source);
+static void apply_builtin_sample_preset_to_slot(sample_slot_t& slot,
+                                                 const sample_source_t& source);
 static void service_synth_menu_preview(uint32_t now);
 static void preview_synth_menu_selection(void);
 static void set_audio_beat_error(const char* msg);
@@ -1759,6 +1893,9 @@ static void set_harmony_tuning_cents_x10(int32_t cents_x10, bool apply = true);
 static void reset_harmony_tuning(bool apply = true);
 static uint8_t synth_sustain_cache_slot(performance_page_t page);
 static pitched_page_settings_t& page_settings(performance_page_t page);
+static uint8_t resolved_pad_sound(const pitched_page_settings_t& settings);
+static sample_slot_t* synth_sample_slot(performance_page_t page);
+static const sample_slot_t* synth_sample_slot_const(performance_page_t page);
 static std::string sampler_file_display_name(const std::string& source_name, const char* source_dir);
 static const char* sampler_beat_file_kind_badge(const std::string& source_name);
 static uint8_t chord_degree_for_order(uint8_t order);
@@ -1767,6 +1904,10 @@ static void request_chord_label_draw(void);
 static uint8_t allocate_pitched_voice(pitched_voice_owner_t owner, uint8_t trigger, uint8_t note,
                                       bool live_performance = false);
 static uint16_t sample_pitch_for_note(const sample_slot_t& slot, uint8_t note);
+static uint16_t sample_synth_pitch_scale_q12(const sample_slot_t& slot);
+static void set_sample_synth_tune(sample_slot_t& slot, int16_t cents);
+static uint16_t sample_page_pitch_scale_q12(performance_page_t page,
+                                             const sample_slot_t& slot);
 static bool synth_sustain_parameters(const sample_slot_t& slot, uint32_t source_start,
                                      uint32_t* start, uint32_t* end, uint16_t* crossfade);
 static uint16_t sample_sustain_auto_release_ms(const sample_slot_t& slot,
@@ -1883,6 +2024,7 @@ static pad_wave_shape_t pad_wave_shape[def::pad::pad_count];
 static constexpr const uint32_t recording_internal_sample_rate = 32000;
 static constexpr const uint32_t recording_external_sample_rate = sampler_audio_t::sample_rate;
 static constexpr const uint32_t recording_buffer_frames = recording_external_sample_rate * sampler_pool_t::max_sample_sec;
+static uint32_t recording_buffer_capacity_frames = 0;
 // Keep two 128ms destinations queued in Mic_Class. LCD and file work can block
 // the UI loop for more than 32ms, so smaller chunks leave holes in the capture
 // and produce time-compressed recordings. finish_pad_recording() separately
@@ -1985,7 +2127,7 @@ static constexpr const char* const fn_labels[][3] = {
 };
 static constexpr const char* const edit_param_labels[] = {
   "START", "END", "VOLUME", "PITCH", "REPEAT", "HOLD", "REVERSE",
-  "LOOP IN", "LOOP OUT", "RELEASE", "SUSTAIN", "CHOKE"
+  "LOOP IN", "LOOP OUT", "RELEASE", "SUSTAIN", "CHOKE", "ATTACK", "TUNE"
 };
 
 // Pad配色 { 画面通常, 画面押下, LED通常, LED押下 }。
@@ -2255,6 +2397,8 @@ static uint32_t edit_pad_background(int pad)
       assigned = true;
       enabled = bass_settings.source == synth_tone_source_t::pad && bass_settings.pad == (uint8_t)edit_pad;
       break;
+    case 4: accent = 0x70B8FFu; assigned = true; focused = edit_param == 12; break;
+    case 5: accent = 0xC090FFu; assigned = true; focused = edit_param == 13; break;
     case 8: accent = 0xFFD0D0u; assigned = enabled = menu_back = true; break;
     case 9: accent = 0x80E0B0u; assigned = true; enabled = sustain_ready; focused = edit_param == 10; break;
     case 10: accent = 0x50D8D0u; assigned = true; focused = edit_param == 7; break;
@@ -2428,6 +2572,9 @@ static void mark_sound_priority(uint32_t hold_ms = 90)
 
 static bool sampler_cpu_has_active_voice(void)
 {
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+  if (sampler_amy_engine::hasActiveVoices()) { return true; }
+#endif
   for (uint8_t voice = 0; voice < sampler_audio_t::max_voice; ++voice) {
     if (sampler_audio_t::isPlaying(voice)) { return true; }
   }
@@ -2547,6 +2694,15 @@ static void request_pad_draw(int pad)
 {
   if (pad >= 0 && pad < (int)def::pad::pad_count) {
     dirty_pad_mask |= (uint16_t)(1u << pad);
+  }
+}
+
+static void request_urgent_pad_draw(int pad)
+{
+  if (pad >= 0 && pad < (int)def::pad::pad_count) {
+    const uint16_t bit = (uint16_t)(1u << pad);
+    dirty_pad_mask |= bit;
+    urgent_pad_mask |= bit;
   }
 }
 
@@ -3323,12 +3479,17 @@ static bool play_sample_sustain_voice(int pad, bool auto_release)
     ? sample_sustain_auto_release_ms(slot, sustain_start, sustain_end) : 0;
   request_sampler_sustain_cache(pad);
   const uint8_t cache_slot = sampler_sustain_cache_slot_for_pad(pad);
-  return sampler_audio_t::playSynth((uint8_t)pad, slot.pcm + source_start,
+  const bool started = sampler_audio_t::playSynth((uint8_t)pad, slot.pcm + source_start,
     slot.playEnd() - source_start, slot.sample_rate, true, false,
     mixer_scaled_volume_q8(mixer_part_t::sampler, slot.volume_q8),
-    slot.samplerPlaybackPitchQ8(), 0, slot.synth_release_ms,
+    slot.samplerPlaybackPitchQ8(), slot.synth_attack_ms, slot.synth_release_ms,
     sustain_start, sustain_end, sustain_crossfade, auto_release_ms,
     true, 1, cache_slot);
+  if (started) {
+    sampler_audio_t::setVoicePitchScaleQ12((uint8_t)pad,
+                                            sample_synth_pitch_scale_q12(slot));
+  }
+  return started;
 }
 
 static void play_sample_once(int pad, uint32_t source_offset_frames = 0,
@@ -3563,16 +3724,19 @@ static void service_wave_transfer(void)
   if (hold_progress_kind == hold_progress_kind_t::loop_clear) {
     wave_transfer_active = false;
     wave_transfer_full_frame = false;
+    wave_transfer_page_switch = false;
     return;
   }
   if (ui_surface_exclusive) {
     wave_transfer_active = false;
     wave_transfer_full_frame = false;
+    wave_transfer_page_switch = false;
     return;
   }
   if (!wave_transfer_full_frame && !uses_incremental_wave_transfer()) {
     wave_transfer_active = false;
     wave_transfer_full_frame = false;
+    wave_transfer_page_switch = false;
     return;
   }
   // A newly started free-length loop replaces the stopped timeline with the
@@ -3588,6 +3752,7 @@ static void service_wave_transfer(void)
   if (wave_transfer_h <= 0) {
     wave_transfer_active = false;
     wave_transfer_full_frame = false;
+    wave_transfer_page_switch = false;
     return;
   }
 
@@ -3596,7 +3761,10 @@ static void service_wave_transfer(void)
   // 物理ボタンに未処理の変化がある時は、表示より入力を先に処理する。
   if (kp::system_registry->internal_input.getButtonBitmask() != prev_bitmask) { return; }
   static constexpr int live_wave_transfer_chunk_height = 8;
-  const int transfer_h = std::min<int>(wave_transfer_h, live_wave_transfer_chunk_height);
+  static constexpr int page_switch_transfer_chunk_height = 16;
+  const int chunk_height = wave_transfer_page_switch
+    ? page_switch_transfer_chunk_height : live_wave_transfer_chunk_height;
+  const int transfer_h = std::min<int>(wave_transfer_h, chunk_height);
   if (hold_progress_kind != hold_progress_kind_t::none) {
     int chip_x = 0;
     int chip_y = 0;
@@ -3635,6 +3803,7 @@ static void service_wave_transfer(void)
     if (!wave_transfer_full_frame) { draw_live_wave_frame(); }
     wave_transfer_active = false;
     wave_transfer_full_frame = false;
+    wave_transfer_page_switch = false;
   }
 }
 
@@ -3647,6 +3816,7 @@ static void push_wave_canvas(void)
   c.drawRect(1, 1, c.width() - 2, c.height() - 2, color);
   wave_transfer_active = false;
   wave_transfer_full_frame = false;
+  wave_transfer_page_switch = false;
   {
     display_spi_guard_t display_guard;
     c.pushSprite(0, wave_y);
@@ -3656,7 +3826,7 @@ static void push_wave_canvas(void)
   }
 }
 
-static void queue_wave_canvas_full_transfer(void)
+static void queue_wave_canvas_full_transfer(bool page_switch = false)
 {
   auto& c = wave_canvas;
   uint32_t color = mode_info[(int)current_mode].screen_color;
@@ -3665,6 +3835,7 @@ static void queue_wave_canvas_full_transfer(void)
   wave_transfer_y = 0;
   wave_transfer_h = c.height();
   wave_transfer_full_frame = true;
+  wave_transfer_page_switch = page_switch;
   wave_transfer_active = true;
 }
 
@@ -3676,6 +3847,7 @@ static void reset_live_wave(void)
   live_wave_prev_bottom = 0;
   wave_transfer_active = false;
   wave_transfer_full_frame = false;
+  wave_transfer_page_switch = false;
 }
 
 static void restore_sample_preview_cursor_columns(int center_x)
@@ -4574,7 +4746,7 @@ static void service_loop_length_label_overlay(void)
   loop_length_label_overlay_visible = true;
 }
 
-static void draw_loop_timeline(bool cursor_only = false)
+static void draw_loop_timeline(bool cursor_only = false, bool page_switch = false)
 {
   if (ui_surface_exclusive || page_selector_visible) { return; }
   auto& c = wave_canvas;
@@ -4597,7 +4769,7 @@ static void draw_loop_timeline(bool cursor_only = false)
     loop_length_label_overlay_visible = false;
     loop_length_label_restore_pending = false;
     loop_recording_notice_shown = true;
-    queue_wave_canvas_full_transfer();
+    queue_wave_canvas_full_transfer(page_switch);
     return;
   }
   const int plot_left = loop_timeline_inset_x;
@@ -4635,7 +4807,56 @@ static void draw_loop_timeline(bool cursor_only = false)
   loop_timeline_cache_valid = true;
   loop_cursor_prev_x = -1;
   loop_timeline_dirty_span_count = 0;
-  queue_wave_canvas_full_transfer();
+  queue_wave_canvas_full_transfer(page_switch);
+}
+
+static bool mixer_meter_geometry(uint8_t part, int* x, int* y, int* width)
+{
+  if (part >= mixer_part_count) { return false; }
+  const uint8_t pad_number = mixer_part_pad_numbers[part];
+  const int row = pad_number >= 5 ? 0 : 1;
+  const int col = pad_number >= 5 ? pad_number - 5 : pad_number - 1;
+  const int column_w = wave_canvas.width() / 3;
+  if (x) { *x = 5 + col * column_w; }
+  if (y) { *y = 30 + row * 35 + 18; }
+  if (width) { *width = column_w - 12; }
+  return true;
+}
+
+static void paint_mixer_meter(M5Canvas& canvas, uint8_t part)
+{
+  int x = 0;
+  int y = 0;
+  int width = 0;
+  if (!mixer_meter_geometry(part, &x, &y, &width)) { return; }
+  static constexpr uint32_t background = 0x0A0C10u;
+  const uint32_t color = mixer_part_muted[part] ? 0x606068u : mixer_part_colors[part];
+  canvas.fillRect(x, y, width, 8, background);
+  canvas.drawRect(x, y, width, 8, 0x505058u);
+  if (!mixer_part_muted[part]) {
+    canvas.fillRect(x + 1, y + 1,
+      ((width - 2) * mixer_part_volume[part]) / 100, 6, color);
+  }
+}
+
+static void present_mixer_meter(uint8_t part)
+{
+  if (!mixer_active || current_mode != sampler_mode_t::mode_fx
+   || ui_surface_exclusive || page_selector_visible
+   || hold_progress_kind != hold_progress_kind_t::none
+   || wave_transfer_active || wave_transfer_job_pending) {
+    request_wave_draw();
+    return;
+  }
+  int x = 0;
+  int y = 0;
+  int width = 0;
+  if (!mixer_meter_geometry(part, &x, &y, &width)) { return; }
+  paint_mixer_meter(wave_canvas, part);
+  display_spi_guard_t display_guard;
+  M5.Display.setClipRect(x, wave_y + y, width, 8);
+  wave_canvas.pushSprite(0, wave_y);
+  M5.Display.clearClipRect();
 }
 
 static void draw_fx_panel(void)
@@ -4667,11 +4888,8 @@ static void draw_fx_panel(void)
       uint32_t color = mixer_part_muted[part] ? 0x606068u : mixer_part_colors[part];
       c.setTextColor(color, 0x0A0C10u);
       c.drawString(mixer_part_labels[part], x, y);
-      c.drawRect(x, y + 18, bar_w, 8, 0x505058u);
-      if (!mixer_part_muted[part]) {
-        c.fillRect(x + 1, y + 19,
-          ((bar_w - 2) * mixer_part_volume[part]) / 100, 6, color);
-      }
+      (void)bar_w;
+      paint_mixer_meter(c, part);
     }
     if (mixer_notice[0] && (int32_t)(mixer_notice_until_msec - M5.millis()) > 0) {
       c.setTextDatum(m5gfx::textdatum_t::bottom_center);
@@ -5324,6 +5542,8 @@ static void draw_wave(void) {
   // Core 0 may still be reading one 8px strip from this Canvas. Complete that
   // tiny transfer before the producer rewrites the retained pixels.
   wait_wave_transfer_job();
+  const bool page_switch = rendered_wave_page != current_page
+                        || rendered_wave_mode != current_mode;
   rendered_wave_page = current_page;
   rendered_wave_mode = current_mode;
   bool timeline_visible = current_mode == sampler_mode_t::mode_rec
@@ -5440,7 +5660,8 @@ static void draw_wave(void) {
                     : edit_param == 4 ? 0xF0D060u : edit_param == 5 ? 0x50C8D8u
                     : edit_param == 6 ? 0xD080E0u : edit_param <= 8 ? 0x50D8D0u
                     : edit_param == 9 ? 0xF0A050u : edit_param == 10 ? 0x80E0B0u
-                    : 0xFF8060u;
+                    : edit_param == 11 ? 0xFF8060u : edit_param == 12 ? 0x70B8FFu
+                    : 0xC090FFu;
     char value[24];
     if (edit_param == 0) {
       snprintf(value, sizeof(value), "%.2fs", slot.sample_rate ? (float)slot.playStart() / slot.sample_rate : 0.0f);
@@ -5462,6 +5683,10 @@ static void draw_wave(void) {
                slot.sample_rate ? (float)frame / slot.sample_rate : 0.0f);
     } else if (edit_param == 9) {
       snprintf(value, sizeof(value), "%ums", (unsigned)slot.synth_release_ms);
+    } else if (edit_param == 12) {
+      snprintf(value, sizeof(value), "%ums", (unsigned)slot.synth_attack_ms);
+    } else if (edit_param == 13) {
+      snprintf(value, sizeof(value), "%+d cent", (int)slot.synth_tune_cents);
     } else if (edit_param == 11) {
       snprintf(value, sizeof(value), "%s", slot.choke_enabled ? "ON" : "OFF");
     } else {
@@ -5687,9 +5912,11 @@ static void draw_wave(void) {
       if (melody_settings.source == synth_tone_source_t::pad) {
         snprintf(lines[line_count++], sizeof(lines[0]), "Sound : Pad %u",
           (unsigned)pad_display_number(melody_settings.pad));
+      } else if (const auto* source = synth_sample_slot_const(performance_page_t::melody)) {
+        snprintf(lines[line_count++], sizeof(lines[0]), "Sound : %.32s", source->name);
       } else {
         snprintf(lines[line_count++], sizeof(lines[0]), "Sound : %s",
-          kp::def::midi::program_name_table.at(melody_settings.program)->get());
+          pitched_tone_name(performance_page_t::melody, melody_settings.program));
       }
       snprintf(lines[line_count++], sizeof(lines[0]), "Oct.  : %+d", melody_settings.octave);
     } else if (current_page == performance_page_t::bass) {
@@ -5700,9 +5927,11 @@ static void draw_wave(void) {
       if (bass_settings.source == synth_tone_source_t::pad) {
         snprintf(lines[line_count++], sizeof(lines[0]), "Sound : Pad %u",
           (unsigned)pad_display_number(bass_settings.pad));
+      } else if (const auto* source = synth_sample_slot_const(performance_page_t::bass)) {
+        snprintf(lines[line_count++], sizeof(lines[0]), "Sound : %.32s", source->name);
       } else {
         snprintf(lines[line_count++], sizeof(lines[0]), "Sound : %s",
-          kp::def::midi::program_name_table.at(bass_settings.program)->get());
+          pitched_tone_name(performance_page_t::bass, bass_settings.program));
       }
       snprintf(lines[line_count++], sizeof(lines[0]), "Oct.  : %+d", bass_settings.octave);
     } else if (current_page == performance_page_t::chord) {
@@ -5712,9 +5941,11 @@ static void draw_wave(void) {
       if (chord_settings.source == synth_tone_source_t::pad) {
         snprintf(lines[line_count++], sizeof(lines[0]), "Sound : Pad %u",
           (unsigned)pad_display_number(chord_settings.pad));
+      } else if (const auto* source = synth_sample_slot_const(performance_page_t::chord)) {
+        snprintf(lines[line_count++], sizeof(lines[0]), "Sound : %.32s", source->name);
       } else {
         snprintf(lines[line_count++], sizeof(lines[0]), "Sound : %s",
-          kp::def::midi::program_name_table.at(chord_settings.program)->get());
+          pitched_tone_name(performance_page_t::chord, chord_settings.program));
       }
       snprintf(lines[line_count++], sizeof(lines[0]), "Oct.  : %+d", chord_settings.octave);
     } else {
@@ -5824,7 +6055,7 @@ static void draw_wave(void) {
   }
   if (current_mode == sampler_mode_t::mode_rec
    || (current_mode == sampler_mode_t::mode_play && loop_playing)) {
-    draw_loop_timeline();
+    draw_loop_timeline(false, page_switch);
     return;
   }
   if (current_mode == sampler_mode_t::mode_fx) {
@@ -6128,6 +6359,16 @@ static void draw_pad_content(m5gfx::LovyanGFX& d, int pad, int origin_x = 0, int
         label = "Bass";
         accent = performance_page_colors[(uint8_t)performance_page_t::bass];
         enabled = bass_settings.source == synth_tone_source_t::pad && bass_settings.pad == (uint8_t)edit_pad;
+        break;
+      case 4:
+        label = "Atk";
+        accent = 0x70B8FFu;
+        focused = edit_param == 12;
+        break;
+      case 5:
+        label = "Tune";
+        accent = 0xC090FFu;
+        focused = edit_param == 13;
         break;
       case 8:
         label = "Back";
@@ -6961,6 +7202,7 @@ static bool present_current_grid_cache()
     if (xQueueSend(ui_tile_render_queue, &transfer, 0) == pdTRUE) {
       dirty_pad_mask = 0;
       dirty_pad_state_mask = 0;
+      urgent_pad_mask = 0;
       return true;
     }
     grid_cache_busy[index] = false;
@@ -6971,6 +7213,7 @@ static bool present_current_grid_cache()
   grid_cache_canvas[index].pushSprite(0, grid_y);
   dirty_pad_mask = 0;
   dirty_pad_state_mask = 0;
+  urgent_pad_mask = 0;
   return true;
 }
 
@@ -6989,6 +7232,23 @@ static void flush_dirty_ui(bool force = false)
   // Core-0 tile presenter instead of nesting display transactions cross-core.
   if (!force && ui_async_display_busy()) { return; }
   uint32_t now = M5.millis();
+  // Present at most one pressed FX tile before the normal audio-priority
+  // gate. Larger UI work remains deferred during performance.
+  if (!force && urgent_pad_mask != 0) {
+    for (int i = 0; i < (int)def::pad::pad_count; ++i) {
+      const uint16_t bit = (uint16_t)(1u << i);
+      if (!(urgent_pad_mask & bit)) { continue; }
+      if (!ui_dirty_canvas_available()) { return; }
+      urgent_pad_mask &= (uint16_t)~bit;
+      dirty_pad_mask &= (uint16_t)~bit;
+      dirty_pad_state_mask &= (uint16_t)~bit;
+      update_pad_led(i);
+      ui_async_tile_submit = edit_pad < 0;
+      draw_pad(i);
+      ui_async_tile_submit = false;
+      return;
+    }
+  }
   // Fn3 Delete does not trigger audio. Present its target waveform and
   // confirmation while the modifier is still held instead of leaving the
   // request behind the normal post-touch audio-priority window.
@@ -7019,6 +7279,7 @@ static void flush_dirty_ui(bool force = false)
       if (!force && !ui_dirty_canvas_available()) { return; }
       dirty_pad_mask &= ~bit;
       dirty_pad_state_mask &= ~bit;
+      urgent_pad_mask &= ~bit;
       update_pad_led(i);
       ui_async_tile_submit = !force && edit_pad < 0;
       draw_pad(i);
@@ -7056,10 +7317,15 @@ static void draw_all(void) {
   M5.Display.fillScreen(0x101018u);
   dirty_pad_mask = 0;
   dirty_pad_state_mask = 0;
+  urgent_pad_mask = 0;
   dirty_fn_mask = 0;
   dirty_wave = false;
   dirty_header = false;
   invalidate_loop_timeline_cache();
+  // fillScreen() erased the physical Wave region. Sampler PLAY normally
+  // transfers only the changing waveform band, so force its next frame to
+  // include the retained SAMPLER title, divider, and border as well.
+  reset_live_wave();
   draw_header(true);
   draw_wave();
   draw_tabs();
@@ -7086,6 +7352,7 @@ static void restore_performance_surface_from_cache(void)
 
   dirty_pad_mask = 0;
   dirty_pad_state_mask = 0;
+  urgent_pad_mask = 0;
   dirty_fn_mask = 0;
   dirty_wave = false;
   dirty_header = false;
@@ -7123,14 +7390,17 @@ enum class menu_page_t : uint8_t {
   synth_melody,
   synth_melody_sound,
   synth_melody_midi,
+  synth_melody_sample,
   synth_melody_pad,
   synth_bass,
   synth_bass_sound,
   synth_bass_midi,
+  synth_bass_sample,
   synth_bass_pad,
   synth_chord,
   synth_chord_sound,
   synth_chord_midi,
+  synth_chord_sample,
   synth_chord_pad,
   synth_drum,
   input_assign,
@@ -7254,6 +7524,8 @@ enum class menu_action_t : uint8_t {
   external_pad_base_note_select,
   synth_tone_select,
   synth_pad_select,
+  synth_sample_file_select,
+  synth_ktsynth_select,
   synth_pad_base_note_select,
   wifi_setup,
   wifi_wps,
@@ -7275,6 +7547,7 @@ struct sampler_menu_item_t {
     ble_midi,
     audio_beat,
     pattern_beat,
+    editable_sample,
   } visibility = visibility_t::always;
 };
 
@@ -7352,18 +7625,26 @@ static constexpr const sampler_menu_item_t menu_music_track_items[] = {
 
 static constexpr const sampler_menu_item_t menu_synth_melody_items[] = {
   { "Sound Source", menu_item_kind_t::submenu, menu_page_t::synth_melody_sound, menu_value_t::none, menu_action_t::none },
+  { "Base Note",    menu_item_kind_t::action, menu_page_t::root, menu_value_t::none,
+    menu_action_t::synth_pad_base_note_select, sampler_menu_item_t::visibility_t::editable_sample },
   { "Octave",       menu_item_kind_t::value,  menu_page_t::root, menu_value_t::melody_octave, menu_action_t::none },
   { "Pitch Bend",   menu_item_kind_t::value,  menu_page_t::root, menu_value_t::melody_pitch_bend_range, menu_action_t::none },
   { "Volume",       menu_item_kind_t::value,  menu_page_t::root, menu_value_t::melody_volume, menu_action_t::none },
 };
 
 static constexpr const sampler_menu_item_t menu_synth_melody_sound_items[] = {
-  { "General MIDI",  menu_item_kind_t::submenu, menu_page_t::synth_melody_midi, menu_value_t::none, menu_action_t::none },
-  { "Pad",           menu_item_kind_t::submenu, menu_page_t::synth_melody_pad,  menu_value_t::none, menu_action_t::none },
+  { "General MIDI", menu_item_kind_t::action, menu_page_t::root, menu_value_t::none, menu_action_t::synth_tone_select },
+  { "Sample",       menu_item_kind_t::submenu, menu_page_t::synth_melody_sample, menu_value_t::none, menu_action_t::none },
+  { "KANTAN Synth", menu_item_kind_t::action, menu_page_t::root, menu_value_t::none, menu_action_t::synth_ktsynth_select },
 };
 
 static constexpr const sampler_menu_item_t menu_synth_melody_midi_items[] = {
   { "Tone",          menu_item_kind_t::action, menu_page_t::root, menu_value_t::none, menu_action_t::synth_tone_select },
+};
+
+static constexpr const sampler_menu_item_t menu_synth_melody_sample_items[] = {
+  { "Pad",  menu_item_kind_t::action, menu_page_t::root, menu_value_t::none, menu_action_t::synth_pad_select },
+  { "File", menu_item_kind_t::action, menu_page_t::root, menu_value_t::none, menu_action_t::synth_sample_file_select },
 };
 
 static constexpr const sampler_menu_item_t menu_synth_melody_pad_items[] = {
@@ -7373,18 +7654,26 @@ static constexpr const sampler_menu_item_t menu_synth_melody_pad_items[] = {
 
 static constexpr const sampler_menu_item_t menu_synth_bass_items[] = {
   { "Sound Source", menu_item_kind_t::submenu, menu_page_t::synth_bass_sound, menu_value_t::none, menu_action_t::none },
+  { "Base Note",    menu_item_kind_t::action, menu_page_t::root, menu_value_t::none,
+    menu_action_t::synth_pad_base_note_select, sampler_menu_item_t::visibility_t::editable_sample },
   { "Octave",       menu_item_kind_t::value,  menu_page_t::root, menu_value_t::bass_octave, menu_action_t::none },
   { "Pitch Bend",   menu_item_kind_t::value,  menu_page_t::root, menu_value_t::bass_pitch_bend_range, menu_action_t::none },
   { "Volume",       menu_item_kind_t::value,  menu_page_t::root, menu_value_t::bass_volume, menu_action_t::none },
 };
 
 static constexpr const sampler_menu_item_t menu_synth_bass_sound_items[] = {
-  { "General MIDI", menu_item_kind_t::submenu, menu_page_t::synth_bass_midi, menu_value_t::none, menu_action_t::none },
-  { "Pad",          menu_item_kind_t::submenu, menu_page_t::synth_bass_pad,  menu_value_t::none, menu_action_t::none },
+  { "General MIDI", menu_item_kind_t::action, menu_page_t::root, menu_value_t::none, menu_action_t::synth_tone_select },
+  { "Sample",       menu_item_kind_t::submenu, menu_page_t::synth_bass_sample, menu_value_t::none, menu_action_t::none },
+  { "KANTAN Synth", menu_item_kind_t::action, menu_page_t::root, menu_value_t::none, menu_action_t::synth_ktsynth_select },
 };
 
 static constexpr const sampler_menu_item_t menu_synth_bass_midi_items[] = {
   { "Tone", menu_item_kind_t::action, menu_page_t::root, menu_value_t::none, menu_action_t::synth_tone_select },
+};
+
+static constexpr const sampler_menu_item_t menu_synth_bass_sample_items[] = {
+  { "Pad",  menu_item_kind_t::action, menu_page_t::root, menu_value_t::none, menu_action_t::synth_pad_select },
+  { "File", menu_item_kind_t::action, menu_page_t::root, menu_value_t::none, menu_action_t::synth_sample_file_select },
 };
 
 static constexpr const sampler_menu_item_t menu_synth_bass_pad_items[] = {
@@ -7394,17 +7683,25 @@ static constexpr const sampler_menu_item_t menu_synth_bass_pad_items[] = {
 
 static constexpr const sampler_menu_item_t menu_synth_chord_items[] = {
   { "Sound Source", menu_item_kind_t::submenu, menu_page_t::synth_chord_sound, menu_value_t::none, menu_action_t::none },
+  { "Base Note",    menu_item_kind_t::action, menu_page_t::root, menu_value_t::none,
+    menu_action_t::synth_pad_base_note_select, sampler_menu_item_t::visibility_t::editable_sample },
   { "Octave",       menu_item_kind_t::value,  menu_page_t::root, menu_value_t::chord_octave, menu_action_t::none },
   { "Volume",       menu_item_kind_t::value,  menu_page_t::root, menu_value_t::chord_volume, menu_action_t::none },
 };
 
 static constexpr const sampler_menu_item_t menu_synth_chord_sound_items[] = {
-  { "General MIDI",  menu_item_kind_t::submenu, menu_page_t::synth_chord_midi, menu_value_t::none, menu_action_t::none },
-  { "Pad",           menu_item_kind_t::submenu, menu_page_t::synth_chord_pad,  menu_value_t::none, menu_action_t::none },
+  { "General MIDI", menu_item_kind_t::action, menu_page_t::root, menu_value_t::none, menu_action_t::synth_tone_select },
+  { "Sample",       menu_item_kind_t::submenu, menu_page_t::synth_chord_sample, menu_value_t::none, menu_action_t::none },
+  { "KANTAN Synth", menu_item_kind_t::action, menu_page_t::root, menu_value_t::none, menu_action_t::synth_ktsynth_select },
 };
 
 static constexpr const sampler_menu_item_t menu_synth_chord_midi_items[] = {
   { "Tone",          menu_item_kind_t::action, menu_page_t::root, menu_value_t::none, menu_action_t::synth_tone_select },
+};
+
+static constexpr const sampler_menu_item_t menu_synth_chord_sample_items[] = {
+  { "Pad",  menu_item_kind_t::action, menu_page_t::root, menu_value_t::none, menu_action_t::synth_pad_select },
+  { "File", menu_item_kind_t::action, menu_page_t::root, menu_value_t::none, menu_action_t::synth_sample_file_select },
 };
 
 static constexpr const sampler_menu_item_t menu_synth_chord_pad_items[] = {
@@ -7574,11 +7871,20 @@ static void service_surface_sync(uint32_t now)
    || ui_async_display_busy()) {
     return;
   }
-  // This path is intentionally rare. It re-establishes all retained regions
-  // together, so no old page can survive after an async transfer was dropped.
-  draw_all();
-  update_all_leds();
-  surface_sync_deadline_msec = 0;
+  // Recovery must never erase an already-presented cached Pad grid. Under a
+  // dense AMY/loop load the header or Wave job can legitimately miss the
+  // original deadline; the former draw_all() fallback then blacked the whole
+  // LCD and rebuilt every tile, defeating the page cache. Requeue only the
+  // retained regions that are stale and give them another bounded window.
+  if (rendered_header_page != current_page
+   || rendered_header_mode != current_mode) {
+    request_header_draw();
+  }
+  if (rendered_wave_page != current_page
+   || rendered_wave_mode != current_mode) {
+    request_wave_draw();
+  }
+  surface_sync_deadline_msec = now + 220;
 }
 
 static menu_page_t menu_page = menu_page_t::root;
@@ -7632,9 +7938,11 @@ enum class wifi_radio_request_t : uint8_t { none, setup_ap, setup_wps, ota, file
 static wifi_radio_request_t wifi_radio_request = wifi_radio_request_t::none;
 static uint32_t wifi_radio_request_deadline_msec = 0;
 static uint32_t wifi_radio_request_not_before_msec = 0;
+static bool wifi_radio_waiting_for_shutdown = false;
 static bool wifi_ble_suspended = false;
 static bool wifi_ble_resume_pending = false;
 static uint32_t wifi_ble_resume_not_before_msec = 0;
+static bool wifi_amy_paused = false;
 static bool wifi_auto_update_check = false;
 static bool wifi_update_active = false;
 static uint8_t wifi_update_last_state = 0;
@@ -7669,6 +7977,7 @@ enum class kit_edit_state_t : uint8_t {
   select_music_file,
   select_sample_category,
   select_wav,
+  select_synth_file,
   select_bgm_wav,
   select_bgm_pad,
   confirm_bgm_pad,
@@ -7689,6 +7998,12 @@ static constexpr const char* builtin_project_disco = "builtin-project:DISCO Beat
 static char kit_pending_wav_path[96] = { 0 };
 static char kit_pending_wav_name[40] = { 0 };
 static size_t sample_browser_category_cursor = 0;
+enum class synth_file_kind_t : uint8_t {
+  none,
+  sample_file,
+  kantan_synth,
+};
+static synth_file_kind_t synth_file_kind = synth_file_kind_t::none;
 // A performance-surface Import already knows its destination, unlike the
 // regular Kit menu flow which still asks the player to select a Pad.
 static int kit_shortcut_target_pad = -1;
@@ -7758,6 +8073,30 @@ static int16_t midi_cc_assign[128] = { 0 };
 static int16_t external_button_assign[32] = { 0 };
 static int16_t usb_keyboard_assign[256] = { 0 };
 static int16_t usb_gamepad_assign[256] = { 0 };
+// These tables must be unassigned before any startup path can persist Resume.
+// Zero is a valid pad target, so ordinary aggregate initialization would map
+// every input to the same pad until init() reaches its explicit reset.
+static const bool input_assign_storage_initialized = []() {
+  const int16_t none = (int16_t)midi_assign_target_t::none;
+  std::fill(midi_note_assign, midi_note_assign + 128, none);
+  std::fill(midi_cc_assign, midi_cc_assign + 128, none);
+  std::fill(external_button_assign, external_button_assign + 32, none);
+  std::fill(usb_keyboard_assign, usb_keyboard_assign + 256, none);
+  std::fill(usb_gamepad_assign, usb_gamepad_assign + 256, none);
+  return true;
+}();
+static bool input_assign_repair_pending = false;
+
+template <size_t N>
+static bool repair_legacy_zero_filled_assignments(int16_t (&assignments)[N])
+{
+  const int16_t legacy_default = (int16_t)midi_assign_target_t::pad_base;
+  for (size_t i = 0; i < N; ++i) {
+    if (assignments[i] != legacy_default) { return false; }
+  }
+  std::fill(assignments, assignments + N, (int16_t)midi_assign_target_t::none);
+  return true;
+}
 // GM Programは0始まり。画面上の82番 Lead 2 (sawtooth) はProgram 81。
 static uint8_t external_midi_ch1_program = 81;
 enum class external_midi_sound_t : uint8_t { general_midi, pad };
@@ -7816,6 +8155,24 @@ static size_t ble_device_selected = 0;
 static uint32_t ble_device_connect_deadline_msec = 0;
 static char ble_preferred_address[18] = {};
 static char ble_preferred_name[24] = {};
+// During boot, initialize the BLE controller without scanning.  Preferred
+// device discovery starts only after the retained UI and Project are stable.
+static bool ble_preferred_connect_deferred = false;
+// A reset during the previous GATT connection must never immediately repeat
+// the same connection during boot.  Manual Scan & Connect clears the transport
+// guard and provides an explicit, recoverable retry path.
+static bool ble_auto_reconnect_blocked = false;
+static uint8_t ble_boot_recovery_stage = 0;
+static uint16_t ble_boot_recovery_free_kb = 0;
+static uint16_t ble_boot_recovery_largest_kb = 0;
+static uint16_t ble_boot_recovery_midi_stack_kb = 0;
+static uint16_t ble_boot_recovery_callback_stack_kb = 0;
+static uint8_t ble_boot_reset_reason = 0;
+static bool ble_connect_resource_guard_active = false;
+static bool ble_connect_amy_paused = false;
+static uint32_t ble_connect_resource_guard_deadline_msec = 0;
+static uint32_t ble_connect_resource_guard_connected_msec = 0;
+static uint32_t ble_connect_resource_guard_packet_base = 0;
 static uint8_t midi_note_assign_count = 0;
 static uint8_t external_button_assign_count = 0;
 static uint8_t usb_keyboard_assign_count = 0;
@@ -8008,17 +8365,48 @@ static performance_page_t synth_target_for_menu_page(menu_page_t page)
   switch (page) {
   case menu_page_t::synth_bass:
   case menu_page_t::synth_bass_sound:
+  case menu_page_t::synth_bass_sample:
   case menu_page_t::synth_bass_midi:
   case menu_page_t::synth_bass_pad:
     return performance_page_t::bass;
   case menu_page_t::synth_chord:
   case menu_page_t::synth_chord_sound:
+  case menu_page_t::synth_chord_sample:
   case menu_page_t::synth_chord_midi:
   case menu_page_t::synth_chord_pad:
     return performance_page_t::chord;
   default:
     return performance_page_t::melody;
   }
+}
+
+static uint8_t synth_source_slot_index(performance_page_t page)
+{
+  return page == performance_page_t::melody ? 0
+       : page == performance_page_t::chord ? 1
+       : page == performance_page_t::bass ? 2
+       : sampler_pool_t::synth_source_count;
+}
+
+static sample_slot_t* synth_sample_slot(performance_page_t page)
+{
+  auto& settings = page_settings(page);
+  if (settings.source == synth_tone_source_t::pad) {
+    const uint8_t pad = resolved_pad_sound(settings);
+    return pad < def::pad::pad_count ? &sampler_pool_t::slot[pad] : nullptr;
+  }
+  if (settings.source == synth_tone_source_t::file
+   || settings.source == synth_tone_source_t::kantan_synth) {
+    const uint8_t index = synth_source_slot_index(page);
+    return index < sampler_pool_t::synth_source_count
+      ? &sampler_pool_t::synth_source[index] : nullptr;
+  }
+  return nullptr;
+}
+
+static const sample_slot_t* synth_sample_slot_const(performance_page_t page)
+{
+  return synth_sample_slot(page);
 }
 
 static void select_synth_source_branch(menu_page_t page)
@@ -8038,8 +8426,11 @@ static void select_synth_source_branch(menu_page_t page)
   // incoming MIDI, or disturb the shared SAM2695 drum/UI channels.
   // A source switch must never inherit the temporary mute used for recording.
   sampler_audio_t::setOutputMuted(false);
-  apply_synth_tones(true);
+  // Save before rebuilding the selected engine. Configuring AMY immediately
+  // before the LittleFS write races its continuous renderer on the other core.
   save_resume_kit();
+  apply_synth_tones(true);
+  schedule_internal_synth_restore(80);
 }
 
 static const sampler_menu_item_t* menu_raw_items(menu_page_t page, size_t* count)
@@ -8064,14 +8455,17 @@ static const sampler_menu_item_t* menu_raw_items(menu_page_t page, size_t* count
   case menu_page_t::synth_melody: *count = sizeof(menu_synth_melody_items) / sizeof(menu_synth_melody_items[0]); return menu_synth_melody_items;
   case menu_page_t::synth_melody_sound: *count = sizeof(menu_synth_melody_sound_items) / sizeof(menu_synth_melody_sound_items[0]); return menu_synth_melody_sound_items;
   case menu_page_t::synth_melody_midi: *count = sizeof(menu_synth_melody_midi_items) / sizeof(menu_synth_melody_midi_items[0]); return menu_synth_melody_midi_items;
+  case menu_page_t::synth_melody_sample: *count = sizeof(menu_synth_melody_sample_items) / sizeof(menu_synth_melody_sample_items[0]); return menu_synth_melody_sample_items;
   case menu_page_t::synth_melody_pad: *count = sizeof(menu_synth_melody_pad_items) / sizeof(menu_synth_melody_pad_items[0]); return menu_synth_melody_pad_items;
   case menu_page_t::synth_bass: *count = sizeof(menu_synth_bass_items) / sizeof(menu_synth_bass_items[0]); return menu_synth_bass_items;
   case menu_page_t::synth_bass_sound: *count = sizeof(menu_synth_bass_sound_items) / sizeof(menu_synth_bass_sound_items[0]); return menu_synth_bass_sound_items;
   case menu_page_t::synth_bass_midi: *count = sizeof(menu_synth_bass_midi_items) / sizeof(menu_synth_bass_midi_items[0]); return menu_synth_bass_midi_items;
+  case menu_page_t::synth_bass_sample: *count = sizeof(menu_synth_bass_sample_items) / sizeof(menu_synth_bass_sample_items[0]); return menu_synth_bass_sample_items;
   case menu_page_t::synth_bass_pad: *count = sizeof(menu_synth_bass_pad_items) / sizeof(menu_synth_bass_pad_items[0]); return menu_synth_bass_pad_items;
   case menu_page_t::synth_chord:  *count = sizeof(menu_synth_chord_items) / sizeof(menu_synth_chord_items[0]); return menu_synth_chord_items;
   case menu_page_t::synth_chord_sound: *count = sizeof(menu_synth_chord_sound_items) / sizeof(menu_synth_chord_sound_items[0]); return menu_synth_chord_sound_items;
   case menu_page_t::synth_chord_midi: *count = sizeof(menu_synth_chord_midi_items) / sizeof(menu_synth_chord_midi_items[0]); return menu_synth_chord_midi_items;
+  case menu_page_t::synth_chord_sample: *count = sizeof(menu_synth_chord_sample_items) / sizeof(menu_synth_chord_sample_items[0]); return menu_synth_chord_sample_items;
   case menu_page_t::synth_chord_pad: *count = sizeof(menu_synth_chord_pad_items) / sizeof(menu_synth_chord_pad_items[0]); return menu_synth_chord_pad_items;
   case menu_page_t::synth_drum:   *count = sizeof(menu_synth_drum_items) / sizeof(menu_synth_drum_items[0]); return menu_synth_drum_items;
   case menu_page_t::input_assign: *count = sizeof(menu_input_items) / sizeof(menu_input_items[0]); return menu_input_items;
@@ -8086,7 +8480,7 @@ static const sampler_menu_item_t* menu_raw_items(menu_page_t page, size_t* count
   }
 }
 
-static bool menu_item_is_visible(const sampler_menu_item_t& item)
+static bool menu_item_is_visible(const sampler_menu_item_t& item, menu_page_t page)
 {
   switch (item.visibility) {
   default:
@@ -8098,6 +8492,10 @@ static bool menu_item_is_visible(const sampler_menu_item_t& item)
     return beat_format == beat_format_t::audio;
   case sampler_menu_item_t::visibility_t::pattern_beat:
     return beat_format == beat_format_t::pattern;
+  case sampler_menu_item_t::visibility_t::editable_sample: {
+    const auto source = page_settings(synth_target_for_menu_page(page)).source;
+    return source == synth_tone_source_t::pad || source == synth_tone_source_t::file;
+  }
   }
 }
 
@@ -8110,7 +8508,7 @@ static const sampler_menu_item_t* menu_items(menu_page_t page, size_t* count)
   static sampler_menu_item_t visible_items[16];
   size_t visible_count = 0;
   for (size_t i = 0; i < raw_count && visible_count < std::size(visible_items); ++i) {
-    if (menu_item_is_visible(raw_items[i])) {
+    if (menu_item_is_visible(raw_items[i], page)) {
       visible_items[visible_count++] = raw_items[i];
       if (visible_items[visible_count - 1u].value == menu_value_t::background_repeat) {
         visible_items[visible_count - 1u].label = "Beat Repeat";
@@ -8142,15 +8540,18 @@ static const char* menu_page_title(menu_page_t page)
   case menu_page_t::synthesizer: return "Synthesizer";
   case menu_page_t::synth_melody: return "Melody";
   case menu_page_t::synth_melody_sound: return "Melody Sound Source";
-  case menu_page_t::synth_melody_midi: return "Melody General MIDI";
+  case menu_page_t::synth_melody_midi: return melody_tone_page_title;
+  case menu_page_t::synth_melody_sample: return "Melody Sample";
   case menu_page_t::synth_melody_pad: return "Melody Pad";
   case menu_page_t::synth_bass: return "Bass";
   case menu_page_t::synth_bass_sound: return "Bass Sound Source";
-  case menu_page_t::synth_bass_midi: return "Bass General MIDI";
+  case menu_page_t::synth_bass_midi: return bass_tone_page_title;
+  case menu_page_t::synth_bass_sample: return "Bass Sample";
   case menu_page_t::synth_bass_pad: return "Bass Pad";
   case menu_page_t::synth_chord: return "Chord";
   case menu_page_t::synth_chord_sound: return "Chord Sound Source";
-  case menu_page_t::synth_chord_midi: return "Chord General MIDI";
+  case menu_page_t::synth_chord_midi: return chord_tone_page_title;
+  case menu_page_t::synth_chord_sample: return "Chord Sample";
   case menu_page_t::synth_chord_pad: return "Chord Pad";
   case menu_page_t::synth_drum: return "Beat";
   case menu_page_t::input_assign: return "Input Assign";
@@ -8179,13 +8580,16 @@ static menu_page_t menu_parent_page(menu_page_t page)
   case menu_page_t::music_track: return menu_page_t::music;
   case menu_page_t::synth_melody_sound: return menu_page_t::synth_melody;
   case menu_page_t::synth_melody_midi:
-  case menu_page_t::synth_melody_pad: return menu_page_t::synth_melody_sound;
+  case menu_page_t::synth_melody_sample: return menu_page_t::synth_melody_sound;
+  case menu_page_t::synth_melody_pad: return menu_page_t::synth_melody_sample;
   case menu_page_t::synth_bass_sound: return menu_page_t::synth_bass;
   case menu_page_t::synth_bass_midi:
-  case menu_page_t::synth_bass_pad: return menu_page_t::synth_bass_sound;
+  case menu_page_t::synth_bass_sample: return menu_page_t::synth_bass_sound;
+  case menu_page_t::synth_bass_pad: return menu_page_t::synth_bass_sample;
   case menu_page_t::synth_chord_sound: return menu_page_t::synth_chord;
   case menu_page_t::synth_chord_midi:
-  case menu_page_t::synth_chord_pad: return menu_page_t::synth_chord_sound;
+  case menu_page_t::synth_chord_sample: return menu_page_t::synth_chord_sound;
+  case menu_page_t::synth_chord_pad: return menu_page_t::synth_chord_sample;
   case menu_page_t::synth_melody:
   case menu_page_t::synth_bass:
   case menu_page_t::synth_chord:
@@ -8248,12 +8652,15 @@ static uint8_t menu_page_depth(menu_page_t page)
   case menu_page_t::synth_melody_sound:
   case menu_page_t::synth_bass_sound:
   case menu_page_t::synth_chord_sound: return 3;
+  case menu_page_t::synth_melody_sample:
+  case menu_page_t::synth_bass_sample:
+  case menu_page_t::synth_chord_sample: return 4;
   case menu_page_t::synth_melody_midi:
   case menu_page_t::synth_melody_pad:
   case menu_page_t::synth_bass_midi:
   case menu_page_t::synth_bass_pad:
   case menu_page_t::synth_chord_midi:
-  case menu_page_t::synth_chord_pad: return 4;
+  case menu_page_t::synth_chord_pad: return 5;
   default: return 1;
   }
 }
@@ -8270,6 +8677,8 @@ static uint8_t menu_dynamic_depth(void)
     return 2;
   case kit_edit_state_t::select_wav:
     return 3;
+  case kit_edit_state_t::select_synth_file:
+    return menu_page_depth(menu_page) + 1;
   case kit_edit_state_t::assign_wait_pad:
     return 4;
   case kit_edit_state_t::clear_wait_pad:
@@ -8299,6 +8708,56 @@ static void apply_external_midi_ch1_tone(void)
   auto reg = kp::system_registry;
   reg->midi_out_control.setChannelVolume(kp::def::midi::channel_1, 127);
   reg->midi_out_control.setProgramChange(kp::def::midi::channel_1, external_midi_ch1_program);
+}
+
+static bool create_wave_canvas(bool prefer_psram)
+{
+  wave_canvas.deleteSprite();
+  wave_canvas.setColorDepth(16);
+  wave_canvas.setPsram(prefer_psram);
+  wave_canvas.createSprite(M5.Display.width(), wave_h);
+  if (wave_canvas.getBuffer() != nullptr) {
+    wave_canvas_uses_psram = prefer_psram;
+    return true;
+  }
+
+  // The information surface is essential UI. If the preferred heap is too
+  // fragmented, retry in the other heap instead of leaving its width at zero
+  // and silently presenting a blank upper half of the performance screen.
+  wave_canvas.deleteSprite();
+  wave_canvas.setPsram(!prefer_psram);
+  wave_canvas.setColorDepth(16);
+  wave_canvas.createSprite(M5.Display.width(), wave_h);
+  if (wave_canvas.getBuffer() != nullptr) {
+    wave_canvas_uses_psram = !prefer_psram;
+    return true;
+  }
+
+  wave_canvas_uses_psram = false;
+  return false;
+}
+
+static bool prepare_ble_runtime_memory(void)
+{
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+  if (wave_canvas_uses_psram) { return true; }
+
+  // Bluedroid and AMY both require sizeable contiguous internal allocations.
+  // The retained waveform is expendable and can live in PSRAM while BLE is
+  // active, returning roughly 70 KB before BLEDevice::init() starts.
+  wait_wave_transfer_job();
+  wave_transfer_active = false;
+  wave_transfer_full_frame = false;
+  wave_transfer_page_switch = false;
+  if (!create_wave_canvas(true) || !wave_canvas_uses_psram) {
+    // Preserve a usable display and decline BLE instead of entering an
+    // allocation-failure reboot loop on a severely fragmented PSRAM pool.
+    return false;
+  }
+  reset_live_wave();
+  invalidate_loop_timeline_cache();
+#endif
+  return true;
 }
 
 static void apply_external_input_mode(void)
@@ -8353,7 +8812,13 @@ static void apply_external_input_mode(void)
     // BLE利用中もUSB-Cは常にPC接続用のデバイスとして待機させる。
     // 直前のUSBホスト設定が残ると、MacからUSB-Serial/JTAGが見えなくなる。
     reg->midi_port_setting.setUSBMode(usb_device);
-    task_midi.setBLEMidiPreferredDevice(ble_preferred_address, ble_preferred_name);
+    if (!prepare_ble_runtime_memory()) {
+      external_input_mode = external_input_mode_t::off;
+      break;
+    }
+    if (!ble_preferred_connect_deferred && !ble_auto_reconnect_blocked) {
+      task_midi.setBLEMidiPreferredDevice(ble_preferred_address, ble_preferred_name);
+    }
     reg->midi_port_setting.setBLEMIDI(midi_input);
     break;
   case external_input_mode_t::off:
@@ -8446,6 +8911,18 @@ static bool external_input_usb_mode(external_input_mode_t mode,
 
 static bool external_input_mode_needs_restart(external_input_mode_t next)
 {
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+  // BLE must claim its controller/host memory during the early boot layout,
+  // before AMY and the retained UI surfaces occupy the remaining arenas.
+  // Off does not start the USB MIDI task, so relying only on isUSBStarted()
+  // incorrectly attempted an in-place BLE init and crashed before the APPLY
+  // screen. Leaving BLE for a USB role likewise needs a clean USB rebuild.
+  if (next != external_input_mode) {
+    if (next == external_input_mode_t::ble_midi) { return true; }
+    if (external_input_mode == external_input_mode_t::ble_midi
+     && next != external_input_mode_t::off) { return true; }
+  }
+#endif
   kp::def::command::usb_mode_t next_usb_mode;
   if (!task_midi.isUSBStarted()) { return false; }
 
@@ -8495,10 +8972,123 @@ static bool consume_external_input_restart(void)
 #endif
 }
 
+struct external_input_config_disk_t {
+  uint32_t magic = 0;
+  uint8_t version = 0;
+  uint8_t mode = 0;
+  char ble_address[18] = {};
+  char ble_name[24] = {};
+  uint32_t checksum = 0;
+};
+
+static constexpr uint32_t external_input_config_magic = 0x4B504943u;
+static constexpr uint8_t external_input_config_version = 1;
+
+static uint32_t external_input_config_checksum(const external_input_config_disk_t& config)
+{
+  const auto* bytes = reinterpret_cast<const uint8_t*>(&config);
+  const size_t length = sizeof(config) - sizeof(config.checksum);
+  uint32_t hash = 2166136261u;
+  for (size_t i = 0; i < length; ++i) {
+    hash = (hash ^ bytes[i]) * 16777619u;
+  }
+  return hash;
+}
+
+static bool save_external_input_config(void)
+{
+  if (!kp::storage_littlefs.beginStorage()) { return false; }
+  external_input_config_disk_t config{};
+  config.magic = external_input_config_magic;
+  config.version = external_input_config_version;
+  config.mode = (uint8_t)external_input_mode;
+  snprintf(config.ble_address, sizeof(config.ble_address), "%s", ble_preferred_address);
+  snprintf(config.ble_name, sizeof(config.ble_name), "%s", ble_preferred_name);
+  config.checksum = external_input_config_checksum(config);
+  return kp::storage_littlefs.saveFromMemoryToFile(
+    sampler_input_config_path, reinterpret_cast<const uint8_t*>(&config),
+    sizeof(config)) >= 0;
+}
+
+static bool load_external_input_config(void)
+{
+  if (!kp::storage_littlefs.beginStorage()
+   || kp::storage_littlefs.getFileSize(sampler_input_config_path)
+        != (int)sizeof(external_input_config_disk_t)) {
+    return false;
+  }
+  external_input_config_disk_t config{};
+  const int loaded = kp::storage_littlefs.loadFromFileToMemory(
+    sampler_input_config_path, reinterpret_cast<uint8_t*>(&config), sizeof(config));
+  if (loaded != (int)sizeof(config)
+   || config.magic != external_input_config_magic
+   || config.version != external_input_config_version
+   || config.mode >= (uint8_t)external_input_mode_t::max
+   || config.checksum != external_input_config_checksum(config)) {
+    return false;
+  }
+  external_input_mode = (external_input_mode_t)config.mode;
+  snprintf(ble_preferred_address, sizeof(ble_preferred_address), "%s", config.ble_address);
+  snprintf(ble_preferred_name, sizeof(ble_preferred_name), "%s", config.ble_name);
+  return true;
+}
+
+static bool load_resume_ble_boot_config(bool preserve_input_mode)
+{
+  // BLE controller memory must be reserved before AMY and the retained UI
+  // surfaces fragment internal RAM. Read only the routing fields needed for
+  // that early decision; the normal resume loader restores everything later.
+  if (!kp::storage_littlefs.beginStorage()) { return false; }
+  const int size = kp::storage_littlefs.getFileSize(sampler_resume_path);
+  if (size <= 0 || size > 128 * 1024) { return false; }
+
+  uint8_t* data = temp_alloc((size_t)size + 1);
+  if (!data) { return false; }
+  const int len = kp::storage_littlefs.loadFromFileToMemory(
+    sampler_resume_path, data, (size_t)size);
+  if (len <= 0) {
+    free(data);
+    return false;
+  }
+  data[len] = 0;
+
+  JsonDocument filter;
+  filter["inputSource"] = true;
+  filter["bleMidiAddress"] = true;
+  filter["bleMidiName"] = true;
+  filter["usbKeyboard"] = true;
+  JsonDocument doc;
+  const DeserializationError err = deserializeJson(
+    doc, data, len, DeserializationOption::Filter(filter));
+  free(data);
+  if (err) { return false; }
+
+  snprintf(ble_preferred_address, sizeof(ble_preferred_address), "%s",
+           doc["bleMidiAddress"] | "");
+  snprintf(ble_preferred_name, sizeof(ble_preferred_name), "%s",
+           doc["bleMidiName"] | "");
+  if (!preserve_input_mode) {
+    uint8_t source = doc["inputSource"] | (uint8_t)external_input_mode_t::off;
+    if (doc["inputSource"].isNull() && (doc["usbKeyboard"] | false)) {
+      source = (uint8_t)external_input_mode_t::usb_keyboard;
+    }
+    if (source >= (uint8_t)external_input_mode_t::max) {
+      source = (uint8_t)external_input_mode_t::off;
+    }
+    external_input_mode = (external_input_mode_t)source;
+  }
+  return true;
+}
+
 static void restart_for_external_input_mode(void)
 {
   // 実行済みUSBスタックのHost/Device切替だけは再構築が必要。
-  save_resume_kit();
+#if !defined(M5UNIFIED_PC_BUILD)
+  // Set the hand-off marker before any filesystem operation. Even an
+  // unexpected write failure must not turn an intentional mode change into
+  // an ordinary boot that restores the previous source.
+  mark_external_input_restart(external_input_mode);
+#endif
   auto& d = M5.Display;
   d.startWrite();
   d.fillScreen(0x08080Cu);
@@ -8512,6 +9102,11 @@ static void restart_for_external_input_mode(void)
   d.setTextColor(0xA0D0FFu, 0x08080Cu);
   d.drawString("Restarting...", d.width() / 2, d.height() / 2 + 22);
   d.endWrite();
+  // Input routing is device configuration, not musical Project data. Saving
+  // the entire Resume here allocated a large JSON tree while BLE/AMY were
+  // resident and could abort before APPLYING INPUT appeared. This fixed-size
+  // record keeps switching and BLE device selection allocation-free.
+  save_external_input_config();
 #if defined(M5UNIFIED_PC_BUILD)
   apply_external_input_mode();
 #else
@@ -8521,7 +9116,6 @@ static void restart_for_external_input_mode(void)
   M5.Power.setUsbOutput(false);
   // この再起動だけは選択した入力先を次回起動へ引き継ぐ。マーカーは起動時に
   // 即座に消費されるため、その後の電源再投入やリセットではHostを自動解除できる。
-  mark_external_input_restart(external_input_mode);
   // VBUSの放電とUSB-C CC状態の更新を待ってから再起動する。これが短いと
   // 最初の再起動だけMacがUSB-Serial/JTAGとして再列挙しないことがある。
   M5.delay(750);
@@ -8539,14 +9133,27 @@ static void set_external_input_mode(external_input_mode_t next)
   }
   apply_external_input_mode();
   // 再起動しない切替も、次回起動時に同じ入力ソースを復元する。
-  save_resume_kit();
+  save_external_input_config();
 }
 
-static void apply_wifi_radio_request(wifi_radio_request_t request)
+static bool apply_wifi_radio_request(wifi_radio_request_t request)
 {
   using namespace kp::def::command;
   auto reg = kp::system_registry;
-  if (reg == nullptr) { return; }
+  if (reg == nullptr) { return false; }
+  // start() is idempotent. This retries a boot-time task allocation after BLE
+  // has returned its controller memory, before registry notifications are sent.
+  if (!task_wifi.start()) {
+    // BLE teardown can release its final task stack just after the runtime
+    // state changes to Off. Keep the original foreground request alive and
+    // retry instead of forcing the user to leave and reopen File Editor.
+    wifi_radio_request = request;
+    wifi_radio_request_deadline_msec = M5.millis() + 25000;
+    wifi_radio_request_not_before_msec = M5.millis() + 500;
+    wifi_radio_waiting_for_shutdown = false;
+    M5.Log.println("[wifi] worker allocation deferred; retrying");
+    return false;
+  }
   switch (request) {
   case wifi_radio_request_t::setup_ap:
     reg->wifi_control.setWebServerMode(webserver_mode_t::ws_disable);
@@ -8577,6 +9184,7 @@ static void apply_wifi_radio_request(wifi_radio_request_t request)
   default:
     break;
   }
+  return true;
 }
 
 static void update_ui_memory_metrics(void)
@@ -8625,9 +9233,63 @@ static void create_ui_dirty_canvases(void)
   ui_dirty_renderer_ready = ready;
 }
 
+static void begin_ble_connect_resource_guard(void)
+{
+  if (ble_connect_resource_guard_active) { return; }
+  ble_connect_resource_guard_active = true;
+  // Pairing controllers can establish and drop the radio link several times
+  // before notifications are usable. Keep the reclaimed internal-RAM arena
+  // for the whole bounded UI connection transaction.
+  ble_connect_resource_guard_deadline_msec = M5.millis() + 35000;
+  ble_connect_resource_guard_connected_msec = 0;
+  ble_connect_resource_guard_packet_base = task_midi.getBLEMidiPacketCount();
+  sampler_amy_engine::setRadioConnectionPaused(true);
+  ble_connect_amy_paused = true;
+  release_ui_dirty_canvases();
+  // Each retained Pad-synth cache can own up to 24 KB of internal RAM. They
+  // are accelerators rather than source data, so release only idle entries
+  // while Bluedroid performs its allocation-heavy encrypted GATT discovery.
+  sampler_audio_t::releaseUnusedSynthSustainCacheMemory();
+  printf("BLE_GUARD free=%u largest=%u\n",
+         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+  // Let the render task observe the pause before Bluedroid opens the link.
+  M5.delay(6);
+}
+
+static void end_ble_connect_resource_guard(void)
+{
+  if (!ble_connect_resource_guard_active) { return; }
+  ble_connect_resource_guard_active = false;
+  ble_connect_resource_guard_deadline_msec = 0;
+  ble_connect_resource_guard_connected_msec = 0;
+  ble_connect_resource_guard_packet_base = 0;
+  if (!performance_ui_arena_suspended && !ui_dirty_renderer_ready) {
+    create_ui_dirty_canvases();
+  }
+  if (ble_connect_amy_paused) {
+    sampler_amy_engine::setRadioConnectionPaused(false);
+    ble_connect_amy_paused = false;
+  }
+  // Recreate only the three currently selected synth working sets. Sample
+  // sustain caches remain lazy and are rebuilt when their Pad is next used.
+  apply_synth_tones(false);
+}
+
 static void suspend_performance_ui_arena(void)
 {
   performance_ui_arena_resume_pending = false;
+  if (!sampler_amy_engine::radioConnectionPaused()) {
+    sampler_amy_engine::setRadioConnectionPaused(true);
+    wifi_amy_paused = true;
+  }
+  // This block exists only to guarantee contiguous DMA memory for a later
+  // recording. Wi-Fi owns the foreground now, so lend it to the radio and
+  // rebuild the reservation after Wi-Fi has fully stopped.
+  if (recording_internal_dma_reserve != nullptr) {
+    free(recording_internal_dma_reserve);
+    recording_internal_dma_reserve = nullptr;
+  }
   if (performance_ui_arena_suspended) { return; }
   performance_ui_arena_suspended = true;
 
@@ -8663,10 +9325,16 @@ static void suspend_performance_ui_arena(void)
   if (recording_pad < 0 && recording_buffer != nullptr) {
     free(recording_buffer);
     recording_buffer = nullptr;
+    recording_buffer_capacity_frames = 0;
     recording_frames = 0;
   }
   clear_menu_preview();
   update_ui_memory_metrics();
+#if !defined(M5UNIFIED_PC_BUILD)
+  printf("WIFI_GUARD free=%u largest=%u\n",
+         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+#endif
 }
 
 static void request_performance_ui_arena_resume(void)
@@ -8684,8 +9352,17 @@ static void service_performance_ui_arena(uint32_t now)
    || (int32_t)(now - performance_ui_arena_resume_msec) < 0) { return; }
   performance_ui_arena_resume_pending = false;
 
-  wave_canvas.setColorDepth(16);
-  wave_canvas.createSprite(M5.Display.width(), wave_h);
+  // Re-establish the microphone guarantee before optional retained display
+  // buffers can fragment internal RAM again.
+  retain_internal_mic_dma_reserve();
+
+  // A connected Bluedroid client and AMY leave much less contiguous internal
+  // RAM than the normal sampler boot.  Do not create this ~70 KB surface in
+  // internal RAM only to migrate it later in apply_external_input_mode().
+  // Its pixels are not DMA data, so PSRAM is the correct home for BLE boots.
+  const bool ble_wave_canvas =
+    external_input_mode == external_input_mode_t::ble_midi;
+  create_wave_canvas(ble_wave_canvas);
   menu_canvas.setPsram(true);
   menu_canvas.setColorDepth(16);
   menu_canvas.createSprite(M5.Display.width(), menu_area_h);
@@ -8715,6 +9392,10 @@ static void service_performance_ui_arena(uint32_t now)
     if (grid_cache_ready[i]) { reset_grid_cache(i); }
   }
   performance_ui_arena_suspended = false;
+  if (wifi_amy_paused) {
+    sampler_amy_engine::setRadioConnectionPaused(false);
+    wifi_amy_paused = false;
+  }
   update_ui_memory_metrics();
   // Recompose only after every normal sprite has a valid backing buffer.
   // This prevents a stale Wi-Fi screen from surviving the cache hand-off.
@@ -8762,21 +9443,50 @@ static void begin_wifi_radio_request(wifi_radio_request_t request)
   if (reg == nullptr) { return; }
   suspend_performance_ui_arena();
   draw_wifi_compact_status(request);
-  // 新しいWi-Fi要求が来た場合は、前セッションのBLE復帰予約を取り消す。
+  // A new Wi-Fi request supersedes any pending end-of-session UI restore.
   wifi_ble_resume_pending = false;
-  // BLE MIDIはWi-Fiとの同時利用を目的にしない。AP/STAを始める前に停止して
-  // Bluetoothコントローラを解放し、設定済みのBLE入力はセッション後に復帰する。
-  if (external_input_mode == external_input_mode_t::ble_midi && !wifi_ble_suspended) {
-    wifi_ble_suspended = true;
+  const bool ble_requested =
+       reg->midi_port_setting.getBLEMIDI() != midi_off
+    || reg->midi_port_setting.getInstaChordLinkPort()
+         == instachord_link_port_t::iclp_ble
+    || reg->runtime_info.getMidiPortStateBLE() != midiport_info_t::mp_off;
+  const bool stop_ble = ble_requested && !wifi_ble_suspended;
+  const bool stop_wifi =
+       reg->wifi_control.getOperation() != wifi_operation_t::wfop_disable
+    || reg->wifi_control.getWifiMode() != wifi_mode_t::wifi_disable
+    || reg->runtime_info.getWiFiSTAInfo() != wifi_sta_info_t::wsi_off
+    || reg->runtime_info.getWiFiAPInfo() != wifi_ap_info_t::wai_off;
+  if (stop_ble || stop_wifi) {
     wifi_radio_request = request;
-    wifi_radio_request_deadline_msec = M5.millis() + 3000;
+    // A controller may already be inside a bounded GATT connect transaction.
+    // Give that operation time to observe cancellation and unwind cleanly.
+    wifi_radio_request_deadline_msec = M5.millis() + 25000;
     wifi_radio_request_not_before_msec = 0;
-    reg->midi_port_setting.setBLEMIDI(midi_off);
+    wifi_radio_waiting_for_shutdown = stop_wifi;
+    // Never reconfigure an active/tearing-down Wi-Fi driver in place. This is
+    // especially important when manual Setup interrupts startup update check.
+    if (stop_wifi) {
+      reg->wifi_control.setOperation(wifi_operation_t::wfop_disable);
+      reg->wifi_control.setWifiMode(wifi_mode_t::wifi_disable);
+    }
+    // BLE MIDIはWi-Fiとの同時利用を目的にしない。AP/STAを始める前に停止して
+    // Bluetoothコントローラを解放する。Wi-Fi終了後の再初期化は行わず、
+    // 保存済みのInput Sourceは次回の通常起動で復元する。
+    if (stop_ble) {
+      wifi_ble_suspended = true;
+      task_midi.cancelBLEMidiScan();
+      // InstaChord Link can independently force BLE back on even after the
+      // ordinary BLE MIDI setting is disabled. Suspend both owners.
+      reg->midi_port_setting.setInstaChordLinkPort(
+        kp::def::command::instachord_link_port_t::iclp_off);
+      reg->midi_port_setting.setBLEMIDI(midi_off);
+    }
     return;
   }
   wifi_radio_request = wifi_radio_request_t::none;
   wifi_radio_request_deadline_msec = 0;
   wifi_radio_request_not_before_msec = 0;
+  wifi_radio_waiting_for_shutdown = false;
   apply_wifi_radio_request(request);
 }
 
@@ -8786,7 +9496,16 @@ static void service_wifi_radio_start(void)
   const uint32_t now = M5.millis();
   const bool ble_stopped = kp::system_registry->runtime_info.getMidiPortStateBLE()
                         == kp::def::command::midiport_info_t::mp_off;
-  if (!ble_stopped) {
+  const bool wifi_stopped = !wifi_radio_waiting_for_shutdown
+    || (kp::system_registry->wifi_control.getOperation()
+          == kp::def::command::wifi_operation_t::wfop_disable
+     && kp::system_registry->wifi_control.getWifiMode()
+          == kp::def::command::wifi_mode_t::wifi_disable
+     && kp::system_registry->runtime_info.getWiFiSTAInfo()
+          == kp::def::command::wifi_sta_info_t::wsi_off
+     && kp::system_registry->runtime_info.getWiFiAPInfo()
+          == kp::def::command::wifi_ap_info_t::wai_off);
+  if (!ble_stopped || !wifi_stopped) {
     if ((int32_t)(now - wifi_radio_request_deadline_msec) < 0) { return; }
     // Bluetoothを解放できない状態でWi-Fiを重ねると内部RAM不足になり得る。
     // 要求を安全に失敗させ、Wi-Fiドライバは起動しない。
@@ -8794,18 +9513,29 @@ static void service_wifi_radio_start(void)
     wifi_radio_request = wifi_radio_request_t::none;
     wifi_radio_request_deadline_msec = 0;
     wifi_radio_request_not_before_msec = 0;
+    wifi_radio_waiting_for_shutdown = false;
     if (failed_request == wifi_radio_request_t::ota
      || failed_request == wifi_radio_request_t::update_check) {
       kp::system_registry->runtime_info.setWiFiOtaProgress(
         kp::def::command::wifi_ota_state_t::ota_wifi_connection_error);
     }
+    // Setup AP/WPS owns the full display. Clear that ownership before the
+    // retained performance surfaces are rebuilt, otherwise the device can
+    // remain indefinitely on STOPPING BLUETOOTH after a timeout.
+    wifi_setup_active = false;
+    wifi_setup_qr_active = false;
+    wifi_file_server_qr_active = false;
+    wifi_qr_preparing = false;
+    wifi_setup_waiting_for_connection = false;
+    wifi_setup_is_wps = false;
+    ui_surface_exclusive = false;
     disable_wifi_and_clear_indicator();
     return;
   }
-  // BLEDevice::deinit()直後はBluetoothタスクの後処理が残る。Wi-Fiの大きな
-  // 内部RAM確保と重ならないよう、停止通知後も短時間だけ安定を待つ。
+  // BLE/Wi-Fiの停止通知後も、ドライバとnetifがタイマー用の内部RAMを
+  // 解放するまで少し時間差がある。AP認証開始と重ならないよう安定を待つ。
   if (wifi_radio_request_not_before_msec == 0) {
-    wifi_radio_request_not_before_msec = now + 350;
+    wifi_radio_request_not_before_msec = now + 1000;
     return;
   }
   if ((int32_t)(now - wifi_radio_request_not_before_msec) < 0) { return; }
@@ -8813,6 +9543,24 @@ static void service_wifi_radio_start(void)
   wifi_radio_request = wifi_radio_request_t::none;
   wifi_radio_request_deadline_msec = 0;
   wifi_radio_request_not_before_msec = 0;
+  wifi_radio_waiting_for_shutdown = false;
+#if !defined(M5UNIFIED_PC_BUILD)
+  M5.Log.printf("WIFI_START_READY free=%u largest=%u\r\n",
+                (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+#endif
+  // The previous full-screen frame still says STOPPING BLUETOOTH. Refresh it
+  // after clearing the request so the user sees the server-starting phase.
+  if (wifi_qr_preparing
+   && (request == wifi_radio_request_t::setup_ap
+    || request == wifi_radio_request_t::setup_wps)) {
+    draw_wifi_qr_preparing();
+  }
+  if (request == wifi_radio_request_t::file_server) {
+    // BLE shutdown can itself take tens of seconds. Count the connection
+    // timeout from the moment Wi-Fi is actually allowed to start.
+    wifi_file_server_connect_deadline_msec = M5.millis() + 30000;
+  }
   apply_wifi_radio_request(request);
 }
 
@@ -8970,7 +9718,7 @@ static const char* menu_value_text(menu_value_t value, int index)
   case menu_value_t::melody_source:
   case menu_value_t::bass_source:
   case menu_value_t::chord_source:
-    return index ? "Pad" : "General MIDI";
+    return index ? "Pad" : internal_synth_source_label;
   case menu_value_t::melody_pitch_bend_range:
   case menu_value_t::bass_pitch_bend_range:
     return index ? "1 Octave" : "1 Semitone";
@@ -9049,7 +9797,8 @@ static bool start_file_editor_session(void)
   ui_surface_exclusive = true;
   wifi_qr_preparing = true;
   wifi_file_server_client_connected = false;
-  wifi_file_server_connect_deadline_msec = M5.millis() + 15000;
+  // The deadline starts in service_wifi_radio_start(), after BLE is off.
+  wifi_file_server_connect_deadline_msec = 0;
   wifi_setup_qr_web_page = true;
   wifi_setup_qr_dirty = true;
   return true;
@@ -9310,13 +10059,16 @@ static bool menu_file_preview_available(void)
         && sampler_pool_t::slot[beat_pad_source_list[menu_cursor]].isValid();
   }
   if ((kit_edit_state != kit_edit_state_t::select_wav
+    && kit_edit_state != kit_edit_state_t::select_synth_file
     && kit_edit_state != kit_edit_state_t::select_bgm_wav)
    || menu_cursor >= kit_wav_list.size()) {
     return false;
   }
   const std::string& source = kit_wav_list[menu_cursor].filename;
-  if (kit_edit_state == kit_edit_state_t::select_wav) {
-    return source.rfind("builtin:", 0) == 0 || is_audio_file_name(source);
+  if (kit_edit_state == kit_edit_state_t::select_wav
+   || kit_edit_state == kit_edit_state_t::select_synth_file) {
+    return source.rfind("builtin:", 0) == 0 || is_sampler_file_name(source)
+        || has_lower_suffix(source, ".ktsynth");
   }
   return source.rfind("pattern:", 0) == 0
       || has_lower_suffix(source, ".mid") || has_lower_suffix(source, ".midi")
@@ -9974,6 +10726,12 @@ static const char* menu_dynamic_title(void)
   case kit_edit_state_t::select_project_save: return "Save Project";
   case kit_edit_state_t::select_sample_category: return "Sample Category";
   case kit_edit_state_t::select_wav: return "Import Sample";
+  case kit_edit_state_t::select_synth_file:
+    snprintf(import_target_title, sizeof(import_target_title), "%s %s",
+      synth_menu_target == performance_page_t::chord ? "Chord"
+      : synth_menu_target == performance_page_t::bass ? "Bass" : "Melody",
+      synth_file_kind == synth_file_kind_t::kantan_synth ? "KANTAN Synth" : "Sample File");
+    return import_target_title;
   case kit_edit_state_t::assign_confirm_shortcut:
     snprintf(import_target_title, sizeof(import_target_title), "Import to P%u",
              kit_shortcut_target_pad >= 0
@@ -9985,14 +10743,14 @@ static const char* menu_dynamic_title(void)
   case kit_edit_state_t::confirm_beat_rec: return "New Beat Timing";
   case kit_edit_state_t::select_external_tone:
     if (!synth_sound_select_active) { return "MIDI Tone"; }
-    return synth_menu_target == performance_page_t::chord ? "Chord Tone"
-      : synth_menu_target == performance_page_t::bass ? "Bass Tone" : "Melody Tone";
+    return synth_menu_target == performance_page_t::chord ? "Chord General MIDI"
+      : synth_menu_target == performance_page_t::bass ? "Bass General MIDI" : "Melody General MIDI";
   case kit_edit_state_t::select_external_pad:
     if (!synth_sound_select_active) { return "MIDI Pad"; }
-    return synth_menu_target == performance_page_t::chord ? "Chord Pad"
-      : synth_menu_target == performance_page_t::bass ? "Bass Pad" : "Melody Pad";
+    return synth_menu_target == performance_page_t::chord ? "Chord Pad Sample"
+      : synth_menu_target == performance_page_t::bass ? "Bass Pad Sample" : "Melody Pad Sample";
   case kit_edit_state_t::select_external_pad_base_note:
-    return synth_sound_select_active ? "Pad Base Note" : "MIDI Pad Base Note";
+    return synth_sound_select_active ? "Base Note" : "MIDI Pad Base Note";
   case kit_edit_state_t::assign_wait_pad: return "Select Pad";
   case kit_edit_state_t::clear_wait_pad: return "Clear Pad";
   case kit_edit_state_t::pad_list: return "Pad List";
@@ -10036,13 +10794,19 @@ static size_t menu_dynamic_count(void)
   case kit_edit_state_t::select_project_file: return kit_wav_list.size();
   case kit_edit_state_t::select_kit_save:
   case kit_edit_state_t::select_project_save: return kit_save_candidate_count;
-  case kit_edit_state_t::select_sample_category: return sample_category_count + 1;
+  case kit_edit_state_t::select_sample_category: return sample_browser_category_count + 1;
   case kit_edit_state_t::select_wav: return kit_wav_list.size();
+  case kit_edit_state_t::select_synth_file: return kit_wav_list.size();
   case kit_edit_state_t::select_bgm_wav: return kit_wav_list.size();
   case kit_edit_state_t::select_bgm_pad: return beat_pad_source_list.size();
   case kit_edit_state_t::confirm_bgm_pad: return 2;
   case kit_edit_state_t::confirm_beat_rec: return 3;
-  case kit_edit_state_t::select_external_tone: return 128;
+  case kit_edit_state_t::select_external_tone:
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+    return synth_sound_select_active ? sampler_amy_engine::tone_count : 128;
+#else
+    return 128;
+#endif
   case kit_edit_state_t::select_external_pad: return def::pad::pad_count;
   case kit_edit_state_t::select_external_pad_base_note: return 128;
   case kit_edit_state_t::pad_list: return def::pad::pad_count;
@@ -10058,6 +10822,7 @@ static bool menu_dynamic_list_active(void)
       || kit_edit_state == kit_edit_state_t::select_music_file
       || kit_edit_state == kit_edit_state_t::select_sample_category
       || kit_edit_state == kit_edit_state_t::select_wav
+      || kit_edit_state == kit_edit_state_t::select_synth_file
       || kit_edit_state == kit_edit_state_t::select_kit_file
       || kit_edit_state == kit_edit_state_t::select_kit_save
       || kit_edit_state == kit_edit_state_t::select_project_file
@@ -10117,15 +10882,16 @@ static void menu_dynamic_label(size_t index, char* out, size_t out_len)
     return;
   }
   if (kit_edit_state == kit_edit_state_t::select_sample_category) {
-    if (index < sample_category_count) {
-      snprintf(out, out_len, "%s", sample_category_names[index]);
-    } else if (index == sample_category_count) {
+    if (index < sample_browser_category_count) {
+      snprintf(out, out_len, "%s", sample_category_name(sample_browser_categories[index]));
+    } else if (index == sample_browser_category_count) {
       snprintf(out, out_len, "SD Card");
     }
     return;
   }
   if (kit_edit_state == kit_edit_state_t::select_music_file
    || kit_edit_state == kit_edit_state_t::select_wav
+   || kit_edit_state == kit_edit_state_t::select_synth_file
    || kit_edit_state == kit_edit_state_t::select_bgm_wav
    || kit_edit_state == kit_edit_state_t::select_kit_file
    || kit_edit_state == kit_edit_state_t::select_project_file) {
@@ -10170,7 +10936,14 @@ static void menu_dynamic_label(size_t index, char* out, size_t out_len)
     return;
   }
   if (kit_edit_state == kit_edit_state_t::select_external_tone && index < 128) {
-    snprintf(out, out_len, "%s", kp::def::midi::program_name_table.at(index)->get());
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+    if (synth_sound_select_active) {
+      snprintf(out, out_len, "%s", pitched_tone_name(synth_menu_target, (uint8_t)index));
+    } else
+#endif
+    {
+      snprintf(out, out_len, "%s", kp::def::midi::program_name_table.at(index)->get());
+    }
     return;
   }
   if (kit_edit_state == kit_edit_state_t::select_external_pad && index < def::pad::pad_count) {
@@ -10216,40 +10989,15 @@ static void draw_menu_wait_pad(M5Canvas& d, const char* title, const char* line1
 static void prepare_wifi_setup_qr(bool web_page)
 {
   if (!wifi_setup_qr_dirty && wifi_setup_qr_web_page == web_page) { return; }
-
   wifi_setup_qr_web_page = web_page;
   wifi_setup_qr_dirty = false;
-  if (!wifi_qr_canvas_ready) {
-    wifi_qr_canvas.setPsram(true);
-    wifi_qr_canvas.setColorDepth(1);
-    wifi_qr_canvas_ready = wifi_qr_canvas.createSprite(39, 39) != nullptr;
-  }
-  if (!wifi_qr_canvas_ready) {
-    // A later redraw can retry after other transient allocations are released.
-    wifi_setup_qr_dirty = true;
-    return;
-  }
-  wifi_qr_canvas.fillScreen(TFT_WHITE);
-
-  char payload[96];
-  if (web_page) {
-    // Setup AP and File Editor both publish the same mDNS service. A stable
-    // human-readable address is easier to type and keeps both QR flows
-    // consistent even though their underlying network interfaces differ.
-    snprintf(payload, sizeof(payload), "http://%s.local/", kp::def::app::wifi_mdns);
-  } else {
-    snprintf(payload, sizeof(payload), "WIFI:S:%s;T:%s;P:%s;;",
-             kp::def::app::wifi_ap_ssid, kp::def::app::wifi_ap_type, kp::def::app::wifi_ap_pass);
-  }
-  wifi_qr_canvas.qrcode(payload);
 }
 
 static void reset_wifi_qr_canvas(void)
 {
-  // Keep this tiny PSRAM sprite alive across File Editor / Wi-Fi setup
-  // sessions.  Repeated deleteSprite/createSprite around button input was
-  // prone to M5GFX allocator races while the display was being restored.
-  if (wifi_qr_canvas_ready) { wifi_qr_canvas.fillScreen(TFT_WHITE); }
+  // QR is rendered directly to the LCD. Keeping a scaled 1-bit sprite across
+  // the Wi-Fi/PSRAM hand-off left its palette vulnerable to invalidation.
+  wifi_setup_qr_dirty = true;
 }
 
 static void draw_wifi_setup_qr(void)
@@ -10261,20 +11009,6 @@ static void draw_wifi_setup_qr(void)
   const bool web_page = file_server || wifi_setup_qr_web_page
                      || kp::system_registry->runtime_info.getWiFiStationCount() != 0;
   prepare_wifi_setup_qr(web_page);
-
-  if (!wifi_qr_canvas_ready) {
-    auto& d = M5.Display;
-    d.startWrite();
-    d.fillScreen(0x08080Cu);
-    d.drawRect(0, 0, d.width(), d.height(), 0xD0A040u);
-    d.setFont(&fonts::efontJA_16_b);
-    d.setTextSize(1);
-    d.setTextDatum(m5gfx::textdatum_t::middle_center);
-    d.setTextColor(0xFFFFFFu, 0x08080Cu);
-    d.drawString("QR PREPARING", d.width() / 2, d.height() / 2);
-    d.endWrite();
-    return;
-  }
 
   // かんぷれのui_popup_qr_tと同じ39x39・5倍表示。メニュー領域に
   // 押し込まず、画面中央の大きなウィンドウにすることでスマホで読めるサイズにする。
@@ -10291,7 +11025,17 @@ static void draw_wifi_setup_qr(void)
   d.startWrite();
   d.fillScreen(0x08080Cu);
   d.fillRect(x, y, window_w, window_h, frame_color);
-  wifi_qr_canvas.pushRotateZoom(&d, x + window_w / 2, y + qr_width / 2, 0.0f, 5.0f, 5.0f);
+  char payload[96];
+  if (web_page) {
+    snprintf(payload, sizeof(payload), "http://%s.local/", kp::def::app::wifi_mdns);
+  } else {
+    snprintf(payload, sizeof(payload), "WIFI:S:%s;T:%s;P:%s;;",
+             kp::def::app::wifi_ap_ssid, kp::def::app::wifi_ap_type,
+             kp::def::app::wifi_ap_pass);
+  }
+  // Render directly to the display. This avoids retaining a 1-bit sprite and
+  // its palette while Wi-Fi and the normal UI exchange PSRAM ownership.
+  d.qrcode(payload, x + 5, y + 5, qr_width);
   d.drawRect(x + 1, y + 1, window_w - 2, window_h - 2, TFT_DARKGRAY);
   d.setFont(&fonts::efontJA_16_b);
   d.setTextSize(1, 2);
@@ -10367,19 +11111,21 @@ static void disable_wifi_and_clear_indicator(void)
   if (reg == nullptr) { return; }
   reg->wifi_control.setOperation(kp::def::command::wifi_operation_t::wfop_disable);
   reg->wifi_control.setWifiMode(kp::def::command::wifi_mode_t::wifi_disable);
-  // task_wifiの状態反映は最大1秒後になるため、QRを閉じた直後のヘッダーだけ
-  // 接続中のまま残らないよう、UI側でも停止状態を確定する。
-  reg->runtime_info.setWiFiSTAInfo(kp::def::command::wifi_sta_info_t::wsi_off);
-  reg->runtime_info.setWiFiAPInfo(kp::def::command::wifi_ap_info_t::wai_off);
+  // runtime_info is owned by task_wifi. Do not forge an early "off" state:
+  // a following Wi-Fi request must wait until the previous server/radio has
+  // genuinely stopped, otherwise Starting Server races stale teardown.
   wifi_radio_request = wifi_radio_request_t::none;
   wifi_radio_request_deadline_msec = 0;
   wifi_radio_request_not_before_msec = 0;
-  request_performance_ui_arena_resume();
+  wifi_radio_waiting_for_shutdown = false;
   if (wifi_ble_suspended) {
-    // Wi-Fiタスクがドライバとnetifを解放してからBLEを戻す。ここで即時再開すると
-    // 両方の内部RAM確保が重なり、再起動直後の機体でクラッシュすることがある。
+    // Wait for the Wi-Fi driver and netif to release their memory before the
+    // retained performance UI is rebuilt. BLE deliberately stays off for the
+    // rest of this boot; its saved Input Source is restored on the next boot.
     wifi_ble_resume_pending = true;
     wifi_ble_resume_not_before_msec = M5.millis() + 500;
+  } else {
+    request_performance_ui_arena_resume();
   }
 }
 
@@ -10387,11 +11133,6 @@ static void service_wifi_ble_resume(uint32_t now)
 {
   if (!wifi_ble_resume_pending || kp::system_registry == nullptr) { return; }
   auto reg = kp::system_registry;
-  if (external_input_mode != external_input_mode_t::ble_midi) {
-    wifi_ble_resume_pending = false;
-    wifi_ble_suspended = false;
-    return;
-  }
   if ((int32_t)(now - wifi_ble_resume_not_before_msec) < 0) { return; }
   if (reg->wifi_control.getOperation() != kp::def::command::wifi_operation_t::wfop_disable
    || reg->wifi_control.getWifiMode() != kp::def::command::wifi_mode_t::wifi_disable
@@ -10400,8 +11141,8 @@ static void service_wifi_ble_resume(uint32_t now)
     return;
   }
   wifi_ble_resume_pending = false;
-  wifi_ble_suspended = false;
-  reg->midi_port_setting.setBLEMIDI(kp::def::command::midi_input);
+  M5.Log.println("[wifi] session ended; BLE remains off until next boot");
+  request_performance_ui_arena_resume();
 }
 
 static const char* wifi_update_text(uint8_t state, char* out, size_t out_len)
@@ -10560,8 +11301,9 @@ static void cancel_startup_update_check(void)
   // after the Wi-Fi task has released its PSRAM/network allocations.
 }
 
-static void stop_file_server_session(void)
+static void stop_file_server_session(const char* reason)
 {
+  M5.Log.printf("[wifi-ui] stop file server: %s\r\n", reason ? reason : "unknown");
   auto reg = kp::system_registry;
   reg->wifi_control.setWebServerMode(kp::def::command::webserver_mode_t::ws_disable);
   disable_wifi_and_clear_indicator();
@@ -10582,7 +11324,7 @@ static void stop_file_server_session(void)
 
 static void fail_file_server_connection(void)
 {
-  stop_file_server_session();
+  stop_file_server_session("timeout");
   menu_visible = true;
   menu_page = menu_page_t::wifi;
   menu_cursor = 2; // File Server
@@ -10744,6 +11486,15 @@ static void render_menu_item_row(M5Canvas& d, int index, int y, size_t count,
       d.drawString(kit_wav_list[index].filename == builtin_project_disco
                      ? "BUILT-IN" : "SD",
                    230, y + menu_row_h / 2);
+    } else if (kit_edit_state == kit_edit_state_t::select_synth_file
+            && index < (int)kit_wav_list.size()) {
+      d.setTextDatum(m5gfx::textdatum_t::middle_right);
+      set_row_color(0x80D0FFu);
+      d.drawString(kit_wav_list[index].filename.rfind("builtin:", 0) == 0
+                     ? "BUILT-IN"
+                     : has_lower_suffix(kit_wav_list[index].filename, ".ktsynth")
+                       ? "KTS" : "SD",
+                   230, y + menu_row_h / 2);
     } else if (kit_edit_state == kit_edit_state_t::select_wav
             || kit_edit_state == kit_edit_state_t::select_kit_file) {
       if (index < (int)kit_wav_list.size()
@@ -10753,6 +11504,34 @@ static void render_menu_item_row(M5Canvas& d, int index, int y, size_t count,
         d.drawString("SD", 230, y + menu_row_h / 2);
       }
     }
+  } else if ((menu_page == menu_page_t::synth_melody_sound
+           || menu_page == menu_page_t::synth_bass_sound
+           || menu_page == menu_page_t::synth_chord_sound)
+          && (items[index].action == menu_action_t::synth_tone_select
+           || items[index].action == menu_action_t::synth_ktsynth_select)) {
+    d.setTextDatum(m5gfx::textdatum_t::middle_right);
+    const auto source = items[index].action == menu_action_t::synth_ktsynth_select
+      ? synth_tone_source_t::kantan_synth : synth_tone_source_t::general_midi;
+    if (page_settings(synth_target_for_menu_page(menu_page)).source == source) {
+      set_row_color(0x60B8FFu);
+      d.drawString("※", 230, y + menu_row_h / 2);
+    } else {
+      d.drawString(">", 230, y + menu_row_h / 2);
+    }
+  } else if ((menu_page == menu_page_t::synth_melody_sample
+           || menu_page == menu_page_t::synth_bass_sample
+           || menu_page == menu_page_t::synth_chord_sample)
+          && (items[index].action == menu_action_t::synth_pad_select
+           || items[index].action == menu_action_t::synth_sample_file_select)) {
+    d.setTextDatum(m5gfx::textdatum_t::middle_right);
+    const auto source = items[index].action == menu_action_t::synth_pad_select
+      ? synth_tone_source_t::pad : synth_tone_source_t::file;
+    if (page_settings(synth_target_for_menu_page(menu_page)).source == source) {
+      set_row_color(0x60B8FFu);
+      d.drawString("※", 230, y + menu_row_h / 2);
+    } else {
+      d.drawString(">", 230, y + menu_row_h / 2);
+    }
   } else if (items[index].kind == menu_item_kind_t::submenu) {
     d.setTextDatum(m5gfx::textdatum_t::middle_right);
     performance_page_t target;
@@ -10761,7 +11540,17 @@ static void render_menu_item_row(M5Canvas& d, int index, int y, size_t count,
                              || menu_page == menu_page_t::synth_bass_sound
                              || menu_page == menu_page_t::synth_chord_sound)
                             && synth_source_branch_for_page(items[index].child, &target, &source);
-    if (source_branch && page_settings(target).source == source) {
+    const bool sample_branch = (menu_page == menu_page_t::synth_melody_sound
+                             || menu_page == menu_page_t::synth_bass_sound
+                             || menu_page == menu_page_t::synth_chord_sound)
+                            && (items[index].child == menu_page_t::synth_melody_sample
+                             || items[index].child == menu_page_t::synth_bass_sample
+                             || items[index].child == menu_page_t::synth_chord_sample)
+                            && (page_settings(synth_target_for_menu_page(menu_page)).source
+                                  == synth_tone_source_t::pad
+                             || page_settings(synth_target_for_menu_page(menu_page)).source
+                                  == synth_tone_source_t::file);
+    if ((source_branch && page_settings(target).source == source) || sample_branch) {
       set_row_color(0x60B8FFu);
       d.drawString("※", 230, y + menu_row_h / 2);
     } else {
@@ -11279,7 +12068,10 @@ static void menu_close(bool redraw = true)
   kit_shortcut_target_pad = -1;
   kit_shortcut_target_beat = false;
   menu_sound_navigate(3);
-  if (redraw) {
+  // Wi-Fi teardown rebuilds the retained canvases asynchronously. Drawing
+  // into them before that completes can leave the mode/header region stale or
+  // dereference a released sprite.
+  if (redraw && !performance_ui_arena_suspended) {
     draw_all();
     draw_header(true);
   }
@@ -11307,7 +12099,7 @@ static void cancel_learn(bool exit_menu)
 
 static void service_learn_target_timeout(uint32_t now)
 {
-  if (learn_state != learn_state_t::waiting_target || learn_target_deadline_msec == 0
+  if (learn_state == learn_state_t::idle || learn_target_deadline_msec == 0
    || (int32_t)(now - learn_target_deadline_msec) < 0) {
     return;
   }
@@ -11340,6 +12132,29 @@ static void begin_ble_device_scan(void)
 
 static void service_ble_device_ui(uint32_t now)
 {
+  if (ble_connect_resource_guard_active) {
+    bool connected = false;
+    task_midi.getBLEMidiConnectionDiagnostic(&connected, nullptr, nullptr);
+    if (connected && ble_connect_resource_guard_connected_msec == 0) {
+      ble_connect_resource_guard_connected_msec = now;
+    }
+    // The retained UI buffers stay released until MIDI proves the complete
+    // receive path, but AMY no longer needs to remain silent after GATT
+    // discovery and notification subscription have completed. Previously it
+    // resumed only on the first external MIDI packet (or after 35 seconds),
+    // making every local synth part appear broken immediately after boot.
+    if (connected && ble_connect_amy_paused) {
+      sampler_amy_engine::setRadioConnectionPaused(false);
+      ble_connect_amy_paused = false;
+      apply_synth_tones(true);
+    }
+    const bool received_midi = connected
+      && task_midi.getBLEMidiPacketCount() != ble_connect_resource_guard_packet_base;
+    if (received_midi
+     || (int32_t)(now - ble_connect_resource_guard_deadline_msec) >= 0) {
+      end_ble_connect_resource_guard();
+    }
+  }
   if (ble_device_ui_state == ble_device_ui_state_t::scanning) {
     const auto state = task_midi.getBLEMidiScanState();
     if (state == kp::task_midi_t::ble_scan_state_t::ready) {
@@ -11455,10 +12270,12 @@ static void menu_back(void)
     wifi_setup_is_wps = false;
     reset_wifi_qr_canvas();
     clear_status_message(false);
-    // QRモーダルはLCD全体へ直接描画している。かんぷれの無効領域再描画と
-    // 同様に、閉じる瞬間だけ通常UIを完全に復元して透明領域の残像を防ぐ。
-    draw_all();
-    draw_menu(true);
+    // The delayed arena-resume service restores the performance page and then
+    // this still-open menu after every backing canvas is valid again.
+    if (!performance_ui_arena_suspended) {
+      draw_all();
+      draw_menu(true);
+    }
     return;
   }
   if (kit_edit_state == kit_edit_state_t::assign_wait_pad) {
@@ -11489,6 +12306,17 @@ static void menu_back(void)
     draw_menu_keypad();
     return;
   }
+  if (kit_edit_state == kit_edit_state_t::select_synth_file) {
+    clear_menu_preview();
+    kit_edit_state = kit_edit_state_t::idle;
+    synth_file_kind = synth_file_kind_t::none;
+    menu_cursor = 0;
+    menu_depth = menu_page_depth(menu_page);
+    menu_sound_navigate(2);
+    draw_menu_page_transition(-1);
+    draw_menu_keypad();
+    return;
+  }
   if (kit_edit_state == kit_edit_state_t::select_external_tone
    || kit_edit_state == kit_edit_state_t::select_external_pad
    || kit_edit_state == kit_edit_state_t::select_external_pad_base_note) {
@@ -11501,14 +12329,17 @@ static void menu_back(void)
     if (!page_sound_select) {
       menu_page = menu_page_t::midi_sound;
     } else if (synth_menu_target == performance_page_t::chord) {
-      menu_page = selecting_pad || selecting_base_note
-        ? menu_page_t::synth_chord_pad : menu_page_t::synth_chord_midi;
+      menu_page = selecting_base_note ? menu_page_t::synth_chord
+        : selecting_pad ? menu_page_t::synth_chord_sample
+        : menu_page_t::synth_chord_sound;
     } else if (synth_menu_target == performance_page_t::bass) {
-      menu_page = selecting_pad || selecting_base_note
-        ? menu_page_t::synth_bass_pad : menu_page_t::synth_bass_midi;
+      menu_page = selecting_base_note ? menu_page_t::synth_bass
+        : selecting_pad ? menu_page_t::synth_bass_sample
+        : menu_page_t::synth_bass_sound;
     } else {
-      menu_page = selecting_pad || selecting_base_note
-        ? menu_page_t::synth_melody_pad : menu_page_t::synth_melody_midi;
+      menu_page = selecting_base_note ? menu_page_t::synth_melody
+        : selecting_pad ? menu_page_t::synth_melody_sample
+        : menu_page_t::synth_melody_sound;
     }
     menu_cursor = selecting_base_note ? 1 : 0;
     menu_depth = menu_page_depth(menu_page);
@@ -11633,6 +12464,11 @@ static bool is_audio_file_name(const std::string& name)
   return has_lower_suffix(name, ".wav") || has_lower_suffix(name, ".mp3");
 }
 
+static bool is_sampler_file_name(const std::string& name)
+{
+  return is_audio_file_name(name);
+}
+
 static bool is_beat_file_name(const std::string& name)
 {
   return is_audio_file_name(name)
@@ -11710,6 +12546,66 @@ static bool load_menu_audio_file_list_from(const char* dir)
   return true;
 }
 
+static bool load_menu_sample_file_list_from(const char* dir)
+{
+  kit_wav_list.clear();
+  if (!dir || !dir[0]) { return false; }
+  kp::storage_sd.getFileList(kit_wav_list, dir, "");
+  kit_wav_list.erase(std::remove_if(kit_wav_list.begin(), kit_wav_list.end(),
+    [](const kp::file_info_string_t& f) { return !is_sampler_file_name(f.filename); }), kit_wav_list.end());
+  std::sort(kit_wav_list.begin(), kit_wav_list.end(),
+    [](const kp::file_info_string_t& a, const kp::file_info_string_t& b) { return a.filename < b.filename; });
+  if (kit_wav_list.empty()) { return false; }
+  snprintf(kit_wav_dir, sizeof(kit_wav_dir), "%s", dir);
+  return true;
+}
+
+static bool begin_synth_file_select(synth_file_kind_t kind)
+{
+  synth_menu_target = synth_target_for_menu_page(menu_page);
+  synth_sound_select_active = true;
+  synth_file_kind = kind;
+  kit_wav_list.clear();
+  snprintf(kit_wav_dir, sizeof(kit_wav_dir), "%s", sampler_sd_folders[0]);
+
+  if (kind == synth_file_kind_t::kantan_synth) {
+    for (const auto& source : builtin_ktsynths) {
+      kit_wav_list.push_back({ std::string("builtin:") + source.name, 0 });
+    }
+  }
+
+  if (kp::storage_sd.beginStorage()) {
+    ensure_sampler_sd_dirs();
+    std::vector<kp::file_info_string_t> sd_files;
+    kp::storage_sd.getFileList(sd_files, sampler_sd_folders[0], "");
+    sd_files.erase(std::remove_if(sd_files.begin(), sd_files.end(),
+      [kind](const kp::file_info_string_t& file) {
+        return kind == synth_file_kind_t::kantan_synth
+          ? !has_lower_suffix(file.filename, ".ktsynth")
+          : !is_audio_file_name(file.filename);
+      }), sd_files.end());
+    std::sort(sd_files.begin(), sd_files.end(),
+      [](const kp::file_info_string_t& a, const kp::file_info_string_t& b) {
+        return a.filename < b.filename;
+      });
+    kit_wav_list.insert(kit_wav_list.end(), sd_files.begin(), sd_files.end());
+  }
+
+  if (kit_wav_list.empty()) {
+    synth_file_kind = synth_file_kind_t::none;
+    show_status_message(kind == synth_file_kind_t::kantan_synth
+      ? "No KANTAN Synth" : "No sample file", 1800, true);
+    return false;
+  }
+  kit_edit_state = kit_edit_state_t::select_synth_file;
+  menu_cursor = 0;
+  menu_depth = menu_dynamic_depth();
+  menu_sound_navigate(1);
+  draw_menu_page_transition(1);
+  draw_menu_keypad();
+  return true;
+}
+
 static bool load_menu_beat_file_list_from(const char* dir)
 {
   kit_wav_list.clear();
@@ -11741,12 +12637,12 @@ static bool begin_kit_assign_wav(int target_pad = -1)
 
 static void select_sample_category(void)
 {
-  if (menu_cursor > sample_category_count) { return; }
+  if (menu_cursor > sample_browser_category_count) { return; }
   sample_browser_category_cursor = menu_cursor;
   kit_wav_list.clear();
 
-  if (menu_cursor < sample_category_count) {
-    const auto category = (sample_category_t)menu_cursor;
+  if (menu_cursor < sample_browser_category_count) {
+    const auto category = sample_browser_categories[menu_cursor];
     kit_wav_dir[0] = 0;
     for (const auto& source : builtin_samples) {
       if (source.category == category) {
@@ -11759,7 +12655,7 @@ static void select_sample_category(void)
       return;
     }
     ensure_sampler_sd_dirs();
-    load_menu_audio_file_list_from(sampler_sd_folders[0]);
+    load_menu_sample_file_list_from(sampler_sd_folders[0]);
   }
 
   if (kit_wav_list.empty()) {
@@ -12732,14 +13628,17 @@ static void reset_sampler_preferences(void)
   loop_swing_amount = 0;
   audio_beat.volume_q8 = volume_q8_from_20_percent_step(4);
   audio_beat.loop_repeats = 2;
-  melody_settings = { synth_tone_source_t::general_midi, 81, factory_pad_sound_pad, 0, 0, 0, 80 };
-  chord_settings = { synth_tone_source_t::general_midi, 90, factory_pad_sound_pad, 0, 0, 0, 60 };
-  bass_settings = { synth_tone_source_t::general_midi, 38, factory_pad_sound_pad, 0, 0, 0, 80 };
+  melody_settings = { synth_tone_source_t::general_midi, factory_melody_program,
+    factory_pad_sound_pad, 0, 0, 0, factory_melody_volume };
+  chord_settings = { synth_tone_source_t::general_midi, factory_chord_program,
+    factory_pad_sound_pad, 0, 0, 0, factory_chord_volume };
+  bass_settings = { synth_tone_source_t::general_midi, factory_bass_program,
+    factory_pad_sound_pad, 0, 0, 0, factory_bass_volume };
   melody_follow_harmony_key = true;
   harmony_scale = 0;
   reset_harmony_tuning(false);
   beat_volume = 100;
-  beat_drum_kit = beat_drum_kit_t::acoustic;
+  beat_drum_kit = default_beat_drum_kit;
   sampler_volume = 100;
   music_track_volume = music_track_default_volume;
   std::fill(mixer_part_volume, mixer_part_volume + mixer_part_count, 100);
@@ -12802,7 +13701,7 @@ static void start_new_project(void)
   stop_all_audio(false);
   clear_kit(false);
   reset_sampler_preferences();
-  // A blank Project still opens with a playable acoustic Beat kit. Keep the
+  // A blank Project still opens with the beginner-facing default Beat kit. Keep the
   // Pattern and its duration unset so the first Beat performance defines the
   // new loop, while all twelve Sampler pads remain empty.
   start_new_pattern_beat();
@@ -12987,6 +13886,8 @@ static void menu_execute_action(menu_action_t action)
     external_button_assign_count = 0;
     usb_keyboard_assign_count = 0;
     usb_gamepad_assign_count = 0;
+    if (loop_playing) { session_state_save_pending = true; }
+    else { save_resume_kit(); }
     show_status_message("Assigns cleared", 1600, false);
     break;
   case menu_action_t::input_source_select: {
@@ -13012,7 +13913,7 @@ static void menu_execute_action(menu_action_t action)
     task_midi.forgetBLEMidiPreferredDevice();
     ble_preferred_address[0] = 0;
     ble_preferred_name[0] = 0;
-    save_resume_kit();
+    save_external_input_config();
     show_status_message(had_device ? "BLE device forgotten" : "No saved device", 1800, false);
     break; }
   case menu_action_t::reset_ble_connection:
@@ -13067,6 +13968,9 @@ static void menu_execute_action(menu_action_t action)
     synth_sound_select_active = true;
     auto& settings = page_settings(synth_menu_target);
     kit_edit_state = kit_edit_state_t::select_external_tone;
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+    settings.program = std::min<uint8_t>(settings.program, sampler_amy_engine::tone_count - 1);
+#endif
     menu_cursor = settings.program;
     preview_synth_menu_selection();
     menu_depth = menu_dynamic_depth();
@@ -13088,17 +13992,23 @@ static void menu_execute_action(menu_action_t action)
     draw_menu_page_transition(1);
     draw_menu_keypad();
     return; }
+  case menu_action_t::synth_sample_file_select:
+    begin_synth_file_select(synth_file_kind_t::sample_file);
+    return;
+  case menu_action_t::synth_ktsynth_select:
+    begin_synth_file_select(synth_file_kind_t::kantan_synth);
+    return;
   case menu_action_t::synth_pad_base_note_select: {
     synth_menu_target = synth_target_for_menu_page(menu_page);
     synth_sound_select_active = true;
-    auto& settings = page_settings(synth_menu_target);
-    if (settings.pad >= def::pad::pad_count || !sampler_pool_t::slot[settings.pad].isValid()) {
-      show_status_message("Select Pad first", 1600, false);
+    auto* source = synth_sample_slot(synth_menu_target);
+    if (!source || !source->isValid()) {
+      show_status_message("Select sample first", 1600, false);
       draw_menu(true);
       return;
     }
     kit_edit_state = kit_edit_state_t::select_external_pad_base_note;
-    menu_cursor = sampler_pool_t::slot[settings.pad].base_note;
+    menu_cursor = source->base_note;
     menu_depth = menu_dynamic_depth();
     menu_sound_navigate(1);
     menu_sound_cursor(menu_cursor + 1);
@@ -13274,10 +14184,17 @@ static void menu_select(void)
     const auto& device = ble_device_list[ble_device_selected];
     snprintf(ble_preferred_address, sizeof(ble_preferred_address), "%s", device.address);
     snprintf(ble_preferred_name, sizeof(ble_preferred_name), "%s", device.name);
-    task_midi.setBLEMidiPreferredDevice(ble_preferred_address, ble_preferred_name);
-    save_resume_kit();
+    ble_auto_reconnect_blocked = false;
+    begin_ble_connect_resource_guard();
+    task_midi.setBLEMidiPreferredDevice(
+      ble_preferred_address, ble_preferred_name, true,
+      (int8_t)device.address_type);
+    save_external_input_config();
     ble_device_ui_state = ble_device_ui_state_t::connecting;
-    ble_device_connect_deadline_msec = M5.millis() + 15000;
+    // The transport intentionally waits before scanning, then may perform
+    // pairing, service discovery and notification retries. Do not let the UI
+    // declare failure while that bounded connection transaction is active.
+    ble_device_connect_deadline_msec = M5.millis() + 30000;
     menu_page = menu_page_t::ble_device;
     menu_cursor = 0;
     menu_depth = menu_page_depth(menu_page);
@@ -13312,6 +14229,10 @@ static void menu_select(void)
   }
   if (kit_edit_state == kit_edit_state_t::select_wav) {
     select_kit_wav();
+    return;
+  }
+  if (kit_edit_state == kit_edit_state_t::select_synth_file) {
+    select_synth_file();
     return;
   }
   if (kit_edit_state == kit_edit_state_t::select_bgm_wav) {
@@ -13396,11 +14317,13 @@ static void menu_select(void)
     return;
   }
   if (kit_edit_state == kit_edit_state_t::select_external_pad_base_note) {
-    uint8_t selected_pad = synth_sound_select_active
-      ? page_settings(synth_menu_target).pad : external_midi_pad;
-    if (selected_pad < def::pad::pad_count) {
-      sampler_pool_t::slot[selected_pad].base_note = menu_cursor;
-      sampler_pool_t::slot[selected_pad].base_note_auto = false;
+    sample_slot_t* selected_slot = synth_sound_select_active
+      ? synth_sample_slot(synth_menu_target)
+      : (external_midi_pad < def::pad::pad_count
+          ? &sampler_pool_t::slot[external_midi_pad] : nullptr);
+    if (selected_slot) {
+      selected_slot->base_note = menu_cursor;
+      selected_slot->base_note_auto = false;
       save_resume_kit();
     }
     menu_back();
@@ -13622,7 +14545,7 @@ static bool learn_capture_target(uint32_t pressed_edge)
       learn_target = (int16_t)midi_assign_target_t::fn_base + fn;
     }
     learn_state = learn_state_t::waiting_external;
-    learn_target_deadline_msec = 0;
+    learn_target_deadline_msec = M5.millis() + learn_target_timeout_ms;
     draw_learn_overlay();
     return true;
   }
@@ -13631,7 +14554,7 @@ static bool learn_capture_target(uint32_t pressed_edge)
       snprintf(learn_target_label, sizeof(learn_target_label), "%s", mode_info[i].name);
       learn_target = (int16_t)midi_assign_target_t::mode_base + i;
       learn_state = learn_state_t::waiting_external;
-      learn_target_deadline_msec = 0;
+      learn_target_deadline_msec = M5.millis() + learn_target_timeout_ms;
       draw_learn_overlay();
       return true;
     }
@@ -13640,7 +14563,7 @@ static bool learn_capture_target(uint32_t pressed_edge)
     snprintf(learn_target_label, sizeof(learn_target_label), "STOP ALL");
     learn_target = (int16_t)midi_assign_target_t::stop_all;
     learn_state = learn_state_t::waiting_external;
-    learn_target_deadline_msec = 0;
+    learn_target_deadline_msec = M5.millis() + learn_target_timeout_ms;
     draw_learn_overlay();
     return true;
   }
@@ -13685,6 +14608,8 @@ static void delete_selected_input_assignment(void)
   }
   update_midi_assign_count();
   rebuild_input_assignment_list();
+  if (loop_playing) { session_state_save_pending = true; }
+  else { save_resume_kit(); }
 
   char message[32];
   const char* source = entry.source_type == input_source_t::external ? "EXT"
@@ -13716,6 +14641,8 @@ static void finish_learn_assign(const char* source_label, int16_t* assignment)
   menu_visible = true;
   menu_page = menu_page_t::input_assign;
   menu_cursor = 0;
+  if (loop_playing) { session_state_save_pending = true; }
+  else { save_resume_kit(); }
   char message[48];
   snprintf(message, sizeof(message), "%s -> %s", source_label, learn_target_label);
   show_status_message(message, 1800, false);
@@ -13858,7 +14785,12 @@ static void process_external_midi_note(uint8_t status, uint8_t note, uint8_t vel
     return;
   }
 
-  if (melody_settings.source == synth_tone_source_t::pad) {
+  // External MIDI can be the first activity after the CPU entered its idle
+  // rate. Restore the performance clock before dispatching the note and keep
+  // display transfers clear of the same attack/release edge as a local pad.
+  mark_sound_priority(note_on ? 90 : 250);
+
+  if (melody_settings.source != synth_tone_source_t::general_midi) {
     // 基準音を中心に最大2オクターブずつ変調して、鍵盤として広い音域を
     // そのまま扱う。PCMボイスだけで処理するため演奏負荷は増えない。
     if (!note_on) {
@@ -13871,9 +14803,9 @@ static void process_external_midi_note(uint8_t status, uint8_t note, uint8_t vel
       }
       return;
     }
-    if (melody_settings.pad >= def::pad::pad_count) { return; }
-    const auto& slot = sampler_pool_t::slot[melody_settings.pad];
-    if (!slot.isValid() || slot.playFrames() == 0) { return; }
+    const auto* selected_slot = synth_sample_slot_const(performance_page_t::melody);
+    if (!selected_slot || !selected_slot->isValid() || selected_slot->playFrames() == 0) { return; }
+    const auto& slot = *selected_slot;
     const uint16_t pitch = sample_pitch_for_note(slot, note);
     uint32_t volume = ((uint32_t)slot.volume_q8 * velocity) / 127;
     volume = std::max<uint32_t>(1, volume);
@@ -13890,8 +14822,10 @@ static void process_external_midi_note(uint8_t status, uint8_t note, uint8_t vel
     sampler_audio_t::playSynth(external_midi_voice_base + voice,
                           slot.pcm + source_start, source_frames, slot.sample_rate,
                           sustain, slot.reverse, (uint16_t)volume, (uint16_t)pitch,
-                          0, slot.synth_release_ms,
+                          slot.synth_attack_ms, slot.synth_release_ms,
                           sustain_start, sustain_end, sustain_crossfade);
+    sampler_audio_t::setVoicePitchScaleQ12(external_midi_voice_base + voice,
+      sample_page_pitch_scale_q12(performance_page_t::melody, slot));
     external_midi_voice_note[voice] = (int8_t)note;
     return;
   }
@@ -13913,11 +14847,15 @@ static void process_external_midi_cc(uint8_t controller, uint8_t value)
   if (!menu_visible) { process_assigned_input(midi_cc_assign[controller], value != 0); }
 }
 
-static void process_external_midi_input(void)
+static void process_external_midi_input(uint8_t message_budget = 12)
 {
   auto& midi = kp::system_registry->midi_input;
   kp::system_registry_t::reg_midi_input_t::message_t message;
-  while (midi.popMessage(&message)) {
+  const uint32_t started_usec = M5.micros();
+  uint8_t processed = 0;
+  while (processed < message_budget && M5.micros() - started_usec < 500
+      && midi.popMessage(&message)) {
+    ++processed;
     if (message.type == kp::system_registry_t::reg_midi_input_t::NOTE_MESSAGE) {
       process_external_midi_note(message.status, message.number, message.value);
     } else if (message.type == kp::system_registry_t::reg_midi_input_t::CC_MESSAGE) {
@@ -13996,15 +14934,104 @@ static void process_usb_gamepad_input(void)
 //-------------------------------------------------------------------------
 // 入力処理
 
-static int16_t* alloc_recording_buffer(void)
+static uint32_t recording_max_frames(void);
+
+static const char* recording_prepare_error_message(void)
 {
-  if (recording_buffer != nullptr) { return recording_buffer; }
-  size_t bytes = (size_t)recording_buffer_frames * sizeof(int16_t);
+  switch (recording_prepare_error) {
+  case recording_prepare_error_t::standby_memory: return "STANDBY MEMORY LOW";
+  case recording_prepare_error_t::recording_memory: return "SAMPLE MEMORY FULL";
+  case recording_prepare_error_t::mic_begin: return "MIC START FAILED";
+  case recording_prepare_error_t::mic_warmup_queue: return "MIC WARMUP FAILED";
+  case recording_prepare_error_t::mic_warmup_timeout: return "MIC WARMUP TIMEOUT";
+  case recording_prepare_error_t::mic_record_queue: return "MIC RECORD FAILED";
+  case recording_prepare_error_t::external_route: return "INPUT START FAILED";
+  case recording_prepare_error_t::external_record: return "INPUT RECORD FAILED";
+  default: return "RECORDING NOT READY";
+  }
+}
+
+static void report_recording_prepare_error(void)
+{
+#if !defined(M5UNIFIED_PC_BUILD)
+  printf("[REC] prepare error=%u source=%u required=%lu internal=%u/%u psram=%u/%u\n",
+         (unsigned)recording_prepare_error,
+         (unsigned)recording_source,
+         (unsigned long)recording_max_frames(),
+         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+         (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+#endif
+  show_status_message(recording_prepare_error_message(), 2200, false);
+}
+
+static void reserve_internal_mic_resources(void)
+{
+#if !defined(M5UNIFIED_PC_BUILD)
+  if (recording_ui_resources_released) { return; }
+  // Mic_Class creates an I2S DMA channel and an internal-RAM task stack.
+  // Release optional realtime accelerators first so AMY/BLE/UI allocations
+  // cannot leave the microphone without one contiguous startup block.
+  release_ui_dirty_canvases();
+  sampler_audio_t::releaseUnusedSynthSustainCacheMemory();
+  if (recording_internal_dma_reserve != nullptr) {
+    free(recording_internal_dma_reserve);
+    recording_internal_dma_reserve = nullptr;
+  }
+  recording_ui_resources_released = true;
+#endif
+}
+
+static void retain_internal_mic_dma_reserve(void)
+{
+#if !defined(M5UNIFIED_PC_BUILD)
+  if (recording_internal_dma_reserve == nullptr) {
+    recording_internal_dma_reserve = heap_caps_malloc(
+      recording_internal_dma_reserve_bytes,
+      MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
+  }
+#endif
+}
+
+static void restore_internal_mic_resources(void)
+{
+#if !defined(M5UNIFIED_PC_BUILD)
+  if (!recording_ui_resources_released) { return; }
+  recording_ui_resources_released = false;
+  // Reclaim the microphone's contiguous arena before optional UI buffers can
+  // fragment it again. The reservation itself is released on the next take.
+  retain_internal_mic_dma_reserve();
+  if (!performance_ui_arena_suspended && !ui_dirty_renderer_ready) {
+    create_ui_dirty_canvases();
+  }
+#endif
+}
+
+static int16_t* alloc_recording_buffer(uint32_t required_frames = recording_buffer_frames)
+{
+  required_frames = std::min<uint32_t>(required_frames, recording_buffer_frames);
+  if (recording_buffer != nullptr
+   && recording_buffer_capacity_frames >= required_frames) {
+    return recording_buffer;
+  }
+  // The buffer is never resized while a take owns it. A smaller standby
+  // allocation may be replaced here when the selected input needs more room.
+  if (recording_buffer != nullptr) {
+    if (recording_pad >= 0) { return nullptr; }
+    free(recording_buffer);
+    recording_buffer = nullptr;
+    recording_buffer_capacity_frames = 0;
+  }
+  size_t bytes = (size_t)required_frames * sizeof(int16_t);
 #if defined (M5UNIFIED_PC_BUILD)
   recording_buffer = (int16_t*)malloc(bytes);
 #else
   recording_buffer = (int16_t*)heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
 #endif
+  if (recording_buffer != nullptr) {
+    recording_buffer_capacity_frames = required_frames;
+  }
   return recording_buffer;
 }
 
@@ -14013,6 +15040,7 @@ static void release_recording_buffer_if_idle(void)
   if (recording_pad >= 0 || recording_buffer == nullptr) { return; }
   free(recording_buffer);
   recording_buffer = nullptr;
+  recording_buffer_capacity_frames = 0;
   recording_frames = 0;
 }
 
@@ -14537,7 +15565,10 @@ static uint32_t probe_external_input(int16_t* probe_buffer, uint32_t capacity_fr
 #if !defined (M5UNIFIED_PC_BUILD)
 static bool prepare_internal_mic_recording(int16_t* warmup_buffer)
 {
-  if (warmup_buffer == nullptr) { return false; }
+  if (warmup_buffer == nullptr) {
+    recording_prepare_error = recording_prepare_error_t::standby_memory;
+    return false;
+  }
   static bool mic_clock_warmed_after_boot = false;
 
   // M5Unified starts the CoreS3 microphone at its default 16 kHz during boot.
@@ -14548,13 +15579,17 @@ static bool prepare_internal_mic_recording(int16_t* warmup_buffer)
   while (M5.Mic.isRecording()) { M5.delay(1); }
   if (M5.Mic.isRunning()) { M5.Mic.end(); }
   M5.Mic.setSampleRate(recording_internal_sample_rate);
-  if (!M5.Mic.begin()) { return false; }
+  if (!M5.Mic.begin()) {
+    recording_prepare_error = recording_prepare_error_t::mic_begin;
+    return false;
+  }
 
   if (!mic_clock_warmed_after_boot) {
     constexpr uint32_t warmup_frames = recording_internal_sample_rate / 16; // 62.5 ms
     // Calling record while the task is already running forces Mic_Class to
     // commit its private oversampled-rate cache before any PCM is accepted.
     if (!M5.Mic.record(warmup_buffer, warmup_frames, recording_internal_sample_rate)) {
+      recording_prepare_error = recording_prepare_error_t::mic_warmup_queue;
       M5.Mic.end();
       return false;
     }
@@ -14571,6 +15606,7 @@ static bool prepare_internal_mic_recording(int16_t* warmup_buffer)
     }
     const bool capture_finished = capture_started && !M5.Mic.isRecording();
     if (!capture_finished) {
+      recording_prepare_error = recording_prepare_error_t::mic_warmup_timeout;
       M5.Mic.end();
       return false;
     }
@@ -14581,7 +15617,10 @@ static bool prepare_internal_mic_recording(int16_t* warmup_buffer)
     // Recreate the task once so the user's first take uses the now-stable rate.
     M5.Mic.end();
     M5.Mic.setSampleRate(recording_internal_sample_rate);
-    if (!M5.Mic.begin()) { return false; }
+    if (!M5.Mic.begin()) {
+      recording_prepare_error = recording_prepare_error_t::mic_begin;
+      return false;
+    }
   }
   return true;
 }
@@ -14708,6 +15747,7 @@ static void cancel_recording_standby(void)
     schedule_internal_synth_restore();
   }
   recording_standby_output_guarded = false;
+  if (recording_pad < 0) { restore_internal_mic_resources(); }
 }
 
 static void service_recording_standby(void)
@@ -14740,6 +15780,7 @@ static bool begin_recording_standby(void)
 {
   if (recording_standby_active) { return true; }
   cancel_recording_standby();
+  recording_prepare_error = recording_prepare_error_t::none;
 
   // Standby only needs scratch space for input-source probing and the one-time
   // mic warm-up. PCM destined for the Pad begins directly in its final buffer
@@ -14754,6 +15795,7 @@ static bool begin_recording_standby(void)
 #endif
   if (!recording_standby_ring) {
     recording_standby_ring_frames = 0;
+    recording_prepare_error = recording_prepare_error_t::standby_memory;
     return false;
   }
   memset(recording_standby_ring, 0, bytes);
@@ -14773,6 +15815,7 @@ static bool begin_recording_standby(void)
 #if !defined (M5UNIFIED_PC_BUILD)
   if (recording_source_mode == recording_source_mode_t::external_input) {
     if (!set_external_input_enabled(true)) {
+      recording_prepare_error = recording_prepare_error_t::external_route;
       set_external_input_enabled(false);
       cancel_recording_standby();
       return false;
@@ -14792,14 +15835,18 @@ static bool begin_recording_standby(void)
       sampler_audio_t::setExternalInputMonitor(true);
     } else {
       set_external_input_enabled(false);
+      reserve_internal_mic_resources();
       if (!prepare_internal_mic_recording(recording_standby_ring)) {
         cancel_recording_standby();
         return false;
       }
     }
-  } else if (!prepare_internal_mic_recording(recording_standby_ring)) {
-    cancel_recording_standby();
-    return false;
+  } else {
+    reserve_internal_mic_resources();
+    if (!prepare_internal_mic_recording(recording_standby_ring)) {
+      cancel_recording_standby();
+      return false;
+    }
   }
 #else
   if (recording_source_mode == recording_source_mode_t::external_input) {
@@ -14818,13 +15865,14 @@ static bool begin_recording_standby(void)
 static bool mark_recording_standby_press(void)
 {
   if (!recording_standby_active && !begin_recording_standby()) { return false; }
+  recording_prepare_error = recording_prepare_error_t::none;
   recording_standby_press_marked = true;
 
   if (recording_source == recording_source_t::external_input) {
-    int16_t* buffer = alloc_recording_buffer();
+    int16_t* buffer = alloc_recording_buffer(recording_max_frames());
     if (!buffer) {
+      recording_prepare_error = recording_prepare_error_t::recording_memory;
       recording_standby_press_marked = false;
-      show_status_message("NOT ENOUGH SAMPLE SPACE", 1800, false);
       return false;
     }
     recording_frames = 0;
@@ -14832,6 +15880,7 @@ static bool mark_recording_standby_press(void)
     recording_standby_external_candidate = sampler_audio_t::startRecording(
       recording_buffer, recording_max_frames());
     if (!recording_standby_external_candidate) {
+      recording_prepare_error = recording_prepare_error_t::external_record;
       set_external_input_enabled(false);
       recording_standby_press_marked = false;
       release_recording_buffer_if_idle();
@@ -14840,10 +15889,10 @@ static bool mark_recording_standby_press(void)
     return true;
   }
 
-  int16_t* buffer = alloc_recording_buffer();
+  int16_t* buffer = alloc_recording_buffer(recording_max_frames());
   if (!buffer) {
+    recording_prepare_error = recording_prepare_error_t::recording_memory;
     recording_standby_press_marked = false;
-    show_status_message("NOT ENOUGH SAMPLE SPACE", 1800, false);
     return false;
   }
   recording_frames = 0;
@@ -14854,6 +15903,7 @@ static bool mark_recording_standby_press(void)
   service_recording_standby();
   service_recording_standby();
   if (recording_frames == 0) {
+    recording_prepare_error = recording_prepare_error_t::mic_record_queue;
     recording_standby_internal_candidate = false;
     recording_standby_press_marked = false;
     release_recording_buffer_if_idle();
@@ -14874,7 +15924,7 @@ static bool commit_recording_standby(int pad)
     return recording_pad == pad;
   }
 
-  if (!alloc_recording_buffer()) {
+  if (!alloc_recording_buffer(recording_max_frames())) {
     cancel_recording_standby();
     show_status_message("NOT ENOUGH SAMPLE SPACE", 1800, false);
     return false;
@@ -14993,17 +16043,21 @@ static void start_pad_recording(int pad)
       }
     } else {
       set_external_input_enabled(false);
+      reserve_internal_mic_resources();
       if (!prepare_internal_mic_recording(recording_buffer)) {
         sampler_audio_t::setOutputMuted(false);
         release_recording_buffer_if_idle();
+        restore_internal_mic_resources();
         schedule_internal_synth_restore();
         return;
       }
     }
   } else {
+    reserve_internal_mic_resources();
     if (!prepare_internal_mic_recording(recording_buffer)) {
       sampler_audio_t::setOutputMuted(false);
       release_recording_buffer_if_idle();
+      restore_internal_mic_resources();
       schedule_internal_synth_restore();
       return;
     }
@@ -15032,6 +16086,7 @@ static void start_pad_recording(int pad)
       M5.Mic.end();
       sampler_audio_t::setOutputMuted(false);
       release_recording_buffer_if_idle();
+      restore_internal_mic_resources();
       schedule_internal_synth_restore();
       return;
     }
@@ -15125,6 +16180,7 @@ static void finish_pad_recording(void)
   if (recording_source == recording_source_t::external_input) {
     sampler_audio_t::setOutputMuted(false);
   }
+  restore_internal_mic_resources();
   schedule_internal_synth_restore();
   uint32_t frames = recording_frames;
   uint32_t sample_rate = recording_sample_rate_current;
@@ -15219,6 +16275,7 @@ static void finish_pad_recording(void)
           (uint8_t)pad, name, recording_buffer, frames, sample_rate);
       if (loaded_recording) {
         recording_buffer = nullptr;  // Sample Asset now owns the allocation.
+        recording_buffer_capacity_frames = 0;
       } else if (recording_buffer) {
         // A rare realloc/adoption failure keeps the previous safe copy path.
         loaded_recording = sampler_pool_t::loadRecordedPcm(
@@ -15808,6 +16865,27 @@ static void edit_value_add(int diff)
     }
     index = std::clamp(index + diff, 0, (int)std::size(release_values) - 1);
     slot.synth_release_ms = release_values[index];
+    request_wave_draw();
+    return;
+  }
+  if (edit_param == 12) {
+    static constexpr const uint16_t attack_values[] = {
+      0, 5, 10, 20, 50, 100, 200, 500, 1000, 2000
+    };
+    int index = 0;
+    int best_distance = INT_MAX;
+    for (int i = 0; i < (int)std::size(attack_values); ++i) {
+      const int distance = abs((int)slot.synth_attack_ms - (int)attack_values[i]);
+      if (distance < best_distance) { best_distance = distance; index = i; }
+    }
+    index = std::clamp(index + diff, 0, (int)std::size(attack_values) - 1);
+    slot.synth_attack_ms = attack_values[index];
+    request_wave_draw();
+    return;
+  }
+  if (edit_param == 13) {
+    set_sample_synth_tune(slot, (int16_t)std::clamp<int>(
+      (int)slot.synth_tune_cents + diff, -100, 100));
     request_wave_draw();
     return;
   }
@@ -19135,6 +20213,8 @@ static void handle_edit_function_pad(int pad)
     case 1: toggle_edit_synth_assignment(performance_page_t::melody, now); return;
     case 2: toggle_edit_synth_assignment(performance_page_t::chord, now); return;
     case 3: toggle_edit_synth_assignment(performance_page_t::bass, now); return;
+    case 4: edit_param = 12; break;
+    case 5: edit_param = 13; break;
     case 8:
       edit_synth_page = false;
       edit_param = 0;
@@ -19269,6 +20349,18 @@ static uint16_t tuning_scale_q12_from_cents_x10(int32_t cents_x10)
   return (uint16_t)std::clamp<int>((int)lroundf(ratio * 4096.0f), 3866, 4340);
 }
 
+static uint16_t sample_synth_pitch_scale_q12(const sample_slot_t& slot)
+{
+  return slot.synth_tune_scale_q12;
+}
+
+static void set_sample_synth_tune(sample_slot_t& slot, int16_t cents)
+{
+  slot.synth_tune_cents = std::clamp<int16_t>(cents, -100, 100);
+  slot.synth_tune_scale_q12 = tuning_scale_q12_from_cents_x10(
+    (int32_t)slot.synth_tune_cents * 10);
+}
+
 static uint16_t page_pitch_scale_q12(performance_page_t page)
 {
   uint32_t scale = harmony_tuning_scale_q12;
@@ -19298,6 +20390,14 @@ static uint16_t page_pitch_scale_q12(performance_page_t page)
     scale = (scale * bend_scale + 2048u) >> 12;
   }
   return (uint16_t)std::clamp<uint32_t>(scale, 2048, 8192);
+}
+
+static uint16_t sample_page_pitch_scale_q12(performance_page_t page,
+                                             const sample_slot_t& slot)
+{
+  const uint32_t combined = ((uint32_t)page_pitch_scale_q12(page)
+                           * sample_synth_pitch_scale_q12(slot) + 2048u) >> 12;
+  return (uint16_t)std::clamp<uint32_t>(combined, 2048, 8192);
 }
 
 static void send_sam_pitch_bend_range(uint8_t channel, uint8_t semitones)
@@ -19354,8 +20454,13 @@ static void apply_harmony_tuning(bool force)
       page = performance_page_t::chord;
     }
     if (page != performance_page_t::max) {
+      uint16_t scale = page_pitch_scale_q12(page);
+      const auto* source = synth_sample_slot_const(page);
+      if (source && source->isValid()) {
+        scale = sample_page_pitch_scale_q12(page, *source);
+      }
       sampler_audio_t::setVoicePitchScaleQ12(external_midi_voice_base + i,
-                                              page_pitch_scale_q12(page));
+                                              scale);
     }
   }
 }
@@ -19429,7 +20534,11 @@ static void apply_page_pitch_bend(performance_page_t page)
     send_sam_midi((uint8_t)kp::def::midi::pitch_bend | page_midi_channel(page),
                   value & 0x7F, value >> 7);
   } else {
-    const uint16_t scale = page_pitch_scale_q12(page);
+    uint16_t scale = page_pitch_scale_q12(page);
+    const auto* source = synth_sample_slot_const(page);
+    if (source && source->isValid()) {
+      scale = sample_page_pitch_scale_q12(page, *source);
+    }
     const pitched_voice_owner_t owner = page == performance_page_t::bass
       ? pitched_voice_owner_t::bass : pitched_voice_owner_t::melody;
     for (uint8_t i = 0; i < external_midi_voice_count; ++i) {
@@ -20022,9 +21131,9 @@ static void trigger_synth_pad(performance_page_t page, uint8_t pad, int chord_fl
   }
 
   auto& settings = page_settings(page);
-  const uint8_t source_pad = resolved_pad_sound(settings);
-  if (source_pad >= def::pad::pad_count) { state = {}; return; }
-  auto& slot = sampler_pool_t::slot[source_pad];
+  auto* selected_slot = synth_sample_slot(page);
+  if (!selected_slot) { state = {}; return; }
+  auto& slot = *selected_slot;
   if (!slot.isValid() || slot.playFrames() == 0) { state = {}; return; }
   pitched_voice_owner_t owner = page == performance_page_t::chord
     ? pitched_voice_owner_t::chord
@@ -20055,7 +21164,7 @@ static void trigger_synth_pad(performance_page_t page, uint8_t pad, int chord_fl
     sampler_audio_t::playSynth(external_midi_voice_base + voice,
       slot.pcm + source_start, source_frames, slot.sample_rate,
       sustain, slot.reverse, volume_q8,
-      sample_pitch_for_note(slot, notes[i]), 0, slot.synth_release_ms,
+      sample_pitch_for_note(slot, notes[i]), slot.synth_attack_ms, slot.synth_release_ms,
       sustain_start, sustain_end, sustain_crossfade, 0,
       // Chords are up to four simultaneous Pad voices. Their 48kHz source
       // remains clear with nearest-neighbour pitch stepping, while avoiding
@@ -20064,7 +21173,7 @@ static void trigger_synth_pad(performance_page_t page, uint8_t pad, int chord_fl
       render_divider,
       synth_sustain_cache_slot(page));
     sampler_audio_t::setVoicePitchScaleQ12(external_midi_voice_base + voice,
-                                            page_pitch_scale_q12(page));
+                                            sample_page_pitch_scale_q12(page, slot));
   }
 }
 
@@ -20287,6 +21396,7 @@ static void touch_render_task(void*)
           if (!wave_transfer_full_frame) { draw_live_wave_frame(); }
           wave_transfer_active = false;
           wave_transfer_full_frame = false;
+          wave_transfer_page_switch = false;
         }
       }
       wave_transfer_job_pending = false;
@@ -22333,7 +23443,9 @@ static bool sample_mix_to_pad(uint8_t from, uint8_t to)
   bool dst_loop_whole = dst.loop_whole_sample;
   uint8_t dst_loop_grid = dst.loop_grid_half_steps;
   sample_sustain_mode_t dst_sustain_mode = dst.synth_sustain_mode;
+  uint16_t dst_attack_ms = dst.synth_attack_ms;
   uint16_t dst_release_ms = dst.synth_release_ms;
+  int16_t dst_tune_cents = dst.synth_tune_cents;
   sampler_audio_t::stop(from);
   sampler_audio_t::stop(to);
   sampler_pool_t::erase(from);
@@ -22350,7 +23462,9 @@ static bool sample_mix_to_pad(uint8_t from, uint8_t to)
   sampler_pool_t::slot[to].synth_sustain_mode =
     dst_sustain_mode == sample_sustain_mode_t::manual
       ? sample_sustain_mode_t::automatic : dst_sustain_mode;
+  sampler_pool_t::slot[to].synth_attack_ms = dst_attack_ms;
   sampler_pool_t::slot[to].synth_release_ms = dst_release_ms;
+  set_sample_synth_tune(sampler_pool_t::slot[to], dst_tune_cents);
   invalidate_sample_pad_grid_cache(from);
   invalidate_sample_pad_grid_cache(to);
   move_loop_events_pad(performance_page_t::sample, from, to);
@@ -22830,7 +23944,11 @@ static void service_sample_add_hold(uint32_t now)
       // choice armed until an explicit Pad, mode, page, or menu action cancels
       // it instead of expiring while the user waits for the desired phrase.
       show_sample_add_prompt();
-      begin_recording_standby();
+      if (!begin_recording_standby()) {
+        cancel_sample_add();
+        report_recording_prepare_error();
+        return;
+      }
       request_pad_state_draw(pad);
       request_wave_draw();
     }
@@ -23400,6 +24518,8 @@ static void pad_press(int pad, uint8_t velocity) {
     ? sample_surface_slot((uint8_t)pad) : sampler_pool_t::slot[pad];
   if (!slot.isValid() && sample_add_available()) {
     const uint32_t now = performance_event_time();
+    recording_target_page = beat_sound_surface(current_page)
+      ? performance_page_t::drum : performance_page_t::sample;
     // An empty Pad is still a deliberate SOUND selection. Move persistent
     // focus immediately and clear the previous audition/waveform so the
     // Import/Record prompt visibly belongs to this Pad.
@@ -23419,7 +24539,12 @@ static void pad_press(int pad, uint8_t velocity) {
     request_wave_draw();
     if (sample_add_armed_active() && sample_add_armed_pad == pad) {
       sample_add_action_pad = pad;
-      mark_recording_standby_press();
+      if (!mark_recording_standby_press()) {
+        cancel_sample_add();
+        report_recording_prepare_error();
+        request_pad_state_draw(pad);
+        return;
+      }
       // The first hold release hides its prompt while keeping this Pad armed.
       // Show the choice again only while the deliberate second gesture is in
       // progress, so PLAY never retains a popup after the user's finger lifts.
@@ -23438,9 +24563,12 @@ static void pad_press(int pad, uint8_t velocity) {
         sample_add_candidate_pad = -1;
         sample_add_armed_pad = pad;
         request_wave_draw();
-        recording_target_page = beat_sound_surface(current_page)
-          ? performance_page_t::drum : performance_page_t::sample;
-        begin_recording_standby();
+        if (!begin_recording_standby()) {
+          cancel_sample_add();
+          report_recording_prepare_error();
+          request_pad_state_draw(pad);
+          return;
+        }
       } else {
         begin_hold_progress(hold_progress_kind_t::sample_add, pads[pad].press_msec,
                             sample_add_arm_hold_ms, 0x5098F0u,
@@ -23724,21 +24852,12 @@ static void prime_synth_sustain_cache(performance_page_t page)
 {
   const uint8_t cache_slot = synth_sustain_cache_slot(page);
   if (cache_slot == 0xFF) { return; }
-  const auto& settings = page_settings(page);
-  if (settings.source != synth_tone_source_t::pad) {
+  const auto* selected_slot = synth_sample_slot_const(page);
+  if (!selected_slot || !selected_slot->isValid() || selected_slot->playFrames() == 0) {
     sampler_audio_t::clearSynthSustainCache(cache_slot);
     return;
   }
-  const uint8_t source_pad = resolved_pad_sound(settings);
-  if (source_pad >= def::pad::pad_count) {
-    sampler_audio_t::clearSynthSustainCache(cache_slot);
-    return;
-  }
-  const auto& slot = sampler_pool_t::slot[source_pad];
-  if (!slot.isValid() || slot.playFrames() == 0) {
-    sampler_audio_t::clearSynthSustainCache(cache_slot);
-    return;
-  }
+  const auto& slot = *selected_slot;
   const uint32_t source_start = slot.playStart();
   uint32_t sustain_start = 0;
   uint32_t sustain_end = 0;
@@ -23822,15 +24941,16 @@ static void apply_mixer_part(mixer_part_t part)
       ? pitched_voice_owner_t::bass
       : part == mixer_part_t::melody ? pitched_voice_owner_t::melody
                                      : pitched_voice_owner_t::chord;
-    const auto& settings = page_settings(part == mixer_part_t::bass
+    const performance_page_t page = part == mixer_part_t::bass
       ? performance_page_t::bass
       : part == mixer_part_t::melody ? performance_page_t::melody
-                                     : performance_page_t::chord);
-    const uint8_t source_pad = resolved_pad_sound(settings);
+                                     : performance_page_t::chord;
+    const auto& settings = page_settings(page);
+    const auto* source = synth_sample_slot_const(page);
     uint16_t base_q8 = 0;
-    if (source_pad < def::pad::pad_count) {
+    if (source && source->isValid()) {
       base_q8 = (uint16_t)std::min<uint32_t>(512,
-        ((uint32_t)sampler_pool_t::slot[source_pad].volume_q8 * settings.volume) / 100);
+        ((uint32_t)source->volume_q8 * settings.volume) / 100);
     }
     for (uint8_t i = 0; i < external_midi_voice_count; ++i) {
       if (pitched_voice_state[i].owner == owner) {
@@ -24080,7 +25200,7 @@ static void mixer_volume_add(int diff)
   mixer_clear_applied_snapshot();
   apply_mixer_part((mixer_part_t)part);
   request_pad_draw(pad);
-  request_wave_draw();
+  present_mixer_meter(part);
 }
 
 static void set_performance_page(performance_page_t page)
@@ -24126,8 +25246,7 @@ static void set_performance_page(performance_page_t page)
   }
   current_page = page;
   prepare_shared_sample_page(current_page);
-  uint32_t next_generation = ui_page_generation + 1u;
-  ui_page_generation = next_generation ? next_generation : 1u;
+  advance_ui_surface_generation();
   reset_live_wave();
   invalidate_loop_timeline_cache();
   repair_pitched_pad_sources();
@@ -24314,7 +25433,7 @@ static void set_master_scratch_lever(int8_t direction, bool pressed)
   if (pressed) {
     sampler_audio_t::setTapeStop(false);
     if (fx_pad_active >= 0 && pad_display_number((uint8_t)fx_pad_active) == 12) {
-      request_pad_draw(fx_pad_active);
+      request_urgent_pad_draw(fx_pad_active);
       fx_pad_active = -1;
     }
     // The lever makes a short deck gesture, then holds the record still.
@@ -24323,8 +25442,9 @@ static void set_master_scratch_lever(int8_t direction, bool pressed)
     master_scratch_return_pending = false;
     master_scratch_rejoin_after_stop = false;
     master_scratch_target_q8 = direction < 0 ? -384 : 384;
+    master_scratch_ramp_from_q8 = master_scratch_rate_q8;
+    master_scratch_ramp_started_msec = now;
     master_scratch_gesture_until_msec = now + master_scratch_gesture_msec;
-    master_scratch_last_msec = now;
     sampler_audio_t::setMasterScratchRateQ8(master_scratch_rate_q8);
     sampler_audio_t::setMasterScratch(true);
     return;
@@ -24340,8 +25460,9 @@ static void set_master_scratch_lever(int8_t direction, bool pressed)
   master_scratch_return_pending = false;
   master_scratch_rejoin_after_stop = true;
   master_scratch_target_q8 = direction < 0 ? 384 : -384;
+  master_scratch_ramp_from_q8 = master_scratch_rate_q8;
+  master_scratch_ramp_started_msec = now;
   master_scratch_gesture_until_msec = now + master_scratch_gesture_msec;
-  master_scratch_last_msec = now;
 }
 
 static void service_master_scratch(uint32_t now)
@@ -24359,23 +25480,20 @@ static void service_master_scratch(uint32_t now)
   if (master_scratch_gesture_until_msec != 0
    && (int32_t)(now - master_scratch_gesture_until_msec) >= 0) {
     master_scratch_gesture_until_msec = 0;
+    master_scratch_ramp_from_q8 = master_scratch_rate_q8;
+    master_scratch_ramp_started_msec = now;
     master_scratch_target_q8 = 0;
   }
-  uint32_t elapsed = now - master_scratch_last_msec;
-  if (elapsed != 0) {
-    if (elapsed > 20) { elapsed = 20; }
-    master_scratch_last_msec = now;
-    const int current = master_scratch_rate_q8;
-    const int target = master_scratch_target_q8;
-    if (current != target) {
-      const int distance = target - current;
-      int step = (std::abs(distance) * (int)elapsed + (int)master_scratch_ramp_msec - 1)
-               / (int)master_scratch_ramp_msec;
-      if (step < 1) { step = 1; }
-      if (step > std::abs(distance)) { step = std::abs(distance); }
-      master_scratch_rate_q8 = (int16_t)(current + (distance > 0 ? step : -step));
-      sampler_audio_t::setMasterScratchRateQ8(master_scratch_rate_q8);
-    }
+  if (master_scratch_rate_q8 != master_scratch_target_q8) {
+    const uint32_t elapsed = now - master_scratch_ramp_started_msec;
+    const uint32_t progress = std::min<uint32_t>(elapsed, master_scratch_ramp_msec);
+    const int32_t distance = (int32_t)master_scratch_target_q8
+                           - (int32_t)master_scratch_ramp_from_q8;
+    master_scratch_rate_q8 = progress >= master_scratch_ramp_msec
+      ? master_scratch_target_q8
+      : (int16_t)((int32_t)master_scratch_ramp_from_q8
+        + distance * (int32_t)progress / (int32_t)master_scratch_ramp_msec);
+    sampler_audio_t::setMasterScratchRateQ8(master_scratch_rate_q8);
   }
   if (master_scratch_rejoin_after_stop && master_scratch_gesture_until_msec == 0
    && master_scratch_rate_q8 == 0) {
@@ -24446,6 +25564,10 @@ static void set_mode(sampler_mode_t mode) {
     }
   }
   current_mode = mode;
+  // Pad/Fn tiles created for the previous mode can carry the normal Sample
+  // palette into FX after a busy AMY frame. Invalidate every queued transfer
+  // at the same boundary used by a Part change before composing the new mode.
+  advance_ui_surface_generation();
   if (current_mode == sampler_mode_t::mode_sound) {
     prepare_shared_sample_page(current_page);
   }
@@ -24527,7 +25649,8 @@ static void fx_set_active(uint8_t index, bool active)
     if (index == fx_tempo_index) { fx_set_speed_active(active); }
     else { sampler_audio_t::setFx(index, active, fx_param[index]); }
   }
-  for (int i = 0; i < 3; ++i) { draw_fn(i); }
+  // Fn labels do not depend on momentary FX state. Redrawing all three here
+  // delayed the pressed Pad feedback and the next audio gesture.
   request_wave_draw();
 }
 
@@ -24582,7 +25705,7 @@ static void fx_pad_press(int pad)
   if (number == 9 || number == 10) {
     // Target controls are release-edge toggles. This keeps their interaction
     // visibly different from the hold-to-apply FX pads above them.
-    request_pad_draw(pad);
+    request_urgent_pad_draw(pad);
     return;
   }
   int fx = -1;
@@ -24627,7 +25750,7 @@ static void fx_pad_press(int pad)
       && (loop_repeat_armed || loop_repeat_running);
     if (fx_pad_active != pad) {
       if (!preserve_repeat_start && old_fx >= 0) { fx_set_active((uint8_t)old_fx, false); }
-      request_pad_draw(fx_pad_active);
+      request_urgent_pad_draw(fx_pad_active);
     }
   }
   if (repeat_index >= 0) { fx_param[fx_repeat_index] = (int8_t)repeat_index; }
@@ -24653,7 +25776,7 @@ static void fx_pad_press(int pad)
   } else {
     fx_set_active((uint8_t)fx, true);
   }
-  request_pad_draw(pad);
+  request_urgent_pad_draw(pad);
 }
 
 static void fx_pad_release(int pad)
@@ -24667,7 +25790,7 @@ static void fx_pad_release(int pad)
       ? (uint8_t)(base & ~bit) : (uint8_t)(base | bit);
     if (next == 0) {
       show_status_message("KEEP ONE FX TARGET", 1600, false);
-      request_pad_draw(pad);
+      request_urgent_pad_draw(pad);
       return;
     }
     if (fx_pad_active >= 0) {
@@ -24676,7 +25799,7 @@ static void fx_pad_release(int pad)
     } else {
       apply_fx_target(next, true);
     }
-    request_pad_draw(pad);
+    request_urgent_pad_draw(pad);
     return;
   }
   if (fx_pad_active != pad) { return; }
@@ -24685,7 +25808,7 @@ static void fx_pad_release(int pad)
   fx_touch_screen_pressed = false;
   motion_yaw_end(motion_yaw_owner_t::fx);
   fx_pad_active = -1;
-  request_pad_draw(pad);
+  request_urgent_pad_draw(pad);
   if (fx_target_pending_mask != 0) {
     const uint8_t pending = fx_target_pending_mask;
     fx_target_pending_mask = 0;
@@ -25190,12 +26313,24 @@ static void service_loop(uint32_t now)
 }
 
 #if !defined (M5UNIFIED_PC_BUILD)
+static void service_loop_guarded(uint32_t now)
+{
+  bool expected = false;
+  if (!__atomic_compare_exchange_n(&loop_service_busy, &expected, true, false,
+                                   __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
+    return;
+  }
+  service_loop(now);
+  __atomic_store_n(&loop_service_busy, false, __ATOMIC_RELEASE);
+}
+
 // 画面描画とは独立して、1ms周期でループイベントを発火する。
 // I2Sより一段低い優先度で同一CPUへ置き、UI処理中の再生ジッターを防ぐ。
 static void loop_clock_task(void*)
 {
   for (;;) {
-    service_loop(M5.millis());
+    const uint32_t now = M5.millis();
+    service_loop_guarded(now);
     vTaskDelay(1);
   }
 }
@@ -25239,9 +26374,26 @@ static void render_page_selector(void)
   d.endWrite();
 }
 
+static void page_selector_row_bounds(uint8_t selected, uint8_t row,
+                                     uint8_t count, int* top_out, int* bottom_out)
+{
+  static constexpr int normal_h = 17;
+  static constexpr int selected_h = 36;
+  const int content_h = selected_h + normal_h * (static_cast<int>(count) - 1);
+  int y = std::max(3, (static_cast<int>(page_selector_h) - content_h) / 2);
+  for (uint8_t index = 0; index < row; ++index) {
+    y += index == selected ? selected_h : normal_h;
+  }
+  if (top_out) { *top_out = y; }
+  if (bottom_out) { *bottom_out = y + (row == selected ? selected_h : normal_h); }
+}
+
 static void draw_page_selector(bool slide_in)
 {
   if (!page_selector_canvas_ready) { return; }
+  const bool opening = slide_in;
+  const uint8_t previous_index = page_selector_presented_index;
+  const uint8_t count = performance_page_count();
   render_page_selector();
   // The selector remains available during BLE performance, but its staged
   // slide is cosmetic and should not compete with incoming note bursts.
@@ -25258,15 +26410,42 @@ static void draw_page_selector(bool slide_in)
       }
       M5.delay(2);
     }
+  } else if (!opening && previous_index < count
+          && page_selector_presented_count == count
+          && previous_index != page_selector_index) {
+    // Moving the enlarged selection changes only the rows between the old
+    // and new focus. Rows below that range return to exactly the same Y
+    // positions, so keep them on the LCD and transfer just the changed band.
+    const uint8_t first = std::min(previous_index, page_selector_index);
+    const uint8_t last = std::max(previous_index, page_selector_index);
+    int old_top = 0;
+    int old_bottom = 0;
+    int new_top = 0;
+    int new_bottom = 0;
+    page_selector_row_bounds(previous_index, first, count, &old_top, nullptr);
+    page_selector_row_bounds(previous_index, last, count, nullptr, &old_bottom);
+    page_selector_row_bounds(page_selector_index, first, count, &new_top, nullptr);
+    page_selector_row_bounds(page_selector_index, last, count, nullptr, &new_bottom);
+    const int dirty_y = std::max(2, std::min(old_top, new_top) - 1);
+    const int dirty_bottom = std::min<int>(page_selector_h - 2,
+      std::max(old_bottom, new_bottom) + 1);
+    display_spi_guard_t guard;
+    M5.Display.setClipRect(page_selector_x, page_selector_y + dirty_y,
+                           page_selector_w, dirty_bottom - dirty_y);
+    page_selector_canvas.pushSprite(page_selector_x, page_selector_y);
+    M5.Display.clearClipRect();
   } else {
     display_spi_guard_t guard;
     page_selector_canvas.pushSprite(page_selector_x, page_selector_y);
   }
+  page_selector_presented_index = page_selector_index;
+  page_selector_presented_count = count;
 }
 
 static void page_selector_move(int delta)
 {
   if (delta == 0 || menu_visible || edit_pad >= 0) { return; }
+  bool opened = false;
   if (!page_selector_visible) {
     wave_transfer_generation = wave_transfer_generation + 1;
     wave_transfer_active = false;
@@ -25276,14 +26455,18 @@ static void page_selector_move(int delta)
     page_selector_visible = true;
     page_selector_index = performance_page_order_index(current_page);
     page_selector_slide_in = true;
+    opened = true;
   }
+  const uint8_t previous_index = page_selector_index;
   int index = (int)page_selector_index + delta;
   const int count = (int)performance_page_count();
   index = std::clamp<int>(index, 0, count - 1);
   page_selector_index = (uint8_t)index;
   page_selector_until_msec = M5.millis() + page_selector_timeout_ms;
-  page_selector_dirty = true;
-  request_header_draw();
+  if (opened || page_selector_index != previous_index) {
+    page_selector_dirty = true;
+    request_header_draw();
+  }
 }
 
 static bool page_selector_confirm(bool defer_visual_restore)
@@ -25324,13 +26507,15 @@ static void service_page_selector(uint32_t now)
     page_selector_confirm();
     return;
   }
-  const uint32_t interval = sound_priority_active(now) ? 50 : 28;
-  if (!page_selector_dirty && now - page_selector_last_draw_msec < interval) { return; }
+  // The selector has no autonomous animation. Re-rendering and transferring
+  // its full PSRAM canvas every 28 ms while it merely waited for confirmation
+  // consumed the same bandwidth needed by AMY and cached page presentation.
+  // One frame per actual encoder selection is both visually exact and cheap.
+  if (!page_selector_dirty) { return; }
   if (ui_async_display_busy()) { return; }
   draw_page_selector(page_selector_slide_in);
   page_selector_slide_in = false;
   page_selector_dirty = false;
-  page_selector_last_draw_msec = now;
 }
 
 static bool any_performance_pad_pressed(void)
@@ -25710,7 +26895,7 @@ static void process_bitmask(uint32_t bitmask, uint32_t event_msec) {
     // それ以外の本体ボタンを押した時だけFile Editorを終了する。
     if (pressed_edge & bb::ENC1_PUSH) { stop_all_audio(); }
     const uint32_t encoder_pushes = bb::ENC1_PUSH | bb::ENC2_PUSH;
-    if (pressed_edge & ~encoder_pushes) { stop_file_server_session(); }
+    if (pressed_edge & ~encoder_pushes) { stop_file_server_session("button"); }
     return;
   }
 
@@ -25849,7 +27034,7 @@ static void process_touch(uint32_t value) {
     return;
   }
   if (wifi_file_server_qr_active) {
-    if (pressed) { stop_file_server_session(); }
+    if (pressed) { stop_file_server_session("touch"); }
     return;
   }
   if (performance_record_confirm_active) {
@@ -25932,9 +27117,14 @@ static void clear_menu_preview(void)
 {
   sampler_audio_t::stop(menu_preview_voice);
   if (synth_menu_preview_note_active) {
-    send_sam_midi(0x80 | synth_menu_preview_channel, synth_menu_preview_note, 0);
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+    if (synth_menu_preview_uses_amy) { sampler_amy_engine::stopPreview(); }
+    else
+#endif
+    { send_sam_midi(0x80 | synth_menu_preview_channel, synth_menu_preview_note, 0); }
   }
   synth_menu_preview_note_active = false;
+  synth_menu_preview_uses_amy = false;
   synth_menu_preview_sample_active = false;
   synth_menu_preview_stop_msec = 0;
   sound_page_preview_active = false;
@@ -25975,6 +27165,20 @@ static void preview_synth_menu_selection(void)
   if (kit_edit_state == kit_edit_state_t::select_external_tone) {
     const uint8_t program = (uint8_t)std::min<uint16_t>(menu_cursor, 127);
     clear_menu_preview();
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+    if (synth_sound_select_active) {
+      const uint8_t part = synth_menu_target == performance_page_t::chord ? 1
+                         : synth_menu_target == performance_page_t::bass ? 2 : 0;
+      synth_menu_preview_note = bass_preview ? 36 : 60;
+      if (sampler_amy_engine::previewTone(part, program,
+                                          synth_menu_preview_note, 108)) {
+        synth_menu_preview_note_active = true;
+        synth_menu_preview_uses_amy = true;
+        synth_menu_preview_stop_msec = M5.millis() + preview_ms;
+      }
+      return;
+    }
+#endif
     send_sam_midi(0xC0 | synth_menu_preview_channel, program);
     send_sam_midi(0xB0 | synth_menu_preview_channel, 7, 110);
     send_sam_midi(0xB0 | synth_menu_preview_channel, 10, 64);
@@ -26106,6 +27310,11 @@ static bool play_menu_builtin_preview(const char* builtin_id, uint32_t max_ms)
       return decode_menu_wav_preview(src.data, src.size(), max_ms);
     }
   }
+  for (const auto& src : builtin_ktsynths) {
+    if (strcmp(name, src.name) == 0) {
+      return decode_menu_wav_preview(src.data, src.size(), max_ms);
+    }
+  }
   return false;
 }
 
@@ -26127,6 +27336,8 @@ static bool load_audio_memory_to_pad(uint8_t pad, const char* source_path, const
                                      bool beat_target = false)
 {
   if (mp3_result) { *mp3_result = mp3_decode_result_t::ok; }
+  const bool ktsynth = has_lower_suffix(source_path ? source_path : "", ".ktsynth");
+  if (ktsynth && beat_target) { return false; }
   if (beat_target) { clear_sound_pad_sample(performance_page_t::drum, pad, false); }
   else { prepare_pad_for_new_sample(pad); }
   sampler_pool_t::setProgressCallback(draw_busy_status_dots_tick);
@@ -26147,11 +27358,93 @@ static bool load_audio_memory_to_pad(uint8_t pad, const char* source_path, const
     sampler_pool_t::setProgressCallback(nullptr);
     return ok;
   }
-  bool ok = beat_target
+  bool ok = ktsynth
+    ? sampler_pool_t::loadKtSynth(pad, display_name ? display_name : "", data, size)
+    : beat_target
     ? beat_pool_t::loadWav(pad, display_name ? display_name : "", data, size)
     : sampler_pool_t::loadWav(pad, display_name ? display_name : "", data, size);
   sampler_pool_t::setProgressCallback(nullptr);
   return ok;
+}
+
+static void select_synth_file(void)
+{
+  if (kit_edit_state != kit_edit_state_t::select_synth_file
+   || menu_cursor >= kit_wav_list.size()
+   || synth_file_kind == synth_file_kind_t::none) {
+    return;
+  }
+  const auto kind = synth_file_kind;
+  const auto target = synth_menu_target;
+  const uint8_t synth_index = synth_source_slot_index(target);
+  if (synth_index >= sampler_pool_t::synth_source_count) { return; }
+
+  const std::string entry = kit_wav_list[menu_cursor].filename;
+  const bool builtin = entry.rfind("builtin:", 0) == 0;
+  const std::string path = builtin ? entry
+    : std::string(kit_wav_dir) + "/" + entry;
+  std::string display_name = builtin ? entry.substr(8) : entry;
+  const size_t dot = display_name.find_last_of('.');
+  if (dot != std::string::npos) { display_name.resize(dot); }
+
+  clear_menu_preview();
+  show_loading_message("LOADING SOUND");
+  stop_synth_page(target);
+  sampler_pool_t::setProgressCallback(draw_busy_status_dots_tick);
+  bool loaded = false;
+  if (builtin) {
+    const auto* source = find_builtin_ktsynth_source(display_name.c_str());
+    loaded = source && load_builtin_ktsynth(synth_index, *source);
+  } else if (kp::storage_sd.beginStorage()) {
+    const int size = kp::storage_sd.getFileSize(path.c_str());
+    static constexpr int max_synth_file_bytes = 3200 * 1024;
+    if (size > 4 && size <= max_synth_file_bytes) {
+      uint8_t* data = temp_alloc((size_t)size);
+      if (data) {
+        const int length = kp::storage_sd.loadFromFileToMemory(path.c_str(), data, (size_t)size);
+        if (length > 4 && has_lower_suffix(path, ".mp3")) {
+          int16_t* pcm = nullptr;
+          uint32_t frames = 0;
+          const auto result = decode_mp3_mono_48k(data, (size_t)length,
+            sampler_pool_t::max_sample_sec * sampler_audio_t::sample_rate,
+            true, &pcm, &frames);
+          loaded = result == mp3_decode_result_t::ok
+            && sampler_pool_t::loadSynthPcmOwned(synth_index, display_name.c_str(),
+                                                  pcm, frames,
+                                                  sampler_audio_t::sample_rate);
+          if (!loaded && pcm) { free(pcm); }
+        } else if (length > 4 && has_lower_suffix(path, ".ktsynth")) {
+          loaded = sampler_pool_t::loadSynthKtSynth(synth_index, display_name.c_str(),
+                                                     data, (size_t)length);
+        } else if (length > 4) {
+          loaded = sampler_pool_t::loadSynthWav(synth_index, display_name.c_str(),
+                                                 data, (size_t)length);
+        }
+        free(data);
+      }
+    }
+  }
+  sampler_pool_t::setProgressCallback(nullptr);
+
+  kit_edit_state = kit_edit_state_t::idle;
+  menu_cursor = kind == synth_file_kind_t::kantan_synth ? 2 : 1;
+  synth_file_kind = synth_file_kind_t::none;
+  menu_depth = menu_page_depth(menu_page);
+  if (loaded) {
+    auto& slot = sampler_pool_t::synth_source[synth_index];
+    snprintf(slot.file_path, sizeof(slot.file_path), "%s", path.c_str());
+    page_settings(target).source = kind == synth_file_kind_t::kantan_synth
+      ? synth_tone_source_t::kantan_synth : synth_tone_source_t::file;
+    sampler_audio_t::setOutputMuted(false);
+    apply_synth_tones(true);
+    save_resume_kit();
+    schedule_internal_synth_restore(80);
+    show_status_message("Sound Set", 1600, false);
+  } else {
+    show_status_message("Sound Load Failed", 1800, false);
+  }
+  draw_menu_header(true);
+  draw_menu(true);
 }
 
 static bool load_audio_to_pad(uint8_t pad, const char* path, const char* display_name,
@@ -26617,6 +27910,89 @@ static const sample_source_t* find_builtin_sample_source(const char* name)
   return nullptr;
 }
 
+static const ktsynth_source_t* find_builtin_ktsynth_source(const char* name)
+{
+  if (!name) { return nullptr; }
+  for (const auto& source : builtin_ktsynths) {
+    if (!strcmp(source.name, name)) { return &source; }
+  }
+  return nullptr;
+}
+
+static bool load_builtin_ktsynth(uint8_t synth_index,
+                                 const ktsynth_source_t& source)
+{
+  if (!sampler_pool_t::loadSynthKtSynth(synth_index, source.name,
+                                        source.data, source.size())) {
+    return false;
+  }
+  snprintf(sampler_pool_t::synth_source[synth_index].name,
+           sizeof(sampler_pool_t::synth_source[synth_index].name),
+           "%s", source.name);
+  return true;
+}
+
+static const beat_sound_t* find_builtin_beat_sound(const char* name,
+                                                   uint8_t order_hint = 0xFF)
+{
+  if (!name) { return nullptr; }
+  const beat_sound_t* kits[] = {
+    acoustic_beat_sounds, dance_beat_sounds, chiptune_beat_sounds
+  };
+  for (const auto* kit : kits) {
+    for (uint8_t order = 0; order < def::pad::pad_count; ++order) {
+      if (!strcmp(name, kit[order].source)) { return &kit[order]; }
+    }
+  }
+#if defined(KANPLAY_AMY_INTEGRATION)
+  // Migrate Resume data written by the former embedded-WAV kits. Full Project
+  // saves carry their own WAV assets, so only immutable builtin identifiers
+  // need this compatibility map.
+  static constexpr const char* prior_amy_acoustic[] = {
+    "AMY KICK DEEP", "AMY SNARE SOFT", "AMY SIDE", "AMY CLAP",
+    "AMY TOM LOW", "AMY TOM MID", "AMY TOM HIGH", "AMY HAT CLOSED",
+    "AMY SHAKER", "AMY HAT ACCENT", "AMY COWBELL", "AMY HAT OPEN",
+  };
+  static constexpr const char* legacy_sources[][def::pad::pad_count] = {
+    { "KICK", "SNARE", "RIM", "CLAP", "TOM LOW", "TOM MID", "TOM HIGH", "HAT CLOSE",
+      "SHAKER", "CRASH", "RIDE", "HAT" },
+    { "DANCE KICK", "DANCE SNARE", "DANCE RIM", "DANCE CLAP", "DANCE TOM L", "DANCE TOM M",
+      "DANCE TOM H", "DANCE HAT C", "DANCE SHAKER", "DANCE CRASH", "DANCE RIDE", "DANCE HAT O" },
+    { "CHIP KICK", "CHIP SNARE", "CHIP RIM", "CHIP CLAP", "CHIP TOM", "CHIP TOM", "CHIP TOM",
+      "CHIP HAT C", "CHIP COWBELL", "CHIP COWBELL", "CHIP RIM", "CHIP HAT O" },
+  };
+  const beat_sound_t* replacement_kits[] = {
+    acoustic_beat_sounds, dance_beat_sounds, chiptune_beat_sounds
+  };
+  if (order_hint < def::pad::pad_count) {
+    if (!strcmp(name, prior_amy_acoustic[order_hint])) {
+      return &acoustic_beat_sounds[order_hint];
+    }
+    for (uint8_t kit = 0; kit < 3; ++kit) {
+      if (!strcmp(name, legacy_sources[kit][order_hint])) {
+        return &replacement_kits[kit][order_hint];
+      }
+    }
+  }
+#endif
+  return nullptr;
+}
+
+static bool load_builtin_beat_sound(uint8_t pad, const char* display_name,
+                                    const beat_sound_t& sound)
+{
+  if (sound.amy_pcm != 0xFF) {
+    const int16_t* pcm = nullptr;
+    uint32_t frames = 0;
+    uint32_t sample_rate = 0;
+    return sampler_amy_engine::pcmSample(sound.amy_pcm, &pcm, &frames, &sample_rate)
+        && beat_pool_t::loadPcm(pad, display_name, pcm, frames, sample_rate);
+  }
+  const auto* source = find_builtin_sample_source(sound.source);
+  return source && beat_pool_t::loadWav(pad, display_name,
+                                        source->data, source->size());
+}
+
 static bool load_builtin_beat_sounds(void)
 {
   // Display order is the physical bottom row first. Reusing the compact
@@ -26632,15 +28008,13 @@ static bool load_builtin_beat_sounds(void)
   for (uint8_t order = 0; order < def::pad::pad_count; ++order) {
     draw_busy_status_dots_tick();
     const uint8_t pad = display_order_to_pad(order);
-    const auto* source = find_builtin_sample_source(sounds[order].source);
-    if (!source || !beat_pool_t::loadWav(pad, beat_pad_labels[order],
-                                         source->data, source->size())) {
+    if (!load_builtin_beat_sound(pad, beat_pad_labels[order], sounds[order])) {
       ok = false;
       continue;
     }
     auto& slot = beat_pool_t::slot[pad];
     slot.pitch_q8 = sounds[order].pitch_q8;
-    snprintf(slot.file_path, sizeof(slot.file_path), "builtin:%s", source->name);
+    snprintf(slot.file_path, sizeof(slot.file_path), "builtin:%s", sounds[order].source);
   }
   // P8/P12 are the closed/open hat pair. `false` means membership in the
   // Beat choke group, not that the Pad itself is disabled.
@@ -27687,6 +29061,7 @@ static bool play_menu_pattern_preview(const char* source)
     const bool use_active = beat_format == beat_format_t::pattern && active.isValid();
     wav_info_t wav = {};
     const sample_source_t* builtin = nullptr;
+    const int16_t* builtin_pcm = nullptr;
     uint32_t source_rate = 0;
     uint32_t source_frames = 0;
     uint16_t pitch_q8 = 256;
@@ -27697,10 +29072,16 @@ static bool play_menu_pattern_preview(const char* source)
       pitch_q8 = active.pitch_q8;
       volume_q8 = active.volume_q8;
     } else {
-      builtin = find_builtin_sample_source(fallback_sounds[event.order].source);
-      if (!builtin || !parse_wav(builtin->data, builtin->size(), &wav)) { continue; }
-      source_rate = wav.sample_rate;
-      source_frames = wav.frames;
+      const auto& fallback = fallback_sounds[event.order];
+      if (fallback.amy_pcm != 0xFF) {
+        if (!sampler_amy_engine::pcmSample(fallback.amy_pcm, &builtin_pcm,
+                                           &source_frames, &source_rate)) { continue; }
+      } else {
+        builtin = find_builtin_sample_source(fallback.source);
+        if (!builtin || !parse_wav(builtin->data, builtin->size(), &wav)) { continue; }
+        source_rate = wav.sample_rate;
+        source_frames = wav.frames;
+      }
       pitch_q8 = fallback_sounds[event.order].pitch_q8;
     }
     if (!source_rate || !source_frames || !pitch_q8) { continue; }
@@ -27721,6 +29102,9 @@ static bool play_menu_pattern_preview(const char* source)
       if (use_active) {
         a = active.pcm[active.playStart() + frame];
         b = active.pcm[active.playStart() + next_frame];
+      } else if (builtin_pcm) {
+        a = builtin_pcm[frame];
+        b = builtin_pcm[next_frame];
       } else {
         a = wav_mono_frame(wav, frame);
         b = wav_mono_frame(wav, next_frame);
@@ -27770,11 +29154,10 @@ static void clear_active_beat(void)
   beat_name[0] = 0;
 }
 
-static void apply_builtin_sample_preset(uint8_t pad, const sample_source_t& source)
+static void apply_builtin_sample_preset_to_slot(sample_slot_t& slot,
+                                                 const sample_source_t& source)
 {
-  if (pad >= def::pad::pad_count || !source.hasSynthPreset()) { return; }
-  auto& slot = sampler_pool_t::slot[pad];
-  if (!slot.isValid() || slot.sample_rate == 0) { return; }
+  if (!source.hasSynthPreset() || !slot.isValid() || slot.sample_rate == 0) { return; }
 
   const auto frame_at_ms = [&slot](uint16_t ms) {
     return (uint32_t)(((uint64_t)slot.sample_rate * ms) / 1000u);
@@ -27792,7 +29175,17 @@ static void apply_builtin_sample_preset(uint8_t pad, const sample_source_t& sour
   slot.synth_loop_crossfade = (uint16_t)std::min<uint32_t>(
     frame_at_ms(source.synth_loop_crossfade_ms), (loop_end - loop_start) / 3u);
   slot.synth_sustain_mode = sample_sustain_mode_t::manual;
+  slot.synth_attack_ms = source.synth_attack_ms;
   slot.synth_release_ms = source.synth_release_ms;
+  set_sample_synth_tune(slot, source.synth_tune_cents);
+  slot.volume_q8 = std::min<uint16_t>(source.default_gain_q8, 512);
+}
+
+static void apply_builtin_sample_preset(uint8_t pad, const sample_source_t& source)
+{
+  if (pad < def::pad::pad_count) {
+    apply_builtin_sample_preset_to_slot(sampler_pool_t::slot[pad], source);
+  }
 }
 
 static void load_builtin_samples(void)
@@ -27915,15 +29308,18 @@ static void load_factory_start_project(void)
   sampler_audio_t::setMasterDelayFrames(fx_delay_frames());
 
   melody_settings = {
-    synth_tone_source_t::general_midi, 90, 9, 0, 0, 0, 90,
+    synth_tone_source_t::general_midi, factory_melody_program, 9,
+    0, 0, 0, factory_melody_volume,
     pitch_bend_range_t::semitone
   };
   chord_settings = {
-    synth_tone_source_t::general_midi, 94, 9, 0, 0, 0, 80,
+    synth_tone_source_t::general_midi, factory_chord_program, 9,
+    0, 0, 0, factory_chord_volume,
     pitch_bend_range_t::semitone
   };
   bass_settings = {
-    synth_tone_source_t::general_midi, 38, 9, 0, 0, 0, 90,
+    synth_tone_source_t::general_midi, factory_bass_program, 9,
+    0, 0, 0, factory_bass_volume,
     pitch_bend_range_t::semitone
   };
   melody_follow_harmony_key = true;
@@ -27962,9 +29358,9 @@ static int load_sd_samples(void) {
     std::vector<kp::file_info_string_t> list;
     kp::storage_sd.getFileList(list, "/sampler/samples", "");
 
-    // WAV / MP3のみ抽出 (大文字小文字を問わない)
+    // WAV / MP3のみ抽出。KANTAN Synthは専用音色選択から読み込む。
     list.erase(std::remove_if(list.begin(), list.end(), [](const kp::file_info_string_t& f) {
-      return !is_audio_file_name(f.filename);
+      return !is_sampler_file_name(f.filename);
     }), list.end());
 
     // ファイル名の若い順で最大12個を、左下Pad 1から順に割り当てる。
@@ -27988,7 +29384,8 @@ static int load_sd_samples(void) {
       if (tmp == nullptr) { break; }
       int len = kp::storage_sd.loadFromFileToMemory(full.c_str(), tmp, fsize);
       if (len > 4) {
-        std::string name = f.filename.substr(0, f.filename.size() - 4);
+        const size_t dot = f.filename.find_last_of('.');
+        std::string name = dot == std::string::npos ? f.filename : f.filename.substr(0, dot);
         uint8_t pad = display_order_to_pad((uint8_t)loaded_count);
         if (load_audio_memory_to_pad(pad, full.c_str(), name.c_str(), tmp, len)) {
           snprintf(sampler_pool_t::slot[pad].file_path, sizeof(sampler_pool_t::slot[pad].file_path), "%s", full.c_str());
@@ -28021,6 +29418,9 @@ static void clear_kit(bool redraw)
     sampler_pool_t::erase(i);
     pads[i].pressed = false;
     pads[i].playing_shown = false;
+  }
+  for (uint8_t i = 0; i < sampler_pool_t::synth_source_count; ++i) {
+    sampler_pool_t::eraseSynth(i);
   }
   recording_pad = -1;
   set_rec_wave_pad(-1);
@@ -28595,6 +29995,23 @@ static void load_chop_metadata(JsonObjectConst object, sample_slot_t& slot)
   }
 }
 
+static bool save_json_document(kp::storage_base_t& storage, const char* path,
+                               const JsonDocument& doc)
+{
+  // ArduinoJson already owns one dynamic representation of the complete
+  // Project. Serializing into std::string creates a second heap copy and can
+  // exhaust the smaller runtime heap while AMY and its oscillators are alive.
+  // Use the app's PSRAM-backed temporary allocator for the output copy.
+  const size_t capacity = measureJson(doc) + 1u;
+  uint8_t* output = temp_alloc(capacity);
+  if (output == nullptr) { return false; }
+  const size_t length = serializeJson(doc, reinterpret_cast<char*>(output), capacity);
+  const bool ok = length > 0
+               && storage.saveFromMemoryToFile(path, output, length) >= 0;
+  free(output);
+  return ok;
+}
+
 static bool save_sample_kit_to_storage(kp::storage_base_t& storage, const char* path)
 {
   if (!path || !storage.beginStorage()) { return false; }
@@ -28628,7 +30045,9 @@ static bool save_sample_kit_to_storage(kp::storage_base_t& storage, const char* 
     s["synthLoopEnd"] = slot.synth_loop_end;
     s["synthLoopCrossfade"] = slot.synth_loop_crossfade;
     s["synthSustainMode"] = (uint8_t)slot.synth_sustain_mode;
+    s["synthAttackMs"] = slot.synth_attack_ms;
     s["synthReleaseMs"] = slot.synth_release_ms;
+    s["synthTuneCents"] = slot.synth_tune_cents;
     s["reverse"] = slot.reverse;
     s["hold"] = slot.hold_enabled;
     s["choke"] = slot.choke_enabled;
@@ -28639,9 +30058,7 @@ static bool save_sample_kit_to_storage(kp::storage_base_t& storage, const char* 
     s["beatAnchorFrame"] = slot.beat_anchor_frame;
     save_chop_metadata(s, slot);
   }
-  std::string out;
-  serializeJson(doc, out);
-  return storage.saveFromMemoryToFile(path, (const uint8_t*)out.data(), out.size()) >= 0;
+  return save_json_document(storage, path, doc);
 }
 
 static bool save_kit_to_storage(kp::storage_base_t& storage, const char* path)
@@ -28680,7 +30097,9 @@ static bool save_kit_to_storage(kp::storage_base_t& storage, const char* path)
     s["synthLoopEnd"] = slot.synth_loop_end;
     s["synthLoopCrossfade"] = slot.synth_loop_crossfade;
     s["synthSustainMode"] = (uint8_t)slot.synth_sustain_mode;
+    s["synthAttackMs"] = slot.synth_attack_ms;
     s["synthReleaseMs"] = slot.synth_release_ms;
+    s["synthTuneCents"] = slot.synth_tune_cents;
     s["reverse"] = slot.reverse;
     s["hold"] = slot.hold_enabled;
     s["choke"] = slot.choke_enabled;
@@ -28801,30 +30220,90 @@ static bool save_kit_to_storage(kp::storage_base_t& storage, const char* path)
     ? sampler_music_player_t::path() : "";
   music["volume"] = music_track_volume;
   JsonObject synth = doc["synth"].to<JsonObject>();
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+  synth["engine"] = "amy-basic-v2";
+#endif
   synth["key"] = harmony_key();
   synth["scale"] = harmony_scale;
   synth["tuningCentsX10"] = harmony_tuning_cents_x10;
+  auto save_synth_source = [&](JsonObject part, performance_page_t page,
+                               const char* asset_name) -> bool {
+    const auto source = page_settings(page).source;
+    if (source != synth_tone_source_t::file
+     && source != synth_tone_source_t::kantan_synth) {
+      return true;
+    }
+    const uint8_t index = synth_source_slot_index(page);
+    if (index >= sampler_pool_t::synth_source_count) { return false; }
+    const auto& slot = sampler_pool_t::synth_source[index];
+    if (!slot.isValid()) { return false; }
+    std::string file = slot.file_path;
+    if (!is_resume) {
+      char asset_path[128];
+      snprintf(asset_path, sizeof(asset_path), "%s/%s.wav",
+               asset_dir.c_str(), asset_name);
+      if (!save_pcm_as_wav(storage, asset_path, slot.pcm, slot.frames,
+                           slot.sample_rate)) {
+        return false;
+      }
+      file = asset_path;
+    }
+    part["file"] = file;
+    part["name"] = slot.name;
+    part["start"] = slot.start_frame;
+    part["end"] = slot.end_frame;
+    part["sampleVolume"] = slot.volume_q8;
+    part["samplePitch"] = slot.pitch_q8;
+    part["baseNote"] = slot.base_note;
+    part["baseNoteAuto"] = slot.base_note_auto;
+    part["synthLoopStart"] = slot.synth_loop_start;
+    part["synthLoopEnd"] = slot.synth_loop_end;
+    part["synthLoopCrossfade"] = slot.synth_loop_crossfade;
+    part["synthSustainMode"] = (uint8_t)slot.synth_sustain_mode;
+    part["synthAttackMs"] = slot.synth_attack_ms;
+    part["synthReleaseMs"] = slot.synth_release_ms;
+    part["synthTuneCents"] = slot.synth_tune_cents;
+    return true;
+  };
   JsonObject melody = synth["melody"].to<JsonObject>();
   melody["source"] = (uint8_t)melody_settings.source;
   melody["program"] = melody_settings.program;
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+  melody["amyTone"] = melody_settings.program;
+#endif
   melody["pad"] = melody_settings.pad;
   melody["octave"] = melody_settings.octave;
   melody["pitchBendRange"] = (uint8_t)melody_settings.pitch_bend_range;
   melody["volume"] = melody_settings.volume;
   melody["followHarmonyKey"] = melody_follow_harmony_key;
+  if (!save_synth_source(melody, performance_page_t::melody, "synthMelody")) {
+    return false;
+  }
   JsonObject chord = synth["chord"].to<JsonObject>();
   chord["source"] = (uint8_t)chord_settings.source;
   chord["program"] = chord_settings.program;
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+  chord["amyTone"] = chord_settings.program;
+#endif
   chord["pad"] = chord_settings.pad;
   chord["octave"] = chord_settings.octave;
   chord["volume"] = chord_settings.volume;
+  if (!save_synth_source(chord, performance_page_t::chord, "synthChord")) {
+    return false;
+  }
   JsonObject bass = synth["bass"].to<JsonObject>();
   bass["source"] = (uint8_t)bass_settings.source;
   bass["program"] = bass_settings.program;
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+  bass["amyTone"] = bass_settings.program;
+#endif
   bass["pad"] = bass_settings.pad;
   bass["octave"] = bass_settings.octave;
   bass["pitchBendRange"] = (uint8_t)bass_settings.pitch_bend_range;
   bass["volume"] = bass_settings.volume;
+  if (!save_synth_source(bass, performance_page_t::bass, "synthBass")) {
+    return false;
+  }
   // Controller routing belongs to the device, not to a musical Project.
   // Resume keeps it across power cycles; Project/Kit files never replace it.
   if (is_resume) {
@@ -28879,9 +30358,7 @@ static bool save_kit_to_storage(kp::storage_base_t& storage, const char* path)
     }
   }
 
-  std::string out;
-  serializeJson(doc, out);
-  return storage.saveFromMemoryToFile(path, (const uint8_t*)out.c_str(), out.size()) >= 0;
+  return save_json_document(storage, path, doc);
 }
 
 static bool load_kit_file(const char* path)
@@ -28936,8 +30413,12 @@ static bool load_kit_from_storage(kp::storage_base_t& storage, const char* path,
     slot.synth_sustain_mode = (sample_sustain_mode_t)std::min<uint8_t>(
       s["synthSustainMode"] | (uint8_t)sample_sustain_mode_t::automatic,
       (uint8_t)sample_sustain_mode_t::manual);
+    slot.synth_attack_ms = std::clamp<uint16_t>(
+      s["synthAttackMs"] | slot.synth_attack_ms, 0, 5000);
     slot.synth_release_ms = std::clamp<uint16_t>(
       s["synthReleaseMs"] | 120, 10, 2000);
+    set_sample_synth_tune(slot, std::clamp<int16_t>(
+      s["synthTuneCents"] | slot.synth_tune_cents, -100, 100));
     if (slot.synth_sustain_mode == sample_sustain_mode_t::manual) {
       const uint32_t loop_start = s["synthLoopStart"] | slot.synth_loop_start;
       const uint32_t loop_end = s["synthLoopEnd"] | slot.synth_loop_end;
@@ -29075,9 +30556,14 @@ static bool load_kit_from_storage(kp::storage_base_t& storage, const char* path,
       bool loaded = false;
       if (!strncmp(file, "builtin:", 8)) {
         const char* name = builtin_sample_name(file);
-        const auto* source = find_builtin_sample_source(name);
-        loaded = source && beat_pool_t::loadWav((uint8_t)pad, item["name"] | name,
-                                                source->data, source->size());
+        if (const auto* beat_source = find_builtin_beat_sound(
+              name, pad_display_number((uint8_t)pad) - 1u)) {
+          loaded = load_builtin_beat_sound((uint8_t)pad, item["name"] | name,
+                                           *beat_source);
+        } else if (const auto* source = find_builtin_sample_source(name)) {
+          loaded = beat_pool_t::loadWav((uint8_t)pad, item["name"] | name,
+                                        source->data, source->size());
+        }
       } else if (allow_sd_assets && kp::storage_sd.beginStorage()) {
         const int audio_size = kp::storage_sd.getFileSize(file);
         if (audio_size > 4 && audio_size <= 3200 * 1024) {
@@ -29241,12 +30727,28 @@ static bool load_kit_from_storage(kp::storage_base_t& storage, const char* path,
   }
   normalize_fx_target_for_music_presence(sampler_music_player_t::hasTrack());
   JsonObject synth = doc["synth"].as<JsonObject>();
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+  const char* saved_amy_engine = synth["engine"] | "";
+  const bool saved_amy_tones = !strcmp(saved_amy_engine, "amy-basic-v1")
+                            || !strcmp(saved_amy_engine, "amy-basic-v2");
+  // A missing part in an old or partial project must not inherit the tone
+  // from the project that happened to be loaded previously.
+  melody_settings.program = factory_melody_program;
+  chord_settings.program = factory_chord_program;
+#endif
   JsonObject melody = synth["melody"].as<JsonObject>();
   melody_follow_harmony_key = true;
   if (!melody.isNull()) {
-    melody_settings.source = (melody["source"] | 0) == 1
-      ? synth_tone_source_t::pad : synth_tone_source_t::general_midi;
+    melody_settings.source = (synth_tone_source_t)std::clamp<int>(
+      melody["source"] | 0, 0, (int)synth_tone_source_t::kantan_synth);
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+    melody_settings.program = saved_amy_tones
+      ? std::clamp<int>(melody["amyTone"] | factory_melody_program, 0,
+                        sampler_amy_engine::tone_count - 1)
+      : factory_melody_program;
+#else
     melody_settings.program = std::min<int>(127, melody["program"] | melody_settings.program);
+#endif
     melody_settings.pad = std::min<int>(def::pad::pad_count - 1, melody["pad"] | melody_settings.pad);
     melody_settings.octave = std::clamp<int>(melody["octave"] | (int)melody_settings.octave, -2, 2);
     melody_settings.pitch_bend_range = (melody["pitchBendRange"] | 0) == 1
@@ -29257,9 +30759,16 @@ static bool load_kit_from_storage(kp::storage_base_t& storage, const char* path,
   }
   JsonObject chord = synth["chord"].as<JsonObject>();
   if (!chord.isNull()) {
-    chord_settings.source = (chord["source"] | 0) == 1
-      ? synth_tone_source_t::pad : synth_tone_source_t::general_midi;
+    chord_settings.source = (synth_tone_source_t)std::clamp<int>(
+      chord["source"] | 0, 0, (int)synth_tone_source_t::kantan_synth);
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+    chord_settings.program = saved_amy_tones
+      ? std::clamp<int>(chord["amyTone"] | factory_chord_program, 0,
+                        sampler_amy_engine::tone_count - 1)
+      : factory_chord_program;
+#else
     chord_settings.program = std::min<int>(127, chord["program"] | chord_settings.program);
+#endif
     chord_settings.pad = std::min<int>(def::pad::pad_count - 1, chord["pad"] | chord_settings.pad);
     chord_settings.octave = std::clamp<int>(chord["octave"] | (int)chord_settings.octave, -2, 2);
     chord_settings.volume = part_volume_percent_from_step(
@@ -29267,12 +30776,20 @@ static bool load_kit_from_storage(kp::storage_base_t& storage, const char* path,
   }
   JsonObject bass = synth["bass"].as<JsonObject>();
   bass_settings = {
-    synth_tone_source_t::general_midi, 38, factory_pad_sound_pad, 0, 0, 0, 80
+    synth_tone_source_t::general_midi, factory_bass_program,
+    factory_pad_sound_pad, 0, 0, 0, factory_bass_volume
   };
   if (!bass.isNull()) {
-    bass_settings.source = (bass["source"] | 0) == 1
-      ? synth_tone_source_t::pad : synth_tone_source_t::general_midi;
+    bass_settings.source = (synth_tone_source_t)std::clamp<int>(
+      bass["source"] | 0, 0, (int)synth_tone_source_t::kantan_synth);
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+    bass_settings.program = saved_amy_tones
+      ? std::clamp<int>(bass["amyTone"] | factory_bass_program, 0,
+                        sampler_amy_engine::tone_count - 1)
+      : factory_bass_program;
+#else
     bass_settings.program = std::min<int>(127, bass["program"] | bass_settings.program);
+#endif
     bass_settings.pad = std::min<int>(def::pad::pad_count - 1, bass["pad"] | bass_settings.pad);
     bass_settings.octave = std::clamp<int>(
       bass["octave"] | (int)bass_settings.octave, -2, 2);
@@ -29281,6 +30798,100 @@ static bool load_kit_from_storage(kp::storage_base_t& storage, const char* path,
     bass_settings.volume = part_volume_percent_from_step(
       part_volume_step_from_percent(std::min<int>(100, bass["volume"] | bass_settings.volume)));
   }
+  auto restore_synth_source = [&](performance_page_t page, JsonObject part) {
+    auto& settings = page_settings(page);
+    if (settings.source != synth_tone_source_t::file
+     && settings.source != synth_tone_source_t::kantan_synth) {
+      return;
+    }
+    const uint8_t index = synth_source_slot_index(page);
+    const char* file = part["file"] | "";
+    const char* name = part["name"] | "Synth";
+    bool loaded = false;
+    if (index >= sampler_pool_t::synth_source_count || !file[0]) {
+      settings.source = synth_tone_source_t::general_midi;
+      return;
+    }
+    if (!strncmp(file, "builtin:", 8)) {
+      const auto* builtin = find_builtin_ktsynth_source(builtin_sample_name(file));
+      loaded = builtin && load_builtin_ktsynth(index, *builtin);
+    } else if (!allow_sd_assets) {
+      skipped_sd_assets = true;
+    } else if (kp::storage_sd.beginStorage()) {
+      const int audio_size = kp::storage_sd.getFileSize(file);
+      if (audio_size > 4 && audio_size <= 3200 * 1024) {
+        uint8_t* audio_data = temp_alloc((size_t)audio_size);
+        if (audio_data) {
+          const int audio_len = kp::storage_sd.loadFromFileToMemory(
+            file, audio_data, (size_t)audio_size);
+          if (audio_len > 4 && has_lower_suffix(file, ".mp3")) {
+            int16_t* pcm = nullptr;
+            uint32_t frames = 0;
+            const auto result = decode_mp3_mono_48k(audio_data, (size_t)audio_len,
+              sampler_pool_t::max_sample_sec * sampler_audio_t::sample_rate,
+              true, &pcm, &frames);
+            loaded = result == mp3_decode_result_t::ok
+              && sampler_pool_t::loadSynthPcmOwned(index, name, pcm, frames,
+                                                    sampler_audio_t::sample_rate);
+            if (!loaded && pcm) { free(pcm); }
+          } else if (audio_len > 4 && has_lower_suffix(file, ".ktsynth")) {
+            loaded = sampler_pool_t::loadSynthKtSynth(index, name,
+                                                       audio_data, (size_t)audio_len);
+          } else if (audio_len > 4) {
+            // Project assets already contain the final PCM amplitude. Resume
+            // paths point to user files and still receive normal import gain.
+            loaded = is_resume
+              ? sampler_pool_t::loadSynthWav(index, name, audio_data, (size_t)audio_len)
+              : sampler_pool_t::loadSynthWavPreserved(index, name, audio_data,
+                                                       (size_t)audio_len);
+          }
+          free(audio_data);
+        }
+      }
+    }
+    if (!loaded) {
+      settings.source = synth_tone_source_t::general_midi;
+      return;
+    }
+
+    auto& slot = sampler_pool_t::synth_source[index];
+    snprintf(slot.file_path, sizeof(slot.file_path), "%s", file);
+    slot.start_frame = std::min<uint32_t>(part["start"] | 0u, slot.frames);
+    slot.end_frame = std::min<uint32_t>(part["end"] | slot.frames, slot.frames);
+    if (slot.end_frame <= slot.start_frame) { slot.end_frame = slot.frames; }
+    slot.volume_q8 = std::clamp<uint16_t>(part["sampleVolume"] | slot.volume_q8,
+                                          0u, 512u);
+    slot.pitch_q8 = std::clamp<uint16_t>(part["samplePitch"] | slot.pitch_q8,
+                                         32u, 2048u);
+    slot.base_note = std::min<uint8_t>(part["baseNote"] | slot.base_note, 127);
+    slot.base_note_auto = part["baseNoteAuto"] | slot.base_note_auto;
+    slot.synth_attack_ms = std::clamp<uint16_t>(
+      part["synthAttackMs"] | slot.synth_attack_ms, 0u, 5000u);
+    slot.synth_release_ms = std::clamp<uint16_t>(
+      part["synthReleaseMs"] | slot.synth_release_ms, 10u, 2000u);
+    set_sample_synth_tune(slot, std::clamp<int16_t>(
+      part["synthTuneCents"] | slot.synth_tune_cents, -100, 100));
+    slot.synth_sustain_mode = (sample_sustain_mode_t)std::min<uint8_t>(
+      part["synthSustainMode"] | (uint8_t)slot.synth_sustain_mode,
+      (uint8_t)sample_sustain_mode_t::manual);
+    if (slot.synth_sustain_mode == sample_sustain_mode_t::manual) {
+      const uint32_t loop_start = part["synthLoopStart"] | slot.synth_loop_start;
+      const uint32_t loop_end = part["synthLoopEnd"] | slot.synth_loop_end;
+      if (loop_start >= slot.playStart() && loop_end <= slot.playEnd()
+       && loop_end > loop_start + 31) {
+        slot.synth_loop_start = loop_start;
+        slot.synth_loop_end = loop_end;
+        slot.synth_loop_crossfade = std::min<uint16_t>(
+          part["synthLoopCrossfade"] | slot.synth_loop_crossfade,
+          (uint16_t)((loop_end - loop_start) / 4));
+      } else {
+        slot.synth_sustain_mode = sample_sustain_mode_t::off;
+      }
+    }
+  };
+  restore_synth_source(performance_page_t::melody, melody);
+  restore_synth_source(performance_page_t::chord, chord);
+  restore_synth_source(performance_page_t::bass, bass);
   const uint8_t restored_key = std::min<int>(11, synth["key"] | 0);
   const uint8_t restored_scale = std::min<int>((int)sampler_scale_count - 1,
     synth["scale"] | 0);
@@ -29343,6 +30954,17 @@ static bool load_kit_from_storage(kp::storage_base_t& storage, const char* path,
         usb_gamepad_assign[code] = target;
       }
     }
+    // Older startup code left some assignment tables zero-filled. Once such a
+    // Resume was saved, every possible KEY/input appeared assigned to the same
+    // pad after each reboot. Only repair that exact impossible legacy shape;
+    // sparse and intentional user mappings remain untouched.
+    bool repaired_assignments = false;
+    repaired_assignments |= repair_legacy_zero_filled_assignments(midi_note_assign);
+    repaired_assignments |= repair_legacy_zero_filled_assignments(midi_cc_assign);
+    repaired_assignments |= repair_legacy_zero_filled_assignments(external_button_assign);
+    repaired_assignments |= repair_legacy_zero_filled_assignments(usb_keyboard_assign);
+    repaired_assignments |= repair_legacy_zero_filled_assignments(usb_gamepad_assign);
+    input_assign_repair_pending = repaired_assignments;
     uint8_t page = doc["performancePage"] | (uint8_t)performance_page_t::sample;
     if (page < (uint8_t)performance_page_t::max) { current_page = (performance_page_t)page; }
     if (current_page == performance_page_t::music
@@ -29353,7 +30975,9 @@ static bool load_kit_from_storage(kp::storage_base_t& storage, const char* path,
              doc["bleMidiAddress"] | "");
     snprintf(ble_preferred_name, sizeof(ble_preferred_name), "%s",
              doc["bleMidiName"] | "");
-    task_midi.setBLEMidiPreferredDevice(ble_preferred_address, ble_preferred_name);
+    if (!ble_preferred_connect_deferred && !ble_auto_reconnect_blocked) {
+      task_midi.setBLEMidiPreferredDevice(ble_preferred_address, ble_preferred_name);
+    }
     uint8_t source = doc["inputSource"] | (uint8_t)external_input_mode_t::off;
     if (source >= (uint8_t)external_input_mode_t::max) { source = (uint8_t)external_input_mode_t::off; }
     external_input_mode = (external_input_mode_t)source;
@@ -29411,7 +31035,23 @@ static void save_resume_kit(void)
   sampler_audio_t::stopAll();
   clear_sample_grid_loops();
   clear_menu_preview();
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+  // LittleFS writes temporarily own the flash cache. Drain the queued Note
+  // Offs, then park AMY's Core-0 renderer until the write has completed.
+  // Preserve a pause already owned by BLE connection setup.
+  const bool amy_was_paused = sampler_amy_engine::radioConnectionPaused();
+  if (!amy_was_paused) {
+    M5.delay(6);
+    sampler_amy_engine::setRadioConnectionPaused(true);
+    M5.delay(3);
+  }
+#endif
   save_kit_to_storage(kp::storage_littlefs, sampler_resume_path);
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+  if (!amy_was_paused) {
+    sampler_amy_engine::setRadioConnectionPaused(false);
+  }
+#endif
 }
 
 //-------------------------------------------------------------------------
@@ -29431,7 +31071,9 @@ static bool sampler_web_path_is_in(const char* path, const char* directory, cons
 static bool sampler_web_audio_path_is_in(const char* path, const char* directory)
 {
   return sampler_web_path_is_in(path, directory, "")
-      && is_audio_file_name(path);
+      && (is_audio_file_name(path)
+       || (strcmp(directory, sampler_sd_folders[0]) == 0
+        && has_lower_suffix(path, ".ktsynth")));
 }
 
 bool sampler_web_enqueue_command(const uint8_t* data, size_t size)
@@ -29495,6 +31137,7 @@ bool sampler_web_export_state(std::string& out)
   doc["version"] = 1;
   doc["commandRevision"] = sampler_web_command_revision;
   doc["sampleRate"] = sampler_audio_t::sample_rate;
+  doc["synthBackend"] = firmware_synth_backend_label;
   JsonObject folders = doc["folders"].to<JsonObject>();
   folders["samples"] = sampler_sd_folders[0];
   folders["loops"] = sampler_sd_folders[1];
@@ -29514,7 +31157,10 @@ bool sampler_web_export_state(std::string& out)
       item["loopStartMs"] = source.synth_loop_start_ms;
       item["loopEndMs"] = source.synth_loop_end_ms;
       item["loopCrossfadeMs"] = source.synth_loop_crossfade_ms;
+      item["attackMs"] = source.synth_attack_ms;
       item["releaseMs"] = source.synth_release_ms;
+      item["tuneCents"] = source.synth_tune_cents;
+      item["defaultGainQ8"] = source.default_gain_q8;
     }
   }
   JsonArray builtin_bgm_json = doc["builtinBackgrounds"].to<JsonArray>();
@@ -29546,7 +31192,9 @@ bool sampler_web_export_state(std::string& out)
     item["baseNote"] = slot.base_note;
     item["baseNoteAuto"] = slot.base_note_auto;
     item["synthSustainMode"] = (uint8_t)slot.synth_sustain_mode;
+    item["synthAttackMs"] = slot.synth_attack_ms;
     item["synthReleaseMs"] = slot.synth_release_ms;
+    item["synthTuneCents"] = slot.synth_tune_cents;
     item["synthLoopStart"] = slot.synth_loop_start;
     item["synthLoopEnd"] = slot.synth_loop_end;
     item["reverse"] = slot.reverse;
@@ -29849,6 +31497,14 @@ static void service_sampler_web_command(void)
       slot.synth_release_ms = std::clamp<uint16_t>(
         doc["synthReleaseMs"].as<uint16_t>(), 10, 2000);
     }
+    if (!doc["synthAttackMs"].isNull()) {
+      slot.synth_attack_ms = std::clamp<uint16_t>(
+        doc["synthAttackMs"].as<uint16_t>(), 0, 5000);
+    }
+    if (!doc["synthTuneCents"].isNull()) {
+      set_sample_synth_tune(slot, std::clamp<int16_t>(
+        doc["synthTuneCents"].as<int16_t>(), -100, 100));
+    }
     if (!doc["synthSustainMode"].isNull()) {
       const uint8_t mode = std::min<uint8_t>(
         doc["synthSustainMode"].as<uint8_t>(),
@@ -30041,6 +31697,12 @@ static void init(void)
 
   M5.Power.setChargeCurrent(200);
 
+#if defined(KANPLAY_AMY_PROBE)
+  // Benchmark before registry initialization starts MIDI and other runtime
+  // tasks, otherwise their scheduling and error logs contaminate the result.
+  setCpuFrequencyMhz(240);
+  run_amy_startup_probe();
+#endif
   kp::system_registry = new kp::system_registry_t();
   kp::system_registry->init();
   // 演奏開始後のpush_backで再確保を起こさず、最初の録音音を優先する。
@@ -30049,7 +31711,94 @@ static void init(void)
   // 明示的に選択するまで給電しない。起動中の不要なVBUS切替を避ける。
   kp::system_registry->midi_port_setting.setUSBPowerEnabled(false);
   M5.Power.setUsbOutput(false);
+
+  // A menu-driven input change is carried through reboot in RTC memory. For
+  // an ordinary boot, recover just enough resume state to know whether BLE
+  // must own its controller memory before AMY starts.
+  const bool applying_input_change_restart = consume_external_input_restart();
+  const external_input_mode_t requested_input_mode = external_input_mode;
+  const bool dedicated_input_config_loaded = load_external_input_config();
+  if (!dedicated_input_config_loaded) {
+    load_resume_ble_boot_config(applying_input_change_restart);
+  }
+  // The RTC hand-off always represents the newest menu selection. The small
+  // persistent record supplies the BLE peer fields, but may still contain the
+  // previous mode if power was lost during its write.
+  if (applying_input_change_restart) {
+    external_input_mode = requested_input_mode;
+  }
+
+  // I2S descriptors and sample buffers require DMA-capable internal memory.
+  // Reserve that fixed realtime path first. When BLE is selected, hold one
+  // contiguous arena across AMY startup and release it immediately before
+  // BLEDevice::init(), preventing either engine from fragmenting the other's
+  // startup memory.
   audio.start();
+  // Keep the microphone's I2S DMA arena contiguous while later subsystems
+  // consume the remaining internal RAM. It is handed back only for a take.
+  retain_internal_mic_dma_reserve();
+  void* ble_boot_arena = nullptr;
+  void* ble_boot_work_arena = nullptr;
+  void* ble_boot_aux_arena = nullptr;
+  void* ble_boot_gatt_arena = nullptr;
+#if !defined(M5UNIFIED_PC_BUILD)
+  if (external_input_mode == external_input_mode_t::ble_midi) {
+    ble_boot_arena = heap_caps_malloc(32 * 1024,
+                                      MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    ble_boot_work_arena = heap_caps_malloc(16 * 1024,
+                                           MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    ble_boot_aux_arena = heap_caps_malloc(16 * 1024,
+                                          MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    ble_boot_gatt_arena = heap_caps_malloc(16 * 1024,
+                                           MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  }
+#endif
+#if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
+  setCpuFrequencyMhz(240);
+  if (!sampler_amy_engine::start()) {
+    M5.Display.print("\nAMY init failed.\n");
+    M5.delay(3000);
+  }
+#endif
+  if (ble_boot_arena != nullptr) {
+    free(ble_boot_arena);
+    ble_boot_arena = nullptr;
+  }
+  if (ble_boot_work_arena != nullptr) {
+    free(ble_boot_work_arena);
+    ble_boot_work_arena = nullptr;
+  }
+  if (ble_boot_aux_arena != nullptr) {
+    free(ble_boot_aux_arena);
+    ble_boot_aux_arena = nullptr;
+  }
+  if (ble_boot_gatt_arena != nullptr) {
+    free(ble_boot_gatt_arena);
+    ble_boot_gatt_arena = nullptr;
+  }
+  task_midi.start();
+  ble_boot_recovery_stage = task_midi.consumeBLEMidiConnectCrashStage(
+    &ble_boot_recovery_free_kb, &ble_boot_recovery_largest_kb,
+    &ble_boot_recovery_midi_stack_kb, &ble_boot_recovery_callback_stack_kb);
+#if !defined(M5UNIFIED_PC_BUILD)
+  ble_boot_reset_reason = (uint8_t)esp_reset_reason();
+#endif
+  ble_auto_reconnect_blocked = ble_boot_recovery_stage != 0;
+  if (external_input_mode == external_input_mode_t::ble_midi) {
+    using namespace kp::def::command;
+    ble_preferred_connect_deferred = true;
+    kp::system_registry->midi_port_setting.setUSBMode(usb_device);
+    kp::system_registry->midi_port_setting.setBLEMIDI(midi_input);
+
+    // Wait only for BLEDevice::init(). Preferred-device discovery is deferred
+    // until the retained UI and Project have finished their startup work.
+    const uint32_t ble_boot_deadline = M5.millis() + 15000;
+    while (kp::system_registry->runtime_info.getMidiPortStateBLE()
+             == kp::def::command::midiport_info_t::mp_off
+        && (int32_t)(M5.millis() - ble_boot_deadline) < 0) {
+      M5.delay(10);
+    }
+  }
   sampler_audio_t::setVoiceFxTarget(audio_beat_voice, sampler_audio_t::fx_target_beat);
   for (uint8_t voice = 0; voice < beat_voice_count; ++voice) {
     sampler_audio_t::setVoiceFxTarget(beat_voice_base + voice, sampler_audio_t::fx_target_beat);
@@ -30069,7 +31818,6 @@ static void init(void)
     M5.Power.powerOff();
   }
   task_port_a.start();
-  task_midi.start();
 #if !defined(M5UNIFIED_PC_BUILD)
   sampler_web_command_mutex = xSemaphoreCreateMutex();
   touch_render_queue = xQueueCreate(1, sizeof(touch_render_state_t));
@@ -30082,10 +31830,25 @@ static void init(void)
                                   && xQueueAddToSet(touch_render_queue, ui_render_queue_set) == pdPASS
                                   && xQueueAddToSet(ui_tile_render_queue, ui_render_queue_set) == pdPASS;
   if (ui_render_queues_ready && touch_render_stopped != nullptr) {
-    if (xTaskCreatePinnedToCore(touch_render_task, "sampler_ui", 4096, nullptr,
-                                kp::def::system::task_priority_spi,
-                                &touch_render_task_handle,
-                                kp::def::system::task_cpu_spi) != pdPASS) {
+    BaseType_t ui_task_result = pdFAIL;
+#if defined(KANPLAY_AMY_INTEGRATION)
+    if (external_input_mode == external_input_mode_t::ble_midi) {
+      // Display transfers may use a PSRAM stack. Reserving their former 4 KB
+      // internal block for Bluedroid prevents the encrypted M-VAVE path from
+      // colliding with UI startup allocations.
+      ui_task_result = xTaskCreatePinnedToCoreWithCaps(
+        touch_render_task, "sampler_ui", 4096, nullptr,
+        kp::def::system::task_priority_spi, &touch_render_task_handle,
+        kp::def::system::task_cpu_spi, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+#endif
+    if (ui_task_result != pdPASS) {
+      ui_task_result = xTaskCreatePinnedToCore(
+        touch_render_task, "sampler_ui", 4096, nullptr,
+        kp::def::system::task_priority_spi, &touch_render_task_handle,
+        kp::def::system::task_cpu_spi);
+    }
+    if (ui_task_result != pdPASS) {
       touch_render_task_handle = nullptr;
     }
   }
@@ -30100,13 +31863,21 @@ static void init(void)
     touch_render_stopped = nullptr;
   }
 #endif
-  task_wifi.start();
+  // A BLE boot can leave too little contiguous internal RAM for the Wi-Fi
+  // worker stacks. Wi-Fi features stop BLE first and start these tasks from
+  // apply_wifi_radio_request() after the controller memory is released.
+  if (external_input_mode != external_input_mode_t::ble_midi) {
+    task_wifi.start();
+  }
 
-  wave_canvas.setColorDepth(16);
-  wave_canvas.createSprite(M5.Display.width(), wave_h);
-  // The waveform canvas remains in internal RAM for responsive performance.
-  // Menus are not rendered during Wi-Fi operations, so keeping their retained
-  // surface in PSRAM leaves enough internal heap for TLS and OTA buffers.
+  // BLE and AMY must coexist before the normal UI is constructed.  Allocate
+  // the large waveform surface directly in PSRAM on that boot path so it
+  // never creates a transient internal-RAM peak.
+  const bool ble_wave_canvas =
+    external_input_mode == external_input_mode_t::ble_midi;
+  create_wave_canvas(ble_wave_canvas);
+  // Outside BLE the waveform remains in internal RAM for responsive
+  // performance. Menus stay in PSRAM so TLS and OTA retain internal headroom.
   menu_canvas.setPsram(true);
   menu_canvas.setColorDepth(16);
   menu_canvas.createSprite(M5.Display.width(), menu_area_h);
@@ -30142,11 +31913,24 @@ static void init(void)
   std::fill(midi_note_assign, midi_note_assign + 128, (int16_t)midi_assign_target_t::none);
   std::fill(midi_cc_assign, midi_cc_assign + 128, (int16_t)midi_assign_target_t::none);
   std::fill(external_button_assign, external_button_assign + 32, (int16_t)midi_assign_target_t::none);
+  std::fill(usb_keyboard_assign, usb_keyboard_assign + 256, (int16_t)midi_assign_target_t::none);
+  std::fill(usb_gamepad_assign, usb_gamepad_assign + 256, (int16_t)midi_assign_target_t::none);
   load_sampler_folder_settings();
+  const external_input_mode_t boot_input_mode = external_input_mode;
+  char boot_ble_address[sizeof(ble_preferred_address)] = {};
+  char boot_ble_name[sizeof(ble_preferred_name)] = {};
+  snprintf(boot_ble_address, sizeof(boot_ble_address), "%s", ble_preferred_address);
+  snprintf(boot_ble_name, sizeof(boot_ble_name), "%s", ble_preferred_name);
   if (!load_resume_kit()) {
     load_factory_start_project();
   }
-  const bool applying_input_change_restart = consume_external_input_restart();
+  // Resumeの保存失敗や旧いinputSource値があっても、メニュー操作で
+  // RTCに渡した今回の切替先は起動完了まで最優先する。
+  if (applying_input_change_restart || dedicated_input_config_loaded) {
+    external_input_mode = boot_input_mode;
+    snprintf(ble_preferred_address, sizeof(ble_preferred_address), "%s", boot_ble_address);
+    snprintf(ble_preferred_name, sizeof(ble_preferred_name), "%s", boot_ble_name);
+  }
   if (!applying_input_change_restart
    && (external_input_mode == external_input_mode_t::usb_midi_host
     || external_input_mode == external_input_mode_t::usb_keyboard
@@ -30155,6 +31939,12 @@ static void init(void)
     // 自動再起動だけは上のRTCマーカーで選択したHostモードを一度適用する。
     external_input_mode = external_input_mode_t::off;
     usb_host_disabled_on_boot = true;
+    save_external_input_config();
+  }
+  if (input_assign_repair_pending) {
+    // Rewrite Resume before BLE auto-connect starts and internal heap becomes
+    // scarce, so the repaired assignments also survive the next reboot.
+    input_assign_repair_pending = false;
     save_resume_kit();
   }
   startup_loading_active = false;
@@ -30190,6 +31980,23 @@ static void init(void)
 
   draw_all();
   update_all_leds();
+  if (ble_preferred_connect_deferred && !ble_auto_reconnect_blocked) {
+    // The first scan can allocate Bluedroid result objects.  Starting it only
+    // after draw_all() prevents a failed scan from fragmenting the heap just
+    // before the large retained surfaces are constructed.
+    ble_preferred_connect_deferred = false;
+    begin_ble_connect_resource_guard();
+    task_midi.setBLEMidiPreferredDevice(ble_preferred_address, ble_preferred_name);
+  }
+  ble_preferred_connect_deferred = false;
+  if (ble_boot_recovery_stage != 0) {
+    char message[48];
+    snprintf(message, sizeof(message), "BLE S%u R%u F%u L%u M%u B%u",
+             ble_boot_recovery_stage, ble_boot_reset_reason,
+             ble_boot_recovery_free_kb, ble_boot_recovery_largest_kb,
+             ble_boot_recovery_midi_stack_kb, ble_boot_recovery_callback_stack_kb);
+    show_status_message(message, 6000, true);
+  }
   if (usb_host_disabled_on_boot) {
     show_status_message("USB Host reset to Off", 2400, true);
   }
@@ -30198,9 +32005,31 @@ static void init(void)
   // One clock tick may dispatch several voices plus pitch-bend MIDI. The
   // former 2KB stack was marginal for these nested C++ paths and could fail
   // only under dense loop automation, making the crash appear intermittent.
-  xTaskCreatePinnedToCore(loop_clock_task, "loopclk", 1024 * 4, nullptr,
-                          kp::def::system::task_priority_i2s - 1, nullptr,
-                          kp::def::system::task_cpu_i2s);
+  BaseType_t loop_task_result = pdFAIL;
+#if defined(KANPLAY_AMY_INTEGRATION)
+  if (external_input_mode == external_input_mode_t::ble_midi) {
+    loop_task_result = xTaskCreatePinnedToCoreWithCaps(
+      loop_clock_task, "loopclk", 1024 * 4, nullptr,
+      kp::def::system::task_priority_i2s - 1, &loop_clock_task_handle,
+      kp::def::system::task_cpu_i2s, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  }
+#endif
+  if (loop_task_result != pdPASS) {
+    loop_task_result = xTaskCreatePinnedToCore(
+      loop_clock_task, "loopclk", 1024 * 4, nullptr,
+      kp::def::system::task_priority_i2s - 1, &loop_clock_task_handle,
+      kp::def::system::task_cpu_i2s);
+  }
+  if (loop_task_result != pdPASS) {
+    // BLE/AMY can leave too little contiguous DRAM for a late task stack.
+    // Loop scheduling does not access flash-cache-disabled APIs, so PSRAM is
+    // a safe fallback. The main loop below remains the final safety net.
+    loop_task_result = xTaskCreatePinnedToCoreWithCaps(
+      loop_clock_task, "loopclk", 1024 * 4, nullptr,
+      kp::def::system::task_priority_i2s - 1, &loop_clock_task_handle,
+      kp::def::system::task_cpu_i2s, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  }
+  if (loop_task_result != pdPASS) { loop_clock_task_handle = nullptr; }
 #endif
 }
 
@@ -30360,8 +32189,9 @@ static void service_sampler_cpu_clock(uint32_t now)
 
 static void update(void)
 {
-  // 外部MIDIは画面・ボタンの処理より先にSAMへ渡す。重いUI更新中でも
-  // Note On/Offの順序を保ち、キーボード演奏の遅れを最小化する。
+  // With BLE selected the external controller is the primary instrument.
+  // Its Note queue is drained first, with a strict time/message budget so the
+  // Loop clock and local controls still receive a scheduling point.
   process_external_midi_input();
   process_external_button_input();
   process_usb_keyboard_input();
@@ -30490,6 +32320,13 @@ static void update(void)
   service_surface_sync(msec);
 #if defined (M5UNIFIED_PC_BUILD)
   service_loop(msec);
+#else
+  // Use the app loop only when task creation failed. A transient delay during
+  // BLE/FX work must not make two schedulers alternately advance loop_prev_pos;
+  // that can duplicate crossed events and sound like a Repeat effect.
+  if (loop_clock_task_handle == nullptr) {
+    service_loop_guarded(msec);
+  }
 #endif
 
   if (menu_visible || learn_state != learn_state_t::idle) {
@@ -30540,19 +32377,26 @@ static void update(void)
     sampler_music_player_t::state_t::idle;
   const auto music_state_now = sampler_music_player_t::state();
 #if !defined(M5UNIFIED_PC_BUILD)
-  // Music decoding and retained-surface transfers share Core 0. The decoder
-  // remains higher priority (3), but leaving the renderer at priority 1 made
-  // an already-cached page appear to redraw slowly throughout playback.
-  // Boost only while Music is audible; MIDI/I2S and the decoder still preempt
-  // it, so this improves visual response without weakening audio deadlines.
-  static bool music_ui_priority_boosted = false;
+  // Retained-surface transfers share Core 0 with Music decoding and AMY.
+  // A page switch is a bounded cached copy, so temporarily lift it above
+  // ordinary background UI work. AMY remains priority 4 and always preempts
+  // this task; sound deadlines therefore keep precedence over the visual.
+  static UBaseType_t applied_ui_priority = 0;
   const bool boost_music_ui = music_state_now == sampler_music_player_t::state_t::playing;
+  bool cached_page_transfer = false;
+  for (uint8_t i = 0; i < grid_cache_count; ++i) {
+    if (grid_cache_busy[i]) { cached_page_transfer = true; break; }
+  }
+  const bool page_switch_wave_transfer = wave_transfer_active
+                                      && wave_transfer_page_switch;
+  const bool mixer_value_transfer = mixer_active && mixer_held_part >= 0;
+  const UBaseType_t desired_ui_priority = kp::def::system::task_priority_spi
+    + ((cached_page_transfer || page_switch_wave_transfer) ? 2u
+       : (boost_music_ui || mixer_value_transfer) ? 1u : 0u);
   if (touch_render_task_handle != nullptr
-   && boost_music_ui != music_ui_priority_boosted) {
-    music_ui_priority_boosted = boost_music_ui;
-    vTaskPrioritySet(touch_render_task_handle,
-      boost_music_ui ? kp::def::system::task_priority_spi + 1u
-                     : kp::def::system::task_priority_spi);
+   && desired_ui_priority != applied_ui_priority) {
+    applied_ui_priority = desired_ui_priority;
+    vTaskPrioritySet(touch_render_task_handle, desired_ui_priority);
   }
 #endif
   if (music_state_now != shown_music_state) {

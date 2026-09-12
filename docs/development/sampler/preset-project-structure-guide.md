@@ -71,7 +71,7 @@ Sample Kitは、Samplerパートの12個のPadに割り当てる音と、それ�
 - Base Note
 - Hold / Repeat / Reverse / Choke
 - Beat AnchorとChop情報
-- Synth Loop In / Out / Crossfade / Release
+- Synth Attack / Loop In / Out / Crossfade / Release / Tune
 
 Sample Kitを単体で読み込んだ場合、Beat、Rec、FX、Mixer、Key / Scaleは変更しません。
 
@@ -118,13 +118,17 @@ Built-in Patternはプログラム内に保持できます。SDカードから�
 
 各パートで必要な情報：
 
-- Sound Source: General MIDIまたはPad Sound
-- GMの場合: Program Numberと音色名
-- Pad Soundの場合: 参照するSampler Pad
+- Sound Source: General MIDI、Sample (Pad / File)、KANTAN Synth
+- General MIDIの場合: Program Numberと音色名
+- Sample > Padの場合: 参照するSampler Pad
+- Sample > Fileの場合: パート専用のWAV/MP3とBase Note
+- KANTAN Synthの場合: `.ktsynth`または調整済み内蔵音色
 - Base Note
 - Octave
 - Volume
-- Sampleベースの場合: Loop In / Out / Crossfade / Release
+- Sampleベースの場合: Loop In / Out / Crossfade / Attack / Release / Tuning
+
+`File`と`KANTAN Synth`はSampler Padとは別の専用スロットに保持します。Project保存時はPCMと音色パラメーターをProject assetsへ固定し、元のSDファイルに依存しない形で復元します。
 
 プリセットProjectでは、Bass、Melody、Chordが互いに聞き分けられ、BeatやSamplerと同時に鳴らしても役割が重複しない組み合わせを選んでください。
 

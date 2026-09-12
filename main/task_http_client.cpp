@@ -131,11 +131,16 @@ static esp_err_t _http_ota_event_handler(esp_http_client_event_t *evt)
 
 static TaskHandle_t _httpcl_task_handle = nullptr;
 
-void task_http_client_t::start(void)
+bool task_http_client_t::start(void)
 {
   if (_httpcl_task_handle == nullptr) {
-    xTaskCreatePinnedToCore((TaskFunction_t)task_func, "httpcl", 10240, this, def::system::task_priority_wifi, &_httpcl_task_handle, def::system::task_cpu_wifi);
+    const BaseType_t result = xTaskCreatePinnedToCore(
+      (TaskFunction_t)task_func, "httpcl", 10240, this,
+      def::system::task_priority_wifi, &_httpcl_task_handle,
+      def::system::task_cpu_wifi);
+    if (result != pdPASS) { _httpcl_task_handle = nullptr; }
   }
+  return _httpcl_task_handle != nullptr;
 }
 
 // リダイレクトを手動解決して最終URLを取得する（ヘッダバッファ蓄積を防止）
@@ -522,7 +527,15 @@ void task_http_client_t::exec_ota(const char* json_url, const char* app_id,
   _catalog_version_major = major;
   _catalog_version_minor = minor;
   _catalog_version_patch = patch;
-  start();
+  if (!start()) {
+    system_registry->runtime_info.setWiFiOtaProgress(
+      def::command::wifi_ota_state_t::ota_connection_error);
+    system_registry->wifi_control.setOperation(
+      def::command::wifi_operation_t::wfop_disable);
+    system_registry->wifi_control.setWifiMode(
+      def::command::wifi_mode_t::wifi_disable);
+    return;
+  }
   _request = request_ota;
   xTaskNotify(_httpcl_task_handle, request_ota, eSetValueWithOverwrite);
 }
@@ -557,7 +570,15 @@ void task_http_client_t::exec_catalog_check(const char* json_url, const char* ap
   _catalog_version_major = major;
   _catalog_version_minor = minor;
   _catalog_version_patch = patch;
-  start();
+  if (!start()) {
+    system_registry->runtime_info.setWiFiOtaProgress(
+      def::command::wifi_ota_state_t::ota_connection_error);
+    system_registry->wifi_control.setOperation(
+      def::command::wifi_operation_t::wfop_disable);
+    system_registry->wifi_control.setWifiMode(
+      def::command::wifi_mode_t::wifi_disable);
+    return;
+  }
   _request = request_catalog_check;
   xTaskNotify(_httpcl_task_handle, request_catalog_check, eSetValueWithOverwrite);
 }
@@ -581,7 +602,13 @@ static void exec_connectivity_check_inner(const char* url)
 void task_http_client_t::exec_connectivity_check(const char* url)
 {
   _connectivity_url = url;
-  start();
+  if (!start()) {
+    system_registry->runtime_info.setWiFiConnectivity(
+      def::command::wifi_connectivity_state_t::offline);
+    system_registry->wifi_control.setOperation(
+      def::command::wifi_operation_t::wfop_disable);
+    return;
+  }
   _request = request_connectivity_check;
   xTaskNotify(_httpcl_task_handle, request_connectivity_check, eSetValueWithOverwrite);
 }

@@ -18,12 +18,23 @@
 |---|---|
 | `main/sampler/sampler_app.cpp` | アプリ本体、入力処理、画面描画、5パートとSOUND/PLAY/REC/FX状態管理 |
 | `main/sampler/sampler_audio.hpp/cpp` | 48kHz I2S再生エンジン、30ボイスミキサー、外部入力録音 |
-| `main/sampler/sampler_pool.hpp/cpp` | PSRAM上のSampler/Pattern Beatサンプル管理、WAV/PCMロード |
+| `main/sampler/sampler_pool.hpp/cpp` | PSRAM上のSampler/Pattern Beat/専用Synthサンプル管理、WAV/PCMロード |
+| `main/sampler/sampler_ktsynth.hpp` | KANTAN Synth tone (`.ktsynth`) の検証とメタデータ解析 |
 | `main/sampler/sampler_wav.hpp` | WAVヘッダ解析 |
 | `main/sampler/sampler_mp3.hpp/cpp` | Helix MP3デコード、48kHz / mono / PCM16変換 |
 | `main/sampler/sampler_music_player.hpp/cpp` | SD上のWAV/MP3を48kHz stereoへ逐次デコードする音楽プレイヤー |
 | `main/sampler/sampler_define.hpp` | モード、Pad数、Pad再生方式 |
 | `main/sampler/sampler_samples.hpp` | SD未使用時の組み込みサンプル |
+
+## Synth backend
+
+- 公開版 `sampler_s3` / `sampler_s3_debug`: SAM2695 + PCM Sample Synth
+- 検証版 `sampler_s3_amy_integration`: AMY + PCM。公開版にはリンクしない
+- `General MIDI`は公開版でSAM2695へ送る
+- `Sample > Pad`は12個のSampler Padを参照し、`Sample > File`はパート専用PCMスロットにWAV/MP3を読み込む
+- `KANTAN Synth`は調整済み内蔵音色または`.ktsynth`をパート専用PCMスロットに読み込む
+- AMY検証で共通化したBLE / Wi-Fi / UI Cache / Recordingのメモリ管理は公開版でも使用する
+- AMY専用Renderer、Ring Buffer、Oscillator状態、内蔵Tableは公開版に含めない
 
 ## サンプルスロット
 
@@ -114,7 +125,18 @@ SOUNDモードはSamplerパートへの強制移動ではなく、現在のパ�
   - `Reload Samples` では `/sampler/samples/*.wav` をファイル名の若い順に最大12個ロードし、Pad 1から順に配置する
   - SDサンプルが読み込めない場合は内蔵サンプルへ戻す
 - 組み込みサンプル:
-  - `docs/Sample_Sound/` の8個のWAVを `48kHz / PCM16 / mono` で埋め込み
+  - `docs/Sample_Sound/` のWAVをファームウェアのFlashへ埋め込む
+  - 2026-09-12時点の公開版は72ファイル、2,186,831 bytes、実時間合計27.319秒
+  - 現行内訳は48kHzが19.755秒、18kHzが7.510秒、44.1kHzが0.054秒
+
+### Built-in preset audio budget
+
+- App領域は6,553,600 bytes。公開版コードと現行Built-in WAVを含む使用量は5,938,654 bytes
+- 将来の機能追加用に約450〜600KBを残し、Built-in WAV全体は2.1〜2.3MBを推奨、2.4MBを暫定上限とする
+- PCM16 mono換算で2,186,831 bytesは、48kHzなら約22.8秒、32kHzなら約34.2秒、24kHzなら約45.6秒、18kHzなら約60.7秒
+- 実用上は、Attackを含む短いSynth Sourceを18〜32kHz、帯域が必要な音を48kHzとして混在させ、合計約35〜60秒を制作目標とする
+- この秒数はFlash上のライブラリ総量。再生時は選択された音だけを5MBのSampler PSRAM Poolへ展開し、ライブラリ全体を同時展開しない
+
   - Pad 1-4: KICK, SNARE, CLAP, HAT
   - Pad 5-8: PIKO, COWBELL, CHIN, TOM
   - Pad 9-12: 空欄
@@ -485,11 +507,11 @@ CHORDはScaleごとのChord Templateを内部で使う。Templateは各度数の
 BASSとMELODYの設定項目は同じ構造とする。
 
 - `Sound Source`
-  - `General MIDI`
-    - `Tone`
-  - `Pad`
-    - `Pad Sound`
-    - `Pad Base Note`
+  - `General MIDI`: 選択後、SAM2695音色一覧を開く
+  - `Sample > Pad`: Sampler Pad一覧を開く
+  - `Sample > File`: SDカードのWAV/MP3を専用スロットへ読み込む
+  - `KANTAN Synth`: 内蔵音色とSDカードの`.ktsynth`を開く
+- `Base Note`: `Sample > Pad / File`のときだけ表示する。`KANTAN Synth`はファイル内の基準音を使う
 - `Key/Scale`: `Key / Scale / Tuning`
 - `Octave`
 - `Volume`
@@ -594,6 +616,8 @@ Chopページ:
 Synthページ:
 
 - Pad 1 / 2 / 3 `Mel / Chord / Bass`: 現在Sampleを各パートへ割り当て、割り当て済みの場合は解除する。3.2秒以内の2回押しで確定
+- Pad 4 `Atk`: 発音時の音量Attackを `0 / 5 / 10 / 20 / 50 / 100 / 200 / 500 / 1000 / 2000ms` から選択
+- Pad 5 `Tune`: Sample固有の微調律を-100〜+100 cent、1 cent単位で設定。Music / Beat解析由来の全体調律とPitch Bendに加算される
 - Pad 8 `Back`: 通常のSample Editへ戻る
 - Pad 9 `Sustain`: `Off / Auto / On` を選択。Autoは波形の安定区間を解析し、OnはIn / Outを直接使用する（内部保存上はManual）
 - Pad 10 `In`: Sustain Loopの開始位置を選択
@@ -606,6 +630,7 @@ Synthページ:
 - `Sustain` と `Rep: Whole Sample` は併用不可。Sustain有効中のRep選択肢からWhole Sampleを除外する
 - Note Grid基準のRepeatはSustainと併用でき、Sustain音を選択Gridで再トリガする
 - Pitchは併用可能。Loop位置はPCMフレームで保持し、Pitchに応じてLoop時間とRelease到達時間が自然に伸縮する
+- Sample Kit / Project / Resume / Web Filer状態に `synthAttackMs` と `synthTuneCents` を保存する。値がない旧データは `0ms / 0 cent` として読み込む
 
 誤操作の影響が大きいMelody／Bass／Chord割当とDeleteは、3.2秒以内の2回押しで確定する。確認メッセージは英語2行表示とする。
 

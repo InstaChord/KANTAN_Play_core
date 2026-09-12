@@ -1,6 +1,6 @@
 # 外部コントローラーを使う
 
-MIDIコントローラー、PC、USB Keyboard、USB Gamepad、BLE MIDI機器などから、Pad演奏や本体操作ができます。
+MIDIコントローラー、PC、USB Keyboard、USB Gamepad、BLE MIDI機器などから、パッド演奏や本体操作ができます。
 
 ## Input Sourceを選ぶ
 
@@ -9,7 +9,7 @@ MIDIコントローラー、PC、USB Keyboard、USB Gamepad、BLE MIDI機器な�
 | 選択肢 | 主な接続先 |
 |---|---|
 | `Off` | 外部入力を使わない |
-| `USB MIDI Controller` | Class Compliant USB MIDI鍵盤・Pad |
+| `USB MIDI Controller` | Class Compliant USB MIDI鍵盤・パッド |
 | `USB MIDI Computer` | PCやタブレットからのUSB MIDI |
 | `USB Keyboard` | USBキーボード |
 | `BLE MIDI` | Bluetooth MIDI機器 |
@@ -53,7 +53,7 @@ Port C MIDIとPort A拡張ボタンは、この択一設定とは別に受信で
 3. 画面が`Press MIDI or EXT button`になったら、外部機器の割り当てたいキーやボタンを押します
 4. 登録完了表示を確認します
 
-本体側で選べる割り当て先は、12 Pad、Fn1〜Fn3、SOUND / PLAY / REC / FX、上のダイヤル押し込みによる全停止です。
+本体側で選べる割り当て先は、12個のパッド、Fn1〜Fn3、SOUND / PLAY / REC / FX、上のダイヤル押し込みによる全停止です。
 
 <!-- IMAGE EXT-02: LEARNのSelect targetとPress MIDI or EXT buttonの2状態。 -->
 

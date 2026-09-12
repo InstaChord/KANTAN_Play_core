@@ -1,19 +1,19 @@
 # 演奏全体をWAVへ録音する
 
-Performance Recordingは、Beat、Sampler、Bass、Melody、Chord、FX、Scratchを含む最終的な演奏音を1本のWAVへ保存します。
+Performance Recordingは、ビート、サンプラー、Bass、Melody、Chord、FX、Scratchを含む最終的な演奏音を1本のWAVへ保存します。
 
-Pad演奏をLoopへ覚えさせる`Rec`とは目的が違います。
+パッド演奏をLoopへ覚えさせる`Rec`とは目的が違います。
 
 | 機能 | 保存するもの |
 |---|---|
-| Rec | Padを押したタイミング。あとからLoopとして再生・編集できる |
+| Rec | パッドを押したタイミング。あとからLoopとして再生・編集できる |
 | Performance Recording | スピーカーから聞こえる演奏全体。WAVとして聞ける |
 
 ## 準備
 
 - SDカードを挿入します
 - Music Playerで曲を読み込んでいる場合は`Remove Music`で外します
-- 保存したいBeat、Rec Loop、FX Targetを準備します
+- 保存したいビート、Rec Loop、FX Targetを準備します
 
 Music PlayerとPerformance Recordingは同時に使えません。
 
@@ -33,7 +33,7 @@ Music PlayerとPerformance Recordingは同時に使えません。
 
 録音中も通常どおり操作できます。
 
-- Padを演奏する
+- パッドを演奏する
 - パートを切り替える
 - MuteやMixerで展開を変える
 - Repeat、Filter、Delay、Tape Stop、Scratchなどを使う

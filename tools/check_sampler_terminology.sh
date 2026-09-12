@@ -33,6 +33,16 @@ if rg -n -i 'Beat / Rec|Rec settings' docs/sampler-ui --glob '*.{html,js,css}' >
   failed=1
 fi
 
+# 日本語マニュアルの本文はカタカナ表記にする。実機表示と
+# HTMLコメントの英語は検査対象から除外する。
+if matches="$(rg -n --pcre2 \
+  '<!--.*?-->(*SKIP)(*F)|`[^`]*`(*SKIP)(*F)|(?<![A-Za-z])(?:Samples?|Beats?|Pads?)(?![A-Za-z])' \
+  docs/docs/ja/sampler docs/mkdocs-sampler.yml --glob '*.md' --glob '*.yml' 2>/dev/null)"; then
+  echo 'Terminology check failed: use サンプル / ビート / パッド in Japanese copy' >&2
+  echo "$matches" >&2
+  failed=1
+fi
+
 if (( failed )); then
   exit 1
 fi

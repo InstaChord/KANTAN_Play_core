@@ -6,8 +6,8 @@ RecしたLoop、Music、Mute、Mixer、FXを組み合わせると、音を足し
 
 次のどちらかから始めます。
 
-- BeatとRecしたLoopを使う
-- Music Playerで曲を読み込み、Samplerの合いの手を加える
+- ビートとRecしたLoopを使う
+- Music Playerで曲を読み込み、サンプラーの合いの手を加える
 
 [音楽Loopを作る](loop-making.md){ .md-button }
 [Music Playerを使う](music-player.md){ .md-button }
@@ -18,24 +18,24 @@ PLAYまたはRECモードの`Fn2`で、現在パートの記録済み演奏をMu
 
 基本的な展開例です。
 
-1. Beatだけを鳴らす
+1. ビートだけを鳴らす
 2. BassをUnmuteする
-3. SamplerとChordを加える
+3. サンプラーとChordを加える
 4. いったんBass以外をMuteする
 5. 全パートを戻す
 
-Mute中も生演奏は鳴るため、記録演奏を止めて自分のPad演奏へ置き換えられます。
+Mute中も生演奏は鳴るため、記録演奏を止めて自分のパッド演奏へ置き換えられます。
 
 ## 3. Mixerの状態を4つ作る
 
-FXモードで`Fn3 MIX`を押します。各パートPadを短く押すとMute、押したまま下のダイヤルを回すと音量を変えられます。
+FXモードで`Fn3 MIX`を押します。各パートのパッドを短く押すとMute、押したまま下のダイヤルを回すと音量を変えられます。
 
 P9〜P12には、4つのMix状態を保存できます。
 
 例：
 
-- Mix 1：Beatだけ
-- Mix 2：Beat + Bass
+- Mix 1：ビートだけ
+- Mix 2：ビート + Bass
 - Mix 3：全パート
 - Mix 4：Musicを小さく、LIVEを大きく
 
@@ -60,10 +60,10 @@ Mixerから`Fn3`でFX画面へ戻ります。
 
 Musicを読み込んでいるときは、FX Targetが次の2つになります。
 
-- P9 `LIVE`：Beat、Sampler、Bass、Melody、Chord
+- P9 `LIVE`：ビート、サンプラー、Bass、Melody、Chord
 - P10 `MUSIC`：Music Playerの曲
 
-たとえばMUSICだけをFilterで細くし、その上でLIVEのSampleを鳴らせます。両方のTargetを選ぶと、全体へFXをかけられます。
+たとえばMUSICだけをFilterで細くし、その上でLIVEのサンプルを鳴らせます。両方のTargetを選ぶと、全体へFXをかけられます。
 
 ## 6. 演奏を残す
 

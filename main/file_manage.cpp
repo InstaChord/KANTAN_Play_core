@@ -37,6 +37,9 @@
   #include <stdio.h>
 #else
 
+  #include <fcntl.h>
+  #include <unistd.h>
+
   #if KANPLAY_USE_VFS_LITTLEFS
     #include <esp_littlefs.h>
   #elif __has_include(<LittleFS.h>)
@@ -161,13 +164,13 @@ static std::string sd_vfs_path(const char* path) {
 }
 #endif // KANPLAY_USE_VFS_SD
 
-#if KANPLAY_USE_VFS_LITTLEFS
+#if !defined(M5UNIFIED_PC_BUILD)
 static constexpr const char* LITTLEFS_MOUNT_POINT = "/littlefs";
 
 static std::string littlefs_vfs_path(const char* path) {
   return std::string(LITTLEFS_MOUNT_POINT) + path;
 }
-#endif // KANPLAY_USE_VFS_LITTLEFS
+#endif
 
 #if KANPLAY_USE_VFS_SD || KANPLAY_USE_VFS_LITTLEFS
 // --- VFS共通ヘルパー ---
@@ -1107,34 +1110,30 @@ int storage_littlefs_t::saveFromMemoryToFile(const char* path, const uint8_t* da
   if (!FP) { return -1; }
   writelen = fwrite(data, 1, length, FP);
   fclose(FP);
-#elif KANPLAY_USE_VFS_LITTLEFS
+#elif KANPLAY_USE_VFS_LITTLEFS || __has_include(<LittleFS.h>)
   {
-    // 一旦テンポラリファイルに保存し、元のファイルを削除してリネームする
-    auto tmppath = littlefs_vfs_path("/.tmpsave.tmp");
-    auto fullpath = littlefs_vfs_path(path);
-    auto fp = fopen(tmppath.c_str(), "wb");
-    if (!fp) return -1;
-    writelen = fwrite(data, 1, length, fp);
-    fclose(fp);
-    taskYIELD();
-    remove(fullpath.c_str());
-    rename(tmppath.c_str(), fullpath.c_str());
-  }
-
-#elif __has_include(<LittleFS.h>)
-  {
-    const char* tmpfile = "/.tmpsave.tmp";
-    // 一旦テンポラリファイルに保存する。
-    auto file = LittleFS.open(tmpfile, FILE_WRITE, true);
-    if (!file) {
-      return -1;
+    // Avoid Arduino FS/File and stdio here. Both ultimately call fopen(),
+    // which allocates a recursive newlib FILE lock and aborts instead of
+    // returning an error when BLE + AMY leave only fragmented internal DRAM.
+    char tmppath[48];
+    char fullpath[256];
+    snprintf(tmppath, sizeof(tmppath), "%s/.tmpsave.tmp", LITTLEFS_MOUNT_POINT);
+    snprintf(fullpath, sizeof(fullpath), "%s%s", LITTLEFS_MOUNT_POINT, path);
+    const int fd = ::open(tmppath, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0) { return -1; }
+    while (writelen < length) {
+      const ssize_t written = ::write(fd, data + writelen, length - writelen);
+      if (written <= 0) { break; }
+      writelen += (size_t)written;
     }
-    writelen = file.write(data, length);
-    file.close();
+    ::close(fd);
     taskYIELD();
-    // 元のファイルを削除してリネームする。
-    LittleFS.remove(path);
-    LittleFS.rename(tmpfile, path);
+    if (writelen == length) {
+      ::unlink(fullpath);
+      if (::rename(tmppath, fullpath) != 0) { writelen = 0; }
+    } else {
+      ::unlink(tmppath);
+    }
   }
 
 #endif

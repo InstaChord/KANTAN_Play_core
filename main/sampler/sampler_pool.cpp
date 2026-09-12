@@ -8,6 +8,7 @@
 #include <math.h>
 
 #include "sampler_pool.hpp"
+#include "sampler_ktsynth.hpp"
 #include "sampler_wav.hpp"
 
 namespace sampler_ns {
@@ -27,6 +28,7 @@ void sampler_pool_t::setProgressCallback(progress_callback_t callback)
 //-------------------------------------------------------------------------
 
 sample_slot_t sampler_pool_t::slot[def::pad::pad_count];
+sample_slot_t sampler_pool_t::synth_source[sampler_pool_t::synth_source_count];
 sample_slot_t beat_pool_t::slot[def::pad::pad_count];
 static sample_asset_t sampler_assets[sampler_pool_t::asset_capacity];
 
@@ -647,6 +649,234 @@ bool sampler_pool_t::loadWav(uint8_t index, const char* display_name, const uint
   return true;
 }
 
+static uint32_t remap_ktsynth_frame(uint32_t frame, uint32_t source_rate,
+                                    uint32_t target_rate, uint32_t target_frames)
+{
+  if (source_rate == target_rate) { return std::min(frame, target_frames); }
+  const uint32_t mapped = (uint32_t)(((uint64_t)frame * target_rate + source_rate / 2u)
+                                     / source_rate);
+  return std::min(mapped, target_frames);
+}
+
+bool sampler_pool_t::loadKtSynth(uint8_t index, const char* display_name,
+                                 const uint8_t* file_data, size_t file_size)
+{
+  if (index >= def::pad::pad_count) { return false; }
+  ktsynth_info_t info;
+  if (!parse_ktsynth(file_data, file_size, &info)) { return false; }
+
+  const uint32_t target_rate = info.wav.sample_rate == 44100 ? 48000 : info.wav.sample_rate;
+  const uint32_t target_frames = resampled_frame_count(info.wav.frames,
+                                                        info.wav.sample_rate, target_rate);
+  if (target_frames < 16 || target_frames > target_rate * max_sample_sec) { return false; }
+  const size_t new_bytes = (size_t)target_frames * sizeof(int16_t);
+  const size_t replacing_bytes = slot[index].asset && slot[index].asset->references == 1
+    ? slot[index].asset->bytes() : 0;
+  if (new_bytes > freeBytes() + replacing_bytes) { return false; }
+
+  erase(index);
+  sample_asset_t* asset = pool_create_asset(target_frames);
+  if (!asset) { return false; }
+  for (uint32_t i = 0; i < target_frames; ++i) {
+    asset->pcm[i] = wav_resampled_mono_frame(info.wav, i, target_rate);
+    report_import_progress(i);
+  }
+
+  char authored_name[64] = {};
+  const size_t copy_name_bytes = std::min<size_t>(info.name_bytes, sizeof(authored_name) - 1);
+  if (copy_name_bytes) { memcpy(authored_name, info.name, copy_name_bytes); }
+  auto& sample = slot[index];
+  initialize_asset_sample_slot(sample, asset, 0, target_frames, target_rate,
+                               authored_name[0] ? authored_name : display_name);
+  sample.start_frame = remap_ktsynth_frame(info.start_frame, info.wav.sample_rate,
+                                            target_rate, target_frames);
+  sample.end_frame = remap_ktsynth_frame(info.end_frame, info.wav.sample_rate,
+                                          target_rate, target_frames);
+  sample.base_note = info.root_note;
+  sample.base_note_auto = false;
+  sample.synth_attack_ms = info.attack_ms;
+  sample.synth_release_ms = info.release_ms;
+  sample.synth_tune_cents = info.tune_cents;
+  sample.synth_tune_scale_q12 = (uint16_t)std::clamp<int>(
+    (int)lroundf(powf(2.0f, (float)info.tune_cents / 1200.0f) * 4096.0f), 2048, 8192);
+  sample.volume_q8 = info.default_gain_q8;
+  if (info.sustain_mode == ktsynth_sustain_mode_t::loop) {
+    sample.synth_sustain_mode = sample_sustain_mode_t::manual;
+    sample.synth_loop_start = remap_ktsynth_frame(info.loop_start_frame,
+                                                   info.wav.sample_rate,
+                                                   target_rate, target_frames);
+    sample.synth_loop_end = remap_ktsynth_frame(info.loop_end_frame,
+                                                 info.wav.sample_rate,
+                                                 target_rate, target_frames);
+    const uint32_t crossfade = remap_ktsynth_frame(info.loop_crossfade_frames,
+                                                    info.wav.sample_rate,
+                                                    target_rate, target_frames);
+    sample.synth_loop_crossfade = (uint16_t)std::min<uint32_t>(crossfade, UINT16_MAX);
+  } else {
+    sample.synth_sustain_mode = sample_sustain_mode_t::off;
+    sample.synth_loop_start = 0;
+    sample.synth_loop_end = 0;
+    sample.synth_loop_crossfade = 0;
+  }
+  build_waveform_cache(sample);
+  return sample.isValid();
+}
+
+static size_t replaceable_slot_bytes(const sample_slot_t& sample)
+{
+  return sample.asset && sample.asset->references == 1 ? sample.asset->bytes() : 0;
+}
+
+static void erase_synth_source_slot(sample_slot_t& sample)
+{
+  if (sample.asset) {
+    M5.delay(8);
+    pool_release_asset(sample.asset);
+  } else if (sample.pcm) {
+    M5.delay(8);
+    pool_free(sample.pcm);
+  }
+  sample = {};
+}
+
+static bool load_synth_wav_slot(sample_slot_t& destination, const char* display_name,
+                                const uint8_t* wav_data, size_t wav_size,
+                                bool preserve_pcm = false)
+{
+  wav_info_t info;
+  if (!parse_wav(wav_data, wav_size, &info)) { return false; }
+  const uint32_t target_rate = info.sample_rate == 44100 ? 48000 : info.sample_rate;
+  uint32_t source_frames = std::min<uint32_t>(info.frames,
+                                               info.sample_rate * sampler_pool_t::max_sample_sec);
+  const uint32_t frames = resampled_frame_count(source_frames, info.sample_rate, target_rate);
+  if (frames < 16 || (size_t)frames * sizeof(int16_t)
+       > sampler_pool_t::freeBytes() + replaceable_slot_bytes(destination)) {
+    return false;
+  }
+  erase_synth_source_slot(destination);
+  sample_asset_t* asset = pool_create_asset(frames);
+  if (!asset) { return false; }
+  for (uint32_t i = 0; i < frames; ++i) {
+    asset->pcm[i] = wav_resampled_mono_frame(info, i, target_rate);
+    report_import_progress(i);
+  }
+  if (!preserve_pcm) { normalize_pcm_for_pad(asset->pcm, frames); }
+  initialize_asset_sample_slot(destination, asset, 0, frames, target_rate, display_name);
+  destination.base_note = detect_base_note(destination.pcm, destination.frames,
+                                            destination.sample_rate);
+  destination.base_note_auto = true;
+  analyze_synth_sustain(destination);
+  build_waveform_cache(destination);
+  return destination.isValid();
+}
+
+static bool load_synth_ktsynth_slot(sample_slot_t& destination, const char* display_name,
+                                    const uint8_t* file_data, size_t file_size)
+{
+  ktsynth_info_t info;
+  if (!parse_ktsynth(file_data, file_size, &info)) { return false; }
+  const uint32_t target_rate = info.wav.sample_rate == 44100 ? 48000 : info.wav.sample_rate;
+  const uint32_t frames = resampled_frame_count(info.wav.frames, info.wav.sample_rate, target_rate);
+  if (frames < 16 || frames > target_rate * sampler_pool_t::max_sample_sec
+   || (size_t)frames * sizeof(int16_t)
+       > sampler_pool_t::freeBytes() + replaceable_slot_bytes(destination)) {
+    return false;
+  }
+  erase_synth_source_slot(destination);
+  sample_asset_t* asset = pool_create_asset(frames);
+  if (!asset) { return false; }
+  for (uint32_t i = 0; i < frames; ++i) {
+    asset->pcm[i] = wav_resampled_mono_frame(info.wav, i, target_rate);
+    report_import_progress(i);
+  }
+  char authored_name[64] = {};
+  const size_t copy_name_bytes = std::min<size_t>(info.name_bytes, sizeof(authored_name) - 1);
+  if (copy_name_bytes) { memcpy(authored_name, info.name, copy_name_bytes); }
+  initialize_asset_sample_slot(destination, asset, 0, frames, target_rate,
+                               authored_name[0] ? authored_name : display_name);
+  destination.start_frame = remap_ktsynth_frame(info.start_frame, info.wav.sample_rate,
+                                                 target_rate, frames);
+  destination.end_frame = remap_ktsynth_frame(info.end_frame, info.wav.sample_rate,
+                                               target_rate, frames);
+  destination.base_note = info.root_note;
+  destination.base_note_auto = false;
+  destination.synth_attack_ms = info.attack_ms;
+  destination.synth_release_ms = info.release_ms;
+  destination.synth_tune_cents = info.tune_cents;
+  destination.synth_tune_scale_q12 = (uint16_t)std::clamp<int>(
+    (int)lroundf(powf(2.0f, (float)info.tune_cents / 1200.0f) * 4096.0f), 2048, 8192);
+  destination.volume_q8 = info.default_gain_q8;
+  if (info.sustain_mode == ktsynth_sustain_mode_t::loop) {
+    destination.synth_sustain_mode = sample_sustain_mode_t::manual;
+    destination.synth_loop_start = remap_ktsynth_frame(info.loop_start_frame,
+                                                        info.wav.sample_rate,
+                                                        target_rate, frames);
+    destination.synth_loop_end = remap_ktsynth_frame(info.loop_end_frame,
+                                                      info.wav.sample_rate,
+                                                      target_rate, frames);
+    destination.synth_loop_crossfade = (uint16_t)std::min<uint32_t>(
+      remap_ktsynth_frame(info.loop_crossfade_frames, info.wav.sample_rate,
+                           target_rate, frames), UINT16_MAX);
+  } else {
+    destination.synth_sustain_mode = sample_sustain_mode_t::off;
+  }
+  build_waveform_cache(destination);
+  return destination.isValid();
+}
+
+bool sampler_pool_t::loadSynthWav(uint8_t synth_index, const char* display_name,
+                                  const uint8_t* wav_data, size_t wav_size)
+{
+  return synth_index < synth_source_count
+      && load_synth_wav_slot(synth_source[synth_index], display_name, wav_data, wav_size);
+}
+
+bool sampler_pool_t::loadSynthWavPreserved(uint8_t synth_index, const char* display_name,
+                                           const uint8_t* wav_data, size_t wav_size)
+{
+  return synth_index < synth_source_count
+      && load_synth_wav_slot(synth_source[synth_index], display_name,
+                              wav_data, wav_size, true);
+}
+
+bool sampler_pool_t::loadSynthPcmOwned(uint8_t synth_index, const char* display_name,
+                                       int16_t* pcm_data, uint32_t frames,
+                                       uint32_t sample_rate)
+{
+  if (synth_index >= synth_source_count || !pcm_data || frames < 16
+   || sample_rate == 0 || sample_rate > 48000
+   || frames > sample_rate * max_sample_sec) {
+    return false;
+  }
+  auto& destination = synth_source[synth_index];
+  const size_t new_bytes = (size_t)frames * sizeof(int16_t);
+  if (new_bytes > freeBytes() + replaceable_slot_bytes(destination)) { return false; }
+  erase_synth_source_slot(destination);
+  normalize_pcm_for_pad(pcm_data, frames);
+  sample_asset_t* asset = pool_adopt_asset(pcm_data, frames);
+  if (!asset) { return false; }
+  initialize_asset_sample_slot(destination, asset, 0, frames, sample_rate, display_name);
+  destination.base_note = detect_base_note(destination.pcm, destination.frames,
+                                            destination.sample_rate);
+  destination.base_note_auto = true;
+  analyze_synth_sustain(destination);
+  build_waveform_cache(destination);
+  return destination.isValid();
+}
+
+bool sampler_pool_t::loadSynthKtSynth(uint8_t synth_index, const char* display_name,
+                                      const uint8_t* file_data, size_t file_size)
+{
+  return synth_index < synth_source_count
+      && load_synth_ktsynth_slot(synth_source[synth_index], display_name,
+                                  file_data, file_size);
+}
+
+void sampler_pool_t::eraseSynth(uint8_t synth_index)
+{
+  if (synth_index < synth_source_count) { erase_synth_source_slot(synth_source[synth_index]); }
+}
+
 static bool load_pcm_for_pad(uint8_t index, const char* display_name, const int16_t* pcm_data,
                              uint32_t frames, uint32_t sample_rate, uint32_t target_peak,
                              bool normalize = true)
@@ -822,7 +1052,10 @@ bool sampler_pool_t::clone(uint8_t destination, uint8_t source)
     duplicate.loop_enabled = false;
     duplicate.loop_whole_sample = false;
     duplicate.choke_enabled = false;
+    duplicate.synth_attack_ms = 0;
     duplicate.synth_release_ms = 120;
+    duplicate.synth_tune_cents = 0;
+    duplicate.synth_tune_scale_q12 = 4096;
   }
   pool_retain_asset(asset);
   slot[destination] = duplicate;
@@ -916,6 +1149,25 @@ bool beat_pool_t::loadPcmOwned(uint8_t index, const char* display_name,
   slot[index].synth_sustain_mode = sample_sustain_mode_t::off;
   slot[index].synth_release_ms = 10;
   build_waveform_cache(slot[index]);
+  return true;
+}
+
+bool beat_pool_t::loadPcm(uint8_t index, const char* display_name,
+                          const int16_t* pcm_data, uint32_t frames,
+                          uint32_t sample_rate)
+{
+  if (index >= def::pad::pad_count || !pcm_data || sample_rate == 0) { return false; }
+  frames = std::min<uint32_t>(frames, sample_rate * max_sample_sec);
+  if (frames < 16 || (size_t)frames * sizeof(int16_t) > freeBytes() + slot[index].bytes()) {
+    return false;
+  }
+  int16_t* copy = pool_alloc((size_t)frames * sizeof(int16_t));
+  if (!copy) { return false; }
+  memcpy(copy, pcm_data, (size_t)frames * sizeof(int16_t));
+  if (!loadPcmOwned(index, display_name, copy, frames, sample_rate)) {
+    pool_free(copy);
+    return false;
+  }
   return true;
 }
 

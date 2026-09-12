@@ -16,6 +16,7 @@ public:
     char name[24] = {};
     char address[18] = {};
     int8_t rssi = -127;
+    uint8_t address_type = 0;
     bool advertises_midi = false;
   };
 
@@ -37,6 +38,7 @@ public:
   bool sendFlush(void) override;
 
   std::vector<uint8_t> read(void) override;
+  bool readInto(MIDI_Decoder& decoder) override;
   void service(void) override;
   uint32_t getReceivedPacketCount(void) const;
   void getLastReceivedPacket(uint8_t* data, size_t* length) const;
@@ -50,14 +52,23 @@ public:
   void cancelCentralScan(void);
   scan_state_t getCentralScanState(void) const;
   size_t getCentralScanDevices(scan_device_t* devices, size_t capacity) const;
-  void setPreferredCentralDevice(const char* address, const char* name);
+  void setPreferredCentralDevice(const char* address, const char* name,
+                                 bool force_fresh_pairing = false,
+                                 int8_t address_type = -1);
   void getPreferredCentralDevice(char* address, size_t address_size,
                                  char* name, size_t name_size) const;
   bool forgetPreferredCentralDevice(void);
+  uint8_t consumePreviousConnectCrashStage(uint16_t* free_internal_kb = nullptr,
+                                           uint16_t* largest_internal_kb = nullptr,
+                                           uint16_t* midi_stack_kb = nullptr,
+                                           uint16_t* callback_stack_kb = nullptr);
 
   void setUseTxRx(bool use_tx, bool use_rx) override;
 
-  static void decodeReceive(const uint8_t* data, size_t length);
+  // Returns true only when the packet appended a musical message. BLE MIDI
+  // clock/active-sensing packets can then be discarded without waking the
+  // performance worker dozens of times per second.
+  static bool decodeReceive(const uint8_t* data, size_t length);
   void setCentralConnected(bool connected);
   void setPeripheralConnected(bool connected);
 

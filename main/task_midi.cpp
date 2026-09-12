@@ -66,12 +66,21 @@ public:
     if (_handle == nullptr) {
       _midi.begin();
 #if __has_include(<freertos/FreeRTOS.h>)
-      // The internal SAM2695 is part of the instrument sound engine, so its
-      // realtime Note On/Off path must preempt UI and connection housekeeping.
-      const UBaseType_t priority =
-        _task_status_index == system_registry_t::reg_task_status_t::bitindex_t::TASK_MIDI_INTERNAL
+      // Internal synth output and BLE input are both realtime musical paths.
+      // Keep them above transient UI transfers so Note On/Off cannot wait
+      // behind a cached page copy on Core 0. I2S remains the top priority.
+      const bool internal_synth =
+        _task_status_index == system_registry_t::reg_task_status_t::bitindex_t::TASK_MIDI_INTERNAL;
+      const bool ble_input =
+        _task_status_index == system_registry_t::reg_task_status_t::bitindex_t::TASK_MIDI_BLE;
+      // AMY render runs at I2S-1 on Core 0. Giving BLE decode the same
+      // priority can starve one audio block while FX and notifications arrive
+      // together, which sounds like a short repeat. BLE remains above normal
+      // MIDI/UI work, while internal synth output keeps the lowest latency.
+      const UBaseType_t priority = internal_synth
           ? def::system::task_priority_i2s - 1
-          : def::system::task_priority_midi_sub;
+          : ble_input ? def::system::task_priority_i2s - 2
+                      : def::system::task_priority_midi_sub;
       xTaskCreatePinnedToCore((TaskFunction_t)task_func, "midi_subtask", 1024*3, this,
                               priority, &_handle, def::system::task_cpu_midi_sub);
 #else
@@ -517,6 +526,7 @@ size_t task_midi_t::getBLEMidiScanDevices(ble_scan_device_t* devices, size_t cap
     snprintf(devices[i].name, sizeof(devices[i].name), "%s", source[i].name);
     snprintf(devices[i].address, sizeof(devices[i].address), "%s", source[i].address);
     devices[i].rssi = source[i].rssi;
+    devices[i].address_type = source[i].address_type;
     devices[i].advertises_midi = source[i].advertises_midi;
   }
   return count;
@@ -527,13 +537,18 @@ size_t task_midi_t::getBLEMidiScanDevices(ble_scan_device_t* devices, size_t cap
 #endif
 }
 
-void task_midi_t::setBLEMidiPreferredDevice(const char* address, const char* name)
+void task_midi_t::setBLEMidiPreferredDevice(const char* address, const char* name,
+                                            bool force_fresh_pairing,
+                                            int8_t address_type)
 {
 #ifdef MIDI_TRANSPORT_BLE_HPP
-  ble_midi_transport.setPreferredCentralDevice(address, name);
+  ble_midi_transport.setPreferredCentralDevice(
+    address, name, force_fresh_pairing, address_type);
 #else
   (void)address;
   (void)name;
+  (void)force_fresh_pairing;
+  (void)address_type;
 #endif
 }
 
@@ -554,6 +569,23 @@ bool task_midi_t::forgetBLEMidiPreferredDevice(void)
   return ble_midi_transport.forgetPreferredCentralDevice();
 #else
   return false;
+#endif
+}
+
+uint8_t task_midi_t::consumeBLEMidiConnectCrashStage(uint16_t* free_internal_kb,
+                                                     uint16_t* largest_internal_kb,
+                                                     uint16_t* midi_stack_kb,
+                                                     uint16_t* callback_stack_kb)
+{
+#ifdef MIDI_TRANSPORT_BLE_HPP
+  return ble_midi_transport.consumePreviousConnectCrashStage(
+    free_internal_kb, largest_internal_kb, midi_stack_kb, callback_stack_kb);
+#else
+  if (free_internal_kb) { *free_internal_kb = 0; }
+  if (largest_internal_kb) { *largest_internal_kb = 0; }
+  if (midi_stack_kb) { *midi_stack_kb = 0; }
+  if (callback_stack_kb) { *callback_stack_kb = 0; }
+  return 0;
 #endif
 }
 
@@ -680,7 +712,10 @@ void task_midi_t::start(void)
   {
     midi_driver::MIDI_Transport_BLE::config_t config;
     ble_midi_transport.setConfig(config);
-    // ble_midi_transport.begin();
+    // begin() only restores the RTC crash guard; the controller itself is
+    // initialized later by setUseTxRx().  Do this synchronously so the app can
+    // suppress a failing saved-device reconnect before the MIDI task runs.
+    ble_midi_transport.begin();
     // オン・オフはsystem_registryで設定する
   }
 #endif
@@ -693,7 +728,14 @@ void task_midi_t::start(void)
 #endif
 
   TaskHandle_t handle = nullptr;
-  xTaskCreatePinnedToCore((TaskFunction_t)task_func, "midi", 1024*3, this, def::system::task_priority_midi, &handle, def::system::task_cpu_midi);
+  // This task owns BLE scan, SMP pairing and GATT service discovery.  Those
+  // nested Bluedroid/C++ paths exceed the old 3 KB stack on some controllers,
+  // especially M-VAVE during encrypted reconnect.  A stack overflow here
+  // presents as an immediate reboot as soon as the selected device connects.
+  const BaseType_t midi_task_result = xTaskCreatePinnedToCore(
+    (TaskFunction_t)task_func, "midi", 1024 * 12, this,
+    def::system::task_priority_midi, &handle, def::system::task_cpu_midi);
+  if (midi_task_result != pdPASS) { handle = nullptr; }
   system_registry->midi_out_control.setNotifyTaskHandle(handle);
   system_registry->midi_port_setting.setNotifyTaskHandle(handle);
 #endif

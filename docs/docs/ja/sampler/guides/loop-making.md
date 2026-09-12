@@ -1,31 +1,31 @@
 # 音楽Loopを作る
 
-Beatを土台にして、Sampler、Bass、Melody、Chordを少しずつ重ねます。最後にMuteやFXで変化を付けると、短いLoopから演奏の展開を作れます。
+ビートを土台にして、サンプラー、Bass、Melody、Chordを少しずつ重ねます。最後にMuteやFXで変化を付けると、短いLoopから演奏の展開を作れます。
 
 ## 最小構成から始める
 
 最初は次の3つだけで作ります。
 
-1. Beat
-2. Samplerの1〜2音
+1. ビート
+2. サンプラーの1〜2音
 3. Bassの1音
 
 音を増やす前に、少ない音で気持ちよく繰り返す状態を作るのがコツです。
 
-## 1. Beatを決める
+## 1. ビートを決める
 
-内蔵Patternから、雰囲気に近いBeatを選びます。
+内蔵Patternから、雰囲気に近いビートを選びます。
 
-[Beatを選ぶ](../tutorials/select-beat.md){ .md-button .md-button--primary }
+[ビートを選ぶ](../tutorials/select-beat.md){ .md-button .md-button--primary }
 
 最初はTempoやSwingを細かく調整せず、そのままの速さで試します。
 
-## 2. Samplerを重ねる
+## 2. サンプラーを重ねる
 
 1. パートを`SAMPLER`にします
 2. `REC`モードへ切り替えます
-3. Beatを1周聴きます
-4. Sampleを1音だけRecします
+3. ビートを1周聴きます
+4. サンプルを1音だけRecします
 5. 次の周回で、必要ならもう1音加えます
 
 [演奏をRecする](../tutorials/record-loop.md){ .md-button }
@@ -33,7 +33,7 @@ Beatを土台にして、Sampler、Bass、Melody、Chordを少しずつ重ねま
 ## 3. Bassを加える
 
 1. Loopを再生したままパートを`BASS`へ切り替えます
-2. `PLAY`でPadを試し、合いそうな音を探します
+2. `PLAY`でパッドを試し、合いそうな音を探します
 3. `REC`へ切り替え、1音か2音だけ記録します
 
 Bassは低い音でLoopの中心を作ります。すべての隙間を埋めず、長めの音を少なく置くとまとまりやすくなります。
@@ -53,10 +53,10 @@ KANTAN Samplerは共通のKey / Scaleに沿って音を並べるため、音楽�
 
 例：
 
-1. Beatだけ
-2. Beat + Bass
+1. ビートだけ
+2. ビート + Bass
 3. すべてのパート
-4. SamplerをMuteしてBeat + Bass
+4. サンプラーをMuteしてビート + Bass
 
 ## 6. FXを加える
 
@@ -70,9 +70,9 @@ FXを常にかけ続けるより、切り替わりの直前だけ使うと変化
 
 同じLoopをあとで続きから使う場合はProjectを保存します。
 
-Projectには、Sampler、Beat、Rec、Key / Scale、シンセ音色、FX、Mixerなど、演奏状態全体が保存されます。
+Projectには、サンプラー、ビート、Rec、Key / Scale、シンセ音色、FX、Mixerなど、演奏状態全体が保存されます。
 
-Sampleの音色セットだけを別の演奏でも使いたい場合は、Sample Kitとして保存します。
+サンプルの音色セットだけを別の演奏でも使いたい場合は、サンプルキットとして保存します。
 
-[ProjectとSample Kitの保存](../reference/save-and-restore.md){ .md-button .md-button--primary }
+[Projectとサンプルキットの保存](../reference/save-and-restore.md){ .md-button .md-button--primary }
 [演奏全体をWAVへ録音する](../tutorials/performance-recording.md){ .md-button }

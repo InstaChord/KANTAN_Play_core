@@ -316,15 +316,19 @@
     const root = $('#sample-view'); root.innerHTML = '';
     const library = el('div', {class:'panel'}, el('h2', {}, 'Sample source'), folderPanel('samples'));
     library.append(activeFolder('samples') === DEVICE_PRESET
-      ? presetFilePanel() : filePanel('samples', '.wav,.mp3', true));
+      ? presetFilePanel() : filePanel('samples', '.wav,.mp3,.ktsynth', true));
     root.append(assignmentPanel(), library);
   }
   function renderBeat() {
-    const root = $('#beat-view'); root.innerHTML = '';
+    const root = $('#beat-view');
+    if (!root) return;
+    root.innerHTML = '';
     root.append(el('div',{class:'panel'},el('h2',{},'Beat files'),folderPanel('loops'),filePanel('loops','.wav,.mp3,.mid,.midi')));
   }
   function renderKit() {
-    const root = $('#kit-view'); root.innerHTML='';
+    const root = $('#kit-view');
+    if (!root) return;
+    root.innerHTML='';
     root.append(el('div',{class:'panel'},el('h2',{},'Sample Kit files'),folderPanel('kits'),filePanel('kits','.json')));
   }
   function cleanJsonName(name, fallback='New_Project') {

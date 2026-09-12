@@ -55,6 +55,10 @@ public:
                                      uint32_t attack_cache_limit = 4096,
                                      uint32_t sustain_cache_limit = 8192);
   static void clearSynthSustainCache(uint8_t cache_slot = 0xFF);
+  // Release retained internal-RAM buffers which no active voice references.
+  // Radio/GATT setup uses this to obtain a contiguous temporary workspace;
+  // callers may prime the required caches again after the connection settles.
+  static size_t releaseUnusedSynthSustainCacheMemory(void);
   // True while a running voice still refers to this internal-RAM cache.
   // Callers use it to avoid replacing an audible cache entry.
   static bool isSynthSustainCacheInUse(uint8_t cache_slot);

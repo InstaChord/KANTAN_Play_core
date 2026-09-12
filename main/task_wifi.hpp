@@ -14,7 +14,8 @@ namespace kanplay_ns {
 //-------------------------------------------------------------------------
 class task_wifi_t {
 public:
-    void start(void);
+    bool start(void);
+    bool stop(void);
     // NVSに保存済みのSTA設定があるか。Wi-Fiドライバを起動せず確認できる。
     static bool hasSavedSTAConfig(void);
     // 保存済み接続先SSIDを読む。パスワードは返さず、Wi-Fiも起動しない。

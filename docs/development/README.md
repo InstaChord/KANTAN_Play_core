@@ -21,4 +21,6 @@ This directory holds the developer-facing documentation for the two firmware var
 - [Beat Pattern production guide](./sampler/beat-pattern-production-guide.md): MIDI note mapping, timing, velocity, limits, and Work production workflow
 - [Beat part test plan](./sampler/beat-part-test-plan.md): ordered hardware verification for Audio/Pattern Beat integration
 - [OneLibrary integration handoff](./sampler/onelibrary-integration-handoff.md): rekordbox SD metadata research, adapter design, synchronization, and staged implementation
+- [AMY synth feasibility validation](./sampler/amy-synth-validation.md): pinned dependency, baseline budgets, probe environment, and staged integration plan
+- [SoundFont converter interface](./sampler/sf2-converter-interface.md): one-region SF2 conversion contract and KANTAN Sample Synth metadata
 - [Development guide](./sampler/development.md): build, install, and development guidance

@@ -681,40 +681,62 @@ protected:
             uint8_t value;
         };
         void setNoteMessage(uint8_t status, uint8_t note, uint8_t velocity) {
-            pushMessage({ NOTE_MESSAGE, status, note, velocity });
+            pushNoteMessage({ NOTE_MESSAGE, status, note, velocity });
             set32(NOTE_MESSAGE, uint32_t(status) | (uint32_t(note) << 8) | (uint32_t(velocity) << 16), true);
         }
         void setCCMessage(uint8_t status, uint8_t controller, uint8_t value) {
-            pushMessage({ CC_MESSAGE, status, controller, value });
+            pushCCMessage({ CC_MESSAGE, status, controller, value });
             set32(CC_MESSAGE, uint32_t(status) | (uint32_t(controller) << 8) | (uint32_t(value) << 16), true);
         }
         bool popMessage(message_t* message) {
             if (message == nullptr) { return false; }
             std::lock_guard<std::mutex> lock(_message_mutex);
-            if (_message_tail == _message_head) { return false; }
-            *message = _message_queue[_message_tail];
-            _message_tail = (_message_tail + 1) % _message_queue.size();
-            return true;
+            // Musical edges take precedence over continuously streamed CC.
+            // Preserve FIFO ordering inside each class so Note Off cannot
+            // overtake its matching Note On.
+            if (_note_tail != _note_head) {
+                *message = _note_queue[_note_tail];
+                _note_tail = (_note_tail + 1) % _note_queue.size();
+                return true;
+            }
+            if (_cc_tail != _cc_head) {
+                *message = _cc_queue[_cc_tail];
+                _cc_tail = (_cc_tail + 1) % _cc_queue.size();
+                return true;
+            }
+            return false;
         }
 
     private:
         // The registry history is useful for state observation but is not a
-        // real-time queue.  Rapid BLE packets can contain several Note On/Off
-        // messages, so keep their ordering in this dedicated FIFO.
-        void pushMessage(const message_t& message) {
+        // real-time queue. Keep Note and CC traffic separate so a controller's
+        // continuous knobs cannot delay performance Note On/Off edges.
+        void pushNoteMessage(const message_t& message) {
             std::lock_guard<std::mutex> lock(_message_mutex);
-            const size_t next = (_message_head + 1) % _message_queue.size();
-            if (next == _message_tail) {
+            const size_t next = (_note_head + 1) % _note_queue.size();
+            if (next == _note_tail) {
                 // Preserve the most recent release events during an extreme
                 // burst rather than blocking the MIDI worker.
-                _message_tail = (_message_tail + 1) % _message_queue.size();
+                _note_tail = (_note_tail + 1) % _note_queue.size();
             }
-            _message_queue[_message_head] = message;
-            _message_head = next;
+            _note_queue[_note_head] = message;
+            _note_head = next;
         }
-        std::array<message_t, 64> _message_queue {};
-        size_t _message_head = 0;
-        size_t _message_tail = 0;
+        void pushCCMessage(const message_t& message) {
+            std::lock_guard<std::mutex> lock(_message_mutex);
+            const size_t next = (_cc_head + 1) % _cc_queue.size();
+            if (next == _cc_tail) {
+                _cc_tail = (_cc_tail + 1) % _cc_queue.size();
+            }
+            _cc_queue[_cc_head] = message;
+            _cc_head = next;
+        }
+        std::array<message_t, 64> _note_queue {};
+        std::array<message_t, 32> _cc_queue {};
+        size_t _note_head = 0;
+        size_t _note_tail = 0;
+        size_t _cc_head = 0;
+        size_t _cc_tail = 0;
         std::mutex _message_mutex;
     };
 

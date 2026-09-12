@@ -57,7 +57,10 @@ struct sample_slot_t {
   uint32_t synth_loop_end = 0;
   uint16_t synth_loop_crossfade = 0;
   sample_sustain_mode_t synth_sustain_mode = sample_sustain_mode_t::automatic;
+  uint16_t synth_attack_ms = 0;
   uint16_t synth_release_ms = 120;
+  int16_t synth_tune_cents = 0;
+  uint16_t synth_tune_scale_q12 = 4096;  // centsから事前計算する演奏用倍率
   bool reverse = false;
   bool hold_enabled = false;
   // Enabled Sampler Pads share one choke group. Pitched synth parts that use
@@ -112,9 +115,11 @@ public:
   using progress_callback_t = void (*)();
   static constexpr const size_t pool_budget_bytes = 5 * 1024 * 1024;
   static constexpr const uint32_t max_sample_sec = 20;  // Long Chop素材を含む上限
-  static constexpr const uint8_t asset_capacity = 24;   // 12 Pad + Chop素材/変換の余白
+  static constexpr const uint8_t synth_source_count = 3; // Melody / Chord / Bass
+  static constexpr const uint8_t asset_capacity = 27;   // 12 Pad + 3 Synth + Chop素材/変換の余白
 
   static sample_slot_t slot[def::pad::pad_count];
+  static sample_slot_t synth_source[synth_source_count];
 
   static size_t usedBytes(void);
   static size_t freeBytes(void);
@@ -129,6 +134,20 @@ public:
   // WAVデータ(PCM16 mono/stereo 〜48kHz)をモノラル変換してスロットへ登録
   // 上限秒数・プール残量に収まらない場合は末尾を切り詰める
   static bool loadWav(uint8_t index, const char* display_name, const uint8_t* wav_data, size_t wav_size);
+  // KANTAN Synth toneを検証して登録する。Converterが設定した基準音、
+  // Loop、Envelope、Gainを維持し、自動解析や正規化は行わない。
+  static bool loadKtSynth(uint8_t index, const char* display_name,
+                          const uint8_t* file_data, size_t file_size);
+  static bool loadSynthWav(uint8_t synth_index, const char* display_name,
+                           const uint8_t* wav_data, size_t wav_size);
+  static bool loadSynthWavPreserved(uint8_t synth_index, const char* display_name,
+                                    const uint8_t* wav_data, size_t wav_size);
+  static bool loadSynthPcmOwned(uint8_t synth_index, const char* display_name,
+                                int16_t* pcm_data, uint32_t frames,
+                                uint32_t sample_rate);
+  static bool loadSynthKtSynth(uint8_t synth_index, const char* display_name,
+                               const uint8_t* file_data, size_t file_size);
+  static void eraseSynth(uint8_t synth_index);
   // Optional UI hook for long import conversions. The audio data path stays
   // independent from the UI; callers clear this immediately after import.
   static void setProgressCallback(progress_callback_t callback);
@@ -185,6 +204,11 @@ public:
   static size_t freeBytes(void);
   static bool loadWav(uint8_t index, const char* display_name,
                       const uint8_t* wav_data, size_t wav_size);
+  // Copy an immutable PCM source (for example AMY's flash-resident tiny bank)
+  // into the owned Beat pool while retaining the normal normalization/UI path.
+  static bool loadPcm(uint8_t index, const char* display_name,
+                      const int16_t* pcm_data, uint32_t frames,
+                      uint32_t sample_rate);
   static bool loadPcmOwned(uint8_t index, const char* display_name,
                            int16_t* pcm_data, uint32_t frames, uint32_t sample_rate,
                            bool recorded = false);

@@ -14,7 +14,7 @@ namespace kanplay_ns {
 //-------------------------------------------------------------------------
 class task_http_client_t {
 public:
-  void start(void);
+  bool start(void);
   void exec_ota(const char* json_url);
   void exec_ota(const char* json_url, const char* app_id,
                 uint8_t major, uint8_t minor, uint8_t patch);

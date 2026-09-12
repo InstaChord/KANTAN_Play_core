@@ -1,6 +1,6 @@
-# Sampleを追加する
+# サンプルを追加する
 
-空いているPadには、内蔵Sample、SDカードのWAV / MP3、またはマイクで録音した音を追加できます。
+空いているパッドには、内蔵サンプル、SDカードのWAV / MP3、またはマイクで録音した音を追加できます。
 
 このページでは、追加方法を選ぶところまで説明します。
 
@@ -8,14 +8,14 @@
 
 | 方法 | 向いている場面 |
 |---|---|
-| **内蔵SampleをImport** | すぐに別の音を試したい |
+| **内蔵サンプルをImport** | すぐに別の音を試したい |
 | **SDカードからImport** | 手元の効果音や音楽素材を使いたい |
 | **マイクでRecord** | 声、手拍子、机を叩いた音などをその場で録りたい |
 | **File EditorからAssign** | PCやスマートフォンで複数ファイルを整理しながら割り当てたい |
 
 ## 1. Loop再生を止める
 
-Sampleを追加するときは、先にBeatとLoopの再生を止めます。
+サンプルを追加するときは、先にビートとLoopの再生を止めます。
 
 - 再生中なら`Fn1`を押して停止します
 - 状態が分からない場合は、右側の上のダイヤルを押して全音停止します
@@ -28,9 +28,9 @@ Sampleを追加するときは、先にBeatとLoopの再生を止めます。
 
 <!-- IMAGE ADD-01: SAMPLER + SOUND。P9〜P12の空Padが分かる全画面。 -->
 
-## 3. 空Padを一度押す
+## 3. 空パッドを一度押す
 
-空Padを短く1回押して離します。画面に次の案内が表示されます。
+空パッドを短く1回押して離します。画面に次の案内が表示されます。
 
 - `TAP: IMPORT`
 - `HOLD: RECORD`
@@ -43,29 +43,29 @@ Sampleを追加するときは、先にBeatとLoopの再生を止めます。
 
 ### 音を選んで読み込む
 
-同じ空Padを、もう一度短く押して離します。
+同じ空パッドを、もう一度短く押して離します。
 
-1. `Sample Category`から内蔵Sampleの種類、または`SD Card`を選びます
+1. `Sample Category`から内蔵サンプルの種類、または`SD Card`を選びます
 2. 音を選びます
 3. `Import to P○`で割り当て先を確認します
 4. `OK`を押して読み込みます
 
-内蔵SampleはKick、Snare、HiHat、Voice、FXなどのカテゴリーに分かれています。
+内蔵サンプルはKick、Snare、HiHat、Voice、FXなどのカテゴリーに分かれています。
 
 ### マイクで録音する
 
-同じ空Padをもう一度押し、そのまま長押しします。録音画面に切り替わったら、Padを押している間の音が録音されます。
+同じ空パッドをもう一度押し、そのまま長押しします。録音画面に切り替わったら、パッドを押している間の音が録音されます。
 
 [マイク録音の詳しい手順](record-sample.md){ .md-button .md-button--primary }
 
 ### File Editorを使う
 
-複数のファイルをまとめて転送したい場合は、File Editorを使います。File Editorでは内蔵PresetとSDフォルダーを分けて表示し、選んだSampleを任意のPadへAssignできます。
+複数のファイルをまとめて転送したい場合は、File Editorを使います。File Editorでは内蔵PresetとSDフォルダーを分けて表示し、選んだサンプルを任意のパッドへAssignできます。
 
 [File Editorの使い方](../reference/file-editor.md){ .md-button }
 
 ## 追加したあとは
 
-SOUNDモードで追加したPadを1回押すとPreview、同じPadをもう一度押すとEditへ進みます。
+SOUNDモードで追加したパッドを1回押すとPreview、同じパッドをもう一度押すとEditへ進みます。
 
-[Sampleを編集する](edit-sample.md){ .md-button }
+[サンプルを編集する](edit-sample.md){ .md-button }

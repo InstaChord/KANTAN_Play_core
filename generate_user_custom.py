@@ -66,8 +66,18 @@ def update_sampler_catalog(project_dir):
         catalog = json.load(catalog_file)
     changed = False
     for item in catalog.get("firmware", []):
-        if item.get("app") == "sampler" and item.get("version") != version:
+        if item.get("app") != "sampler":
+            continue
+        if item.get("version") != version:
             item["version"] = version
+            changed = True
+        url = item.setdefault("url", {})
+        cores3_url = (
+            "https://u1nagata.github.io/KANTAN_Play_core/firmware/"
+            "KANTAN_Sampler_CoreS3_OTA.bin?v=%s" % version
+        )
+        if url.get("cores3") != cores3_url:
+            url["cores3"] = cores3_url
             changed = True
     if not changed:
         return

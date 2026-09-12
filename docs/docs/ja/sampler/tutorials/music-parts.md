@@ -1,6 +1,6 @@
 # Bass・Melody・Chordを演奏する
 
-Samplerに音楽的なパートを加えると、BeatとSampleだけの演奏へ低音、旋律、和音を重ねられます。音楽理論が分からなくても、共通のKeyとScaleに合う音がPadへ並びます。
+サンプラーに音楽的なパートを加えると、ビートとサンプルだけの演奏へ低音、旋律、和音を重ねられます。音楽理論が分からなくても、共通のKeyとScaleに合う音がパッドへ並びます。
 
 ## まず3つの役割を知る
 
@@ -10,22 +10,22 @@ Samplerに音楽的なパートを加えると、BeatとSampleだけの演奏へ
 | `MELODY` | メロディーや合いの手 | Key / Scaleに合う12音 |
 | `CHORD` | 和音と曲の雰囲気 | 7つのコードと5つのModifier |
 
-最初はBeatを鳴らし、Bassを1音ずつ試してからMelody、Chordへ進みます。
+最初はビートを鳴らし、Bassを1音ずつ試してからMelody、Chordへ進みます。
 
 ## BassとMelodyを鳴らす
 
-1. `Fn1`でBeatまたはLoopを再生します
+1. `Fn1`でビートまたはLoopを再生します
 2. 下のダイヤルを回して`BASS`を選びます
-3. PLAYモードでPadを1つずつ押します
+3. PLAYモードでパッドを1つずつ押します
 4. 同じ手順で`MELODY`へ移動します
 
-画面のPadには現在のKeyとScaleに応じた音名が表示されます。どのPadを押しても設定中のScale内の音です。
+画面のパッドには現在のKeyとScaleに応じた音名が表示されます。どのパッドを押しても設定中のScale内の音です。
 
 <!-- IMAGE MUSIC-PART-01: BASSまたはMELODY + PLAY。12 Padの音名が読める。 -->
 
 ## Chordを鳴らす
 
-CHORDの7つのコードPadは次の位置です。
+CHORDの7つのコードパッドは次の位置です。
 
 - P1、P2、P3：1、2、3番目のコード
 - P5、P6、P7：4、5、6番目のコード
@@ -33,7 +33,7 @@ CHORDの7つのコードPadは次の位置です。
 
 空いている位置はChordの種類を変えるModifierです。
 
-| Pad | Modifier |
+| パッド | Modifier |
 |---|---|
 | P4 | `SWAP`。MajorとMinorの性格を入れ替える |
 | P8 | `7th` |
@@ -41,7 +41,7 @@ CHORDの7つのコードPadは次の位置です。
 | P11 | `9th` |
 | P12 | `M7` |
 
-Modifierを押したままコードPadを押します。Modifierだけでは音は鳴りません。
+Modifierを押したままコードパッドを押します。Modifierだけでは音は鳴りません。
 
 <!-- IMAGE MUSIC-PART-02: CHORD + PLAY。7つのコード名と5つのModifierが読める。 -->
 
@@ -74,12 +74,13 @@ Key / ScaleはBass、Melody、Chordで共有されます。
 
 Bass、Melody、Chordの各パートを表示してメニューを開くと、そのパートの設定が先頭に表示されます。
 
-- `Sound Source` → `General MIDI` → `Tone`：内蔵音色を選ぶ
-- `Sound Source` → `Pad` → `Pad Sound`：Sampler Padの音を使う
+- `Sound Source` → `Synth Sound`：内蔵シンセの音色を選ぶ
+- `Sound Source` → `Pad Sample`：サンプラーパッドの音を使う
+- `Base Note`：`Pad Sample`選択時だけ表示し、サンプルの基準音程を調整する
 - `Octave`：-2〜+2オクターブ
 - `Volume`：0〜100%
 
-Sampler Padを楽器音源として使う場合は、[Sample Synth](../guides/sample-synth.md)も参照してください。
+サンプラーパッドを楽器音源として使う場合は、[サンプルシンセ](../guides/sample-synth.md)も参照してください。
 
 ## Pitch Bendを使う
 
@@ -102,6 +103,6 @@ TOUCH中は現在パートの記録済み演奏が一時Muteされます。TOUCH
 
 ## Loopへ重ねる
 
-演奏方法が分かったらRECモードへ切り替えます。Samplerと同じように、パートごとに演奏を追加し、Undo、Mute、個別Deleteができます。
+演奏方法が分かったらRECモードへ切り替えます。サンプラーと同じように、パートごとに演奏を追加し、Undo、Mute、個別Deleteができます。
 
 [演奏をRecする](record-loop.md){ .md-button .md-button--primary }

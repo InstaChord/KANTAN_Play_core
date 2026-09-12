@@ -52,6 +52,10 @@ uint32_t calc_crc32(const void *data, size_t length, uint32_t crc_init) {
 #if __has_include (<freertos/FreeRTOS.h>)
 void registry_base_t::setNotifyTaskHandle(TaskHandle_t handle)
 {
+  if (handle == nullptr) {
+    _task_handle = nullptr;
+    return;
+  }
   if (_task_handle != nullptr) {
     M5_LOGE("task handle already set");
     return;

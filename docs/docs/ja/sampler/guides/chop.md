@@ -1,21 +1,21 @@
 # 曲をChopして遊ぶ
 
-Chopは、長いSampleを複数の短い音へ分け、P1から順に並べる機能です。曲の一部分やリズムフレーズをばらばらの順番で鳴らせるようになります。
+Chopは、長いサンプルを複数の短い音へ分け、P1から順に並べる機能です。曲の一部分やリズムフレーズをばらばらの順番で鳴らせるようになります。
 
 最初は、切り分けやすい短いドラムフレーズを使い、8 Sliceに分ける方法がおすすめです。
 
 !!! warning
-    Chopを実行すると、作られたSliceの数だけP1から順にSampleが置き換わります。残したいKitは先に保存してください。
+    Chopを実行すると、作られたSliceの数だけP1から順にサンプルが置き換わります。残したいKitは先に保存してください。
 
-## 1. 元になるSampleを用意する
+## 1. 元になるサンプルを用意する
 
-1. 曲やフレーズのWAV / MP3をSampler Padへ追加します
-2. `SAMPLER`の`SOUND`モードで、そのPadを2回短く押してEditへ入ります
+1. 曲やフレーズのWAV / MP3をサンプラーパッドへ追加します
+2. `SAMPLER`の`SOUND`モードで、そのパッドを2回短く押してEditへ入ります
 3. `Start`と`End`で、Chopしたい範囲だけを残します
 
 長すぎる曲全体よりも、最初は数秒程度のフレーズを選ぶと結果を理解しやすくなります。
 
-[Sampleを追加する](../tutorials/add-sample.md){ .md-button }
+[サンプルを追加する](../tutorials/add-sample.md){ .md-button }
 [Start / Endを編集する](../tutorials/edit-sample.md#start-end){ .md-button }
 
 <!-- IMAGE CHOP-01: Sample Edit画面。P1のChopと、波形上のStart / End範囲が分かる状態。 -->
@@ -28,19 +28,19 @@ Edit画面でP1 `Chop`を押します。Chop画面では、分割後の境界が
 
 ## 3. 速度の扱いを選ぶ
 
-| Pad | 設定 | 結果 |
+| パッド | 設定 | 結果 |
 |---|---|---|
-| P1 | `FIT` | 現在のBeatまたは確定済みLoopの長さに合わせる。速度と音程は一緒に変わる |
-| P2 | `KEEP` | 元のSampleの速度と音程を保つ |
+| P1 | `FIT` | 現在のビートまたは確定済みLoopの長さに合わせる。速度と音程は一緒に変わる |
+| P2 | `KEEP` | 元のサンプルの速度と音程を保つ |
 
-`FIT`には、基準になるBeatまたは確定済みLoopが必要です。何もない状態では`NOTHING TO FIT`と表示されます。
+`FIT`には、基準になるビートまたは確定済みLoopが必要です。何もない状態では`NOTHING TO FIT`と表示されます。
 
 !!! tip
-    元の曲らしさを残したい場合は`KEEP`、今鳴っているBeatへ合わせたい場合は`FIT`から試します。
+    元の曲らしさを残したい場合は`KEEP`、今鳴っているビートへ合わせたい場合は`FIT`から試します。
 
 ## 4. 分け方を選ぶ
 
-| Pad | 分け方 |
+| パッド | 分け方 |
 |---|---|
 | P5 | 4 Slice |
 | P6 | 8 Slice |
@@ -65,7 +65,7 @@ Edit画面でP1 `Chop`を押します。Chop画面では、分割後の境界が
 2. `Fn2 CHOP`を押します
 3. `CHOPPING`などの処理表示が消えるまで待ちます
 
-完了するとSamplerのPLAY画面へ戻り、P1から順にSliceが配置されます。Slice同士は、次のSliceを鳴らすと前の音が止まるように設定されます。
+完了すると`SAMPLER`パートの`PLAY`画面へ戻り、P1から順にSliceが配置されます。Slice同士は、次のSliceを鳴らすと前の音が止まるように設定されます。
 
 <!-- IMAGE CHOP-03: Chop完了後のSampler PLAY画面と、CHOP COMPLETE / HOLD: MAKE LOOPの案内。 -->
 
@@ -73,11 +73,11 @@ Edit画面でP1 `Chop`を押します。Chop画面では、分割後の境界が
 
 Chop完了後は次のどちらかを選べます。
 
-- 短く操作して`DONE`：Sliceだけを作り、自分でPadを演奏する
+- 短く操作して`DONE`：Sliceだけを作り、自分でパッドを演奏する
 - `Fn2`を長押しして`MAKE LOOP`：先頭4個または8個のSliceを元の順番でRecへ並べる
 
 `MAKE LOOP`のあとも、RECモードで別の順番を重ねたり、[Undo](../tutorials/record-loop.md#undo)したりできます。
 
 ## ChopしたSliceの注意点
 
-ChopしたSliceはリズム位置を保つ専用Sampleです。Start / End、Pitch、Reverse、再Chop、Sample Synthへの割り当ては使用できません。音量の調整と演奏はできます。
+ChopしたSliceはリズム位置を保つ専用サンプルです。Start / End、Pitch、Reverse、再Chop、サンプルシンセへの割り当ては使用できません。音量の調整と演奏はできます。

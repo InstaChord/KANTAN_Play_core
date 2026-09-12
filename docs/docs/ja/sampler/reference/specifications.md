@@ -3,7 +3,7 @@
 ## 本体と操作
 
 - 対応ハードウェア：M5Stack CoreS3 SE / ESP32-S3
-- 演奏Pad：12個
+- 演奏パッド：12個
 - Fnボタン：3個
 - モード：SOUND / PLAY / REC / FX
 - 内蔵マイク、タッチパネル、加速度センサー
@@ -14,23 +14,23 @@
 
 - 再生出力：48kHz
 - マイク録音：32kHz。処理後に48kHz再生用データへ変換
-- Sample：最大20秒
-- Audio Beat：最大8秒
-- Samplerの12 Padで共有するPCMメモリ：約5MB
+- サンプル：最大20秒
+- オーディオビート：最大8秒
+- 12個のパッドで共有するPCMメモリ：約5MB
 - 内部音声：mono / PCM16
 - 出力直前にピークリミッターを適用
 
-実際に読み込める合計時間は、Sampleの長さや変換後サイズによって変わります。
+実際に読み込める合計時間は、サンプルの長さや変換後サイズによって変わります。
 
 ## 対応ファイル
 
 | 用途 | 形式 |
 |---|---|
-| Sample | WAV、MP3 |
-| Audio Beat | WAV、MP3 |
-| Pattern Beat | MID、MIDI |
+| サンプル | WAV、MP3 |
+| オーディオビート | WAV、MP3 |
+| パターンビート | MID、MIDI |
 | Music Player | WAV、MP3 |
-| Sample Kit / Project | JSONと対応する音声フォルダー |
+| サンプルキット / Project | JSONと対応する音声フォルダー |
 | Performance Recording | WAV |
 
 WAV / MP3はmono / stereoを受け付けます。本体内部では用途に合わせて変換されます。
@@ -42,7 +42,7 @@ WAV / MP3はmono / stereoを受け付けます。本体内部では用途に合�
 - Tuning：A=425〜455Hz、1Hz単位
 - Octave：Bass / Melody / Chordで-2〜+2
 - Pitch Bend：Bass / Melodyで1 Semitoneまたは1 Octave
-- Beat Repeat：1 / 2 / 4
+- ビート Repeat：1 / 2 / 4
 - Note Grid：8 / 16 / 32 / 64 / 128
 - Swing：0 / 25 / 50 / 75 / 100%
 
@@ -50,9 +50,9 @@ WAV / MP3はmono / stereoを受け付けます。本体内部では用途に合�
 
 | 内容 | SDカード上の場所 |
 |---|---|
-| Sample | `/sampler/samples/` |
-| Beat | `/sampler/loops/` |
-| Sample Kit | `/sampler/kits/` |
+| サンプル | `/sampler/samples/` |
+| ビート | `/sampler/loops/` |
+| サンプルキット | `/sampler/kits/` |
 | Project | `/sampler/projects/` |
 | Music | `/sampler/music/` |
 | Performance Recording | `/sampler/recordings/` |

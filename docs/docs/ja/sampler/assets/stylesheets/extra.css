@@ -7,6 +7,23 @@
   border-radius: 12px;
 }
 
+.device-controls-diagram {
+  display: block;
+  width: min(100%, 960px);
+  margin: 1.25rem auto;
+  border-radius: 12px;
+}
+
+.device-top-controls,
+.device-controls-mobile,
+.screen-button-mapping {
+  display: block;
+  width: min(100%, 640px);
+  height: auto;
+  margin: 1.25rem auto;
+  border-radius: 12px;
+}
+
 .manual-start {
   margin: 1.75rem 0 2.5rem;
   padding: 1.25rem;
@@ -29,6 +46,79 @@
 
 .manual-start p:first-child {
   margin-top: 0;
+}
+
+.manual-part-mode {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: center;
+  margin: 1rem 0;
+}
+
+.manual-part-mode-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-self: stretch;
+  padding: 1rem;
+  background: var(--md-code-bg-color);
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 10px;
+}
+
+.manual-part-mode-card strong {
+  font-size: 1.05rem;
+}
+
+.manual-part-mode-card code {
+  overflow-wrap: anywhere;
+}
+
+.manual-part-mode-card small {
+  margin-top: auto;
+}
+
+.manual-part-mode-plus {
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.manual-part-mode-result {
+  padding: 0.8rem 1rem;
+  text-align: center;
+  background: var(--md-accent-fg-color--transparent);
+  border-radius: 10px;
+}
+
+.manual-related {
+  margin: 1.25rem 0 1.75rem;
+  padding: 0.8rem 1rem;
+  background: var(--md-code-bg-color);
+  border-left: 4px solid var(--md-accent-fg-color);
+  border-radius: 0 8px 8px 0;
+}
+
+.manual-related > :first-child {
+  margin-top: 0;
+}
+
+.manual-related > :last-child {
+  margin-bottom: 0;
+}
+
+.manual-related ul {
+  margin-top: 0.4rem;
+}
+
+@media screen and (max-width: 600px) {
+  .manual-part-mode {
+    grid-template-columns: 1fr;
+  }
+
+  .manual-part-mode-plus {
+    text-align: center;
+  }
 }
 
 .manual-route-grid {

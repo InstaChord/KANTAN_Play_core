@@ -15,6 +15,7 @@ public:
     char name[24] = {};
     char address[18] = {};
     int8_t rssi = -127;
+    uint8_t address_type = 0;
     bool advertises_midi = false;
   };
   void start(void);
@@ -47,10 +48,16 @@ public:
   void cancelBLEMidiScan(void);
   ble_scan_state_t getBLEMidiScanState(void) const;
   size_t getBLEMidiScanDevices(ble_scan_device_t* devices, size_t capacity) const;
-  void setBLEMidiPreferredDevice(const char* address, const char* name);
+  void setBLEMidiPreferredDevice(const char* address, const char* name,
+                                 bool force_fresh_pairing = false,
+                                 int8_t address_type = -1);
   void getBLEMidiPreferredDevice(char* address, size_t address_size,
                                  char* name, size_t name_size) const;
   bool forgetBLEMidiPreferredDevice(void);
+  uint8_t consumeBLEMidiConnectCrashStage(uint16_t* free_internal_kb = nullptr,
+                                          uint16_t* largest_internal_kb = nullptr,
+                                          uint16_t* midi_stack_kb = nullptr,
+                                          uint16_t* callback_stack_kb = nullptr);
 protected:
   static void task_func(task_midi_t* me);
 };

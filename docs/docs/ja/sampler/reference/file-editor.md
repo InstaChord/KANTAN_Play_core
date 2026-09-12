@@ -2,18 +2,18 @@
 
 File Editorは、PCやスマートフォンからKANTAN SamplerのSDカード内ファイルを管理する画面です。
 
-Sampleタブではファイル管理に加えて、内蔵PresetまたはSD上のSampleをPadへAssignできます。SampleのStart / End、Pitch、Volumeなどは本体で編集します。
+サンプルタブではファイル管理に加えて、内蔵PresetまたはSD上のサンプルをパッドへAssignできます。サンプルのStart / End、Pitch、Volumeなどは本体で編集します。
 
 ## File Editorでできること
 
-- Sample、Beat、Kit、Project、Musicファイルの表示
+- サンプル、ビート、Kit、Project、Musicファイルの表示
 - SDカードへのUpload
 - PCやスマートフォンへのDownload
 - Rename、Delete
 - SDカード内のフォルダー作成と表示先の切り替え
-- SampleのPreviewとPadへのAssign
+- サンプルのPreviewとパッドへのAssign
 
-BeatのLoadや音量変更、Rec設定、ProjectのSave / Loadなど、本体の演奏状態を変える操作はFile Editorにはありません。
+ビートのLoadや音量変更、Rec設定、ProjectのSave / Loadなど、本体の演奏状態を変える操作はFile Editorにはありません。
 
 ## 開く前の準備
 
@@ -23,12 +23,12 @@ BeatのLoadや音量変更、Rec設定、ProjectのSave / Loadなど、本体の
 
 File Editorを開いている間は、ファイル保護のため本体の演奏機能が制限されます。
 
-## SampleをAssignする { #assign-sample }
+## サンプルをAssignする { #assign-sample }
 
 1. `Sample`タブを開きます
-2. `Assignment target`で割り当て先Padを選びます
+2. `Assignment target`で割り当て先パッドを選びます
 3. `Location`を選びます
-4. 使いたいSampleの`Play`で音を確認します
+4. 使いたいサンプルの`Play`で音を確認します
 5. `Assign`を押します
 
 <!-- IMAGE FILE-01: Sampleタブ全体。Assignment targetとLocationが同時に見える画面。 -->
@@ -37,8 +37,8 @@ File Editorを開いている間は、ファイル保護のため本体の演奏
 
 | 表示例 | 内容 |
 |---|---|
-| `Device Preset` | KANTAN Sampler本体に内蔵されたSample |
-| `SD / Samples` | SDカードのSample用ルートフォルダー |
+| `Device Preset` | KANTAN Sampler本体に内蔵されたサンプル |
+| `SD / Samples` | SDカードのサンプル用ルートフォルダー |
 | `SD / Samples / Drum` | SDカード内のDrumフォルダー |
 | `SD / Samples / Song1` | SDカード内のSong1フォルダー |
 
@@ -57,8 +57,8 @@ File Editorを開いている間は、ファイル保護のため本体の演奏
 
 | タブ | 主なファイル |
 |---|---|
-| Sample | WAV、MP3 |
-| Beat | WAV、MP3、MID、MIDI |
+| サンプル（`Sample`） | WAV、MP3 |
+| ビート（`Beat`） | WAV、MP3、MID、MIDI |
 | Kit | JSON |
 | Project | JSON |
 | Music | WAV、MP3 |

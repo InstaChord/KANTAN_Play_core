@@ -249,13 +249,13 @@ Acoustic Drum以外を対象に、Built-in候補を整理してください。
 現在のファーム領域：
 
 - 最大：6,553,600 bytes
-- 現行ファーム使用量：約5,813,282 bytes
-- 現行組み込みWAV：約2,133,451 bytes
+- 現行ファーム使用量：5,938,654 bytes
+- 現行組み込みWAV：2,186,831 bytes（72ファイル、実時間合計27.319秒）
 
 現行WAVをすべて削除した場合の概算：
 
-- WAVを除くファーム：約3,679,831 bytes
-- 理論上の残り：約2,873,769 bytes
+- WAVを除くファーム：約3,751,823 bytes
+- 理論上の残り：約2,801,777 bytes
 
 ただし、将来の機能追加、コード増加、アラインメント、メタデータの余裕を残す必要があります。
 
@@ -266,6 +266,10 @@ Acoustic Drum以外を対象に、Built-in候補を整理してください。
 - Acoustic Drum Kitを含む
 - 最低でも約450〜600KB程度は将来のファーム更新用として残す
 - 最終容量は必ず実ファームへ組み込んだビルド結果で判断する
+
+2,186,831 bytesをPCM16 monoの時間へ換算すると、48kHzで約22.8秒、32kHzで約34.2秒、24kHzで約45.6秒、18kHzで約60.7秒です。短いLoop Sourceを18〜32kHz中心で作り、必要な音だけ48kHzにする場合、Built-in全体で約35〜60秒を現実的な制作目標とします。
+
+ここで示す容量はFlash上のBuilt-in Libraryです。演奏時に選択音を展開する5MBのSampler PSRAM Poolとは別予算であり、Built-in全体を同時にPSRAMへ展開しません。
 
 暫定配分：
 
@@ -297,7 +301,9 @@ Acoustic Drum以外を対象に、Built-in候補を整理してください。
 - Base Noteを明記
 - Loop In / Loop Outを明記
 - Loop Crossfadeを明記
+- Attackを明記
 - Release設定を明記
+- Base Noteに対する微調律が必要な場合はTuneをcent単位で明記
 - FM風、Sync、Metallic、Voice、Lo-Fiなど、短くても個性が出る音を優先
 
 ## 11. Built-in候補の評価

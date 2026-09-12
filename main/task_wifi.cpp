@@ -67,9 +67,12 @@ void task_wifi_t::task_func(task_wifi_t* me)
   }
 }
 
-void task_wifi_t::start(void) {
+bool task_wifi_t::start(void) {
   auto thread = SDL_CreateThread((SDL_ThreadFunction)task_func, "wifi", this);
+  return thread != nullptr;
 }
+
+bool task_wifi_t::stop(void) { return true; }
 
 bool task_wifi_t::hasSavedSTAConfig(void) { return false; }
 bool task_wifi_t::getSavedSTASSID(char* out, size_t out_size)
@@ -86,6 +89,7 @@ bool task_wifi_t::getSavedSTASSID(char* out, size_t out_size)
 #include <esp_http_client.h>
 #include <esp_netif.h>
 #include <esp_event.h>
+#include <esp_heap_caps.h>
 #include <nvs.h>
 
 #include <esp_crt_bundle.h>
@@ -149,6 +153,9 @@ static volatile wifi_sta_state_t _sta_state = STA_STOPPED;
 static volatile uint32_t _sta_connected_ms = 0;
 static volatile bool _ap_started = false;
 static volatile int _ap_station_count = 0;
+// Keep AP-only resources stable until the setup page has actually answered
+// its first request. STA netif creation and scanning are deferred until then.
+static volatile bool _setup_http_seen = false;
 static volatile uint32_t _ap_start_requested_ms = 0;
 static volatile uint8_t _ap_start_attempts = 0;
 // -2=idle, -1=scanning, >=0=results ready to be consumed by task loop
@@ -202,6 +209,7 @@ struct wifi_state_t {
 
   // HTTP server
   httpd_handle_t http_server = nullptr;
+  bool mdns_started = false;
 };
 static wifi_state_t* _ws = nullptr;
 
@@ -358,6 +366,8 @@ static void dns_server_process() {
 // --- WiFi initialization ---
 static TaskHandle_t _wifi_task_handle = nullptr;
 static TaskHandle_t _wifi_info_task_handle = nullptr;
+static volatile bool _wifi_task_stop_requested = false;
+static volatile bool _wifi_info_task_stop_requested = false;
 
 static bool wpsStart() {
   if (!_ws) return false;
@@ -416,6 +426,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
       break;
     case WIFI_EVENT_AP_START:
       _ap_started = true;
+      _setup_http_seen = false;
       _ap_start_attempts = 0;
       M5.Log.printf("[wifi] ap start\r\n");
       M5_LOGI("[wifi-timing] t=+%lu WIFI_EVENT_AP_START",
@@ -424,15 +435,18 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
     case WIFI_EVENT_AP_STOP:
       _ap_started = false;
       _ap_station_count = 0;
+      _setup_http_seen = false;
       M5.Log.printf("[wifi] ap stop\r\n");
       break;
     case WIFI_EVENT_AP_STACONNECTED:
       _ap_station_count = _ap_station_count + 1;
+      M5.Log.printf("[wifi] ap client connected: count=%d\r\n", _ap_station_count);
       M5_LOGI("[wifi-timing] t=+%lu WIFI_EVENT_AP_STACONNECTED (count=%d)",
               (unsigned long)(M5.millis() - _setup_t0_ms), _ap_station_count);
       break;
     case WIFI_EVENT_AP_STADISCONNECTED:
       if (_ap_station_count > 0) _ap_station_count = _ap_station_count - 1;
+      M5.Log.printf("[wifi] ap client disconnected: count=%d\r\n", _ap_station_count);
       break;
     case WIFI_EVENT_SCAN_DONE:
       {
@@ -475,11 +489,23 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
       _sta_state = STA_CONNECTED;
       _sta_connected_ms = M5.millis();
       _last_disconnect_reason = 0;
+      // Publish connectivity immediately. The low-priority signal-strength
+      // task may run later under AMY load, which previously let the File
+      // Editor deadline expire just after DHCP succeeded.
+      system_registry->runtime_info.setWiFiSTAInfo(
+        def::command::wifi_sta_info_t::wsi_signal_1);
       auto* evt = (ip_event_got_ip_t*)event_data;
       if (evt) {
         M5.Log.printf("[wifi] got ip: " IPSTR "\r\n", IP2STR(&evt->ip_info.ip));
       } else {
         M5.Log.printf("[wifi] got ip\r\n");
+      }
+    } else if (event_id == IP_EVENT_AP_STAIPASSIGNED) {
+      auto* evt = (ip_event_ap_staipassigned_t*)event_data;
+      if (evt) {
+        M5.Log.printf("[wifi] ap assigned ip: " IPSTR "\r\n", IP2STR(&evt->ip));
+      } else {
+        M5.Log.printf("[wifi] ap assigned ip\r\n");
       }
     }
   }
@@ -527,7 +553,7 @@ static bool wifi_state_create() {
   esp_wifi_set_storage(WIFI_STORAGE_FLASH);
 
   esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, nullptr);
-  esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, nullptr);
+  esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, nullptr);
 
   M5_LOGI("[wifi-timing] t=+%lu wifi_state_create end (driver initialized)",
           (unsigned long)(M5.millis() - _setup_t0_ms));
@@ -584,6 +610,8 @@ static esp_err_t response_redirect(httpd_req_t *req, const char *location)
 
 static esp_err_t response_top_handler(httpd_req_t *req)
 {
+  _setup_http_seen = true;
+  M5.Log.printf("[wifi] http GET /\r\n");
   auto operation = system_registry->wifi_control.getOperation();
   if (operation == def::command::wifi_operation_t::wfop_setup_ap) {
     return response_redirect(req, "/wifi");
@@ -593,6 +621,8 @@ static esp_err_t response_top_handler(httpd_req_t *req)
 
 static esp_err_t response_wifi_handler(httpd_req_t *req)
 {
+  _setup_http_seen = true;
+  M5.Log.printf("[wifi] http GET /wifi\r\n");
   httpd_resp_set_type(req, "text/html");
   httpd_resp_send(req, html_wifi, (uint32_t)sizeof_html_wifi);
   httpd_resp_send_chunk(req, nullptr, 0);
@@ -624,7 +654,7 @@ static esp_err_t response_main_handler(httpd_req_t *req)
     "<link rel=\"stylesheet\" href=\"");
   httpd_resp_sendstr_chunk(req, base);
   httpd_resp_sendstr_chunk(req,
-    "/app.css?v=081-multi-upload\"></head><body>"
+    "/app.css?v=085-beat-view-sync\"></head><body>"
     // sampler-ui/index.htmlと同じ最小シェルを本体側で返す。CSS/JSはGitHub
     // Pagesから読み、APIだけを本体のlocation.originへ向ける。
 #if defined(KANPLAY_SAMPLER)
@@ -632,12 +662,12 @@ static esp_err_t response_main_handler(httpd_req_t *req)
     "<span id=\"status\">Connecting…</span><button id=\"refresh\" title=\"Refresh\">Refresh</button>"
     "</header><nav class=\"tabs\" aria-label=\"Editor views\">"
     "<button class=\"tab active\" data-view=\"sample-view\">Sample</button>"
-    "<button class=\"tab\" data-view=\"loop-view\">Loop</button>"
+    "<button class=\"tab\" data-view=\"beat-view\">Beat</button>"
     "<button class=\"tab\" data-view=\"kit-view\">Kit</button>"
     "<button class=\"tab\" data-view=\"project-view\">Project</button>"
     "<button class=\"tab\" data-view=\"music-view\">Music</button>"
     "</nav><section id=\"sample-view\" class=\"view active\"></section>"
-    "<section id=\"loop-view\" class=\"view\"></section>"
+    "<section id=\"beat-view\" class=\"view\"></section>"
     "<section id=\"kit-view\" class=\"view\"></section>"
     "<section id=\"project-view\" class=\"view\"></section>"
     "<section id=\"music-view\" class=\"view\"></section></main>"
@@ -647,7 +677,7 @@ static esp_err_t response_main_handler(httpd_req_t *req)
     "<script>window.KANPLAY={api:location.origin};</script>"
     "<script src=\"");
   httpd_resp_sendstr_chunk(req, base);
-  httpd_resp_sendstr_chunk(req, "/app.js?v=081-multi-upload\" defer></script></body></html>");
+  httpd_resp_sendstr_chunk(req, "/app.js?v=085-beat-view-sync\" defer></script></body></html>");
   httpd_resp_sendstr_chunk(req, nullptr);
   return ESP_OK;
 }
@@ -780,6 +810,7 @@ static void ssid_cache_clear(void)
 }
 
 static esp_err_t response_ssid_handler(httpd_req_t *req) {
+  _setup_http_seen = true;
   // その時点で持っているキャッシュを即時返却する（待機しない）。
   // 継続的な再スキャンはタスク側で走っているので、呼び出すたびに最新が返る。
   httpd_resp_set_type(req, "application/json");
@@ -966,6 +997,17 @@ static esp_err_t response_status_handler(httpd_req_t *req) {
 }
 
 static esp_err_t response_done_handler(httpd_req_t *req) {
+  // A phone may keep the setup page alive and resend /done when the later
+  // File Editor server appears at the same address. Only Setup AP owns this
+  // endpoint; otherwise the stale request used to shut down File Editor as
+  // soon as its STA connection completed.
+  if (system_registry->wifi_control.getOperation()
+        != def::command::wifi_operation_t::wfop_setup_ap) {
+    M5.Log.printf("[wifi] ignored stale POST /done\r\n");
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_sendstr(req, "ignored");
+    return ESP_OK;
+  }
   // Setup 完了後は STA 接続だけを残し、設定用 Web サーバは停止する
   system_registry->wifi_control.setWifiMode(def::command::wifi_mode_t::wifi_enable_sta);
   system_registry->wifi_control.setWebServerMode(def::command::webserver_mode_t::ws_disable);
@@ -1037,9 +1079,12 @@ static httpd_handle_t start_webserver(void)
   // uri_table[] の数に応じてハンドラ上限を引き上げる
   config.max_uri_handlers = 32;
 
-  M5_LOGI("Starting server on port: '%d'", config.server_port);
-  if (httpd_start(&server, &config) == ESP_OK) {
-    M5_LOGI("Registering URI handlers");
+  M5.Log.printf("[wifi] http start: free=%u largest=%u\r\n",
+                (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+  const esp_err_t start_err = httpd_start(&server, &config);
+  if (start_err == ESP_OK) {
+    M5.Log.printf("[wifi] http server ready\r\n");
 
     for (auto& uri : uri_table) {
       httpd_register_uri_handler(server, &uri);
@@ -1052,7 +1097,10 @@ static httpd_handle_t start_webserver(void)
     return server;
   }
 
-  M5_LOGI("Error starting server!");
+  M5.Log.printf("[wifi] http start failed: err=0x%x %s free=%u largest=%u\r\n",
+                start_err, esp_err_to_name(start_err),
+                (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
   return nullptr;
 }
 
@@ -1078,6 +1126,7 @@ static void task_wifi_info(void*) {
   bool sntp_inited = false;
   for (;;) {
     ulTaskNotifyTake(pdTRUE, 1000);
+    if (_wifi_info_task_stop_requested) { break; }
     {
       def::command::wifi_sta_info_t wifi_sta_info = def::command::wifi_sta_info_t::wsi_error;
       switch (_sta_state) {
@@ -1129,19 +1178,70 @@ static void task_wifi_info(void*) {
       system_registry->runtime_info.setWiFiAPInfo(wifi_ap_info);
     }
   }
+  _wifi_info_task_handle = nullptr;
+  vTaskDelete(nullptr);
 }
 
-void task_wifi_t::start(void)
+bool task_wifi_t::start(void)
 {
 #if defined (M5UNIFIED_PC_BUILD)
   auto thread = SDL_CreateThread((SDL_ThreadFunction)task_func, "wifi", this);
 #else
+  // Make start() idempotent so deferred Wi-Fi startup can create these tasks
+  // after BLE has released its controller memory. Wi-Fi/driver call paths keep
+  // their stacks in internal RAM; PSRAM stacks destabilize low-level locks.
+  BaseType_t info_result = _wifi_info_task_handle ? pdPASS : pdFAIL;
+  BaseType_t wifi_result = _wifi_task_handle ? pdPASS : pdFAIL;
+  if (_wifi_info_task_handle == nullptr) {
+    _wifi_info_task_stop_requested = false;
+    info_result = xTaskCreatePinnedToCore(
+      task_wifi_info, "wi", 2048, this, 0, &_wifi_info_task_handle,
+      def::system::task_cpu_wifi);
+  }
+  if (_wifi_task_handle == nullptr) {
+    _wifi_task_stop_requested = false;
+    wifi_result = xTaskCreatePinnedToCore(
+      (TaskFunction_t)task_func, "wifi", 4096, this,
+      def::system::task_priority_wifi, &_wifi_task_handle,
+      def::system::task_cpu_wifi);
+  }
+  M5.Log.printf("[wifi] task start info=%ld worker=%ld info_handle=%p worker_handle=%p\r\n",
+                (long)info_result, (long)wifi_result,
+                _wifi_info_task_handle, _wifi_task_handle);
+  if (_wifi_task_handle != nullptr) {
+    system_registry->wifi_control.setNotifyTaskHandle(_wifi_task_handle);
+  }
+  return _wifi_info_task_handle != nullptr && _wifi_task_handle != nullptr;
+#endif
+}
 
-  xTaskCreatePinnedToCore(task_wifi_info, "wi", 2048, this, 0, &_wifi_info_task_handle, def::system::task_cpu_wifi);
+bool task_wifi_t::stop(void)
+{
+#if !defined (M5UNIFIED_PC_BUILD)
+  if (_wifi_info_task_handle == nullptr && _wifi_task_handle == nullptr) {
+    return true;
+  }
 
-  xTaskCreatePinnedToCore((TaskFunction_t)task_func, "wifi", 4096, this, def::system::task_priority_wifi, &_wifi_task_handle, def::system::task_cpu_wifi);
-  system_registry->wifi_control.setNotifyTaskHandle(_wifi_task_handle);
-
+  // The caller waits until task_func has fully stopped the radio/server and
+  // published both runtime states as off. Each worker must delete itself;
+  // deleting it externally while it leaves ulTaskNotifyTake can corrupt the
+  // task stack allocation on ESP32-S3.
+  system_registry->wifi_control.setNotifyTaskHandle(nullptr);
+  _wifi_info_task_stop_requested = true;
+  _wifi_task_stop_requested = true;
+  if (_wifi_info_task_handle != nullptr) { xTaskNotifyGive(_wifi_info_task_handle); }
+  if (_wifi_task_handle != nullptr) { xTaskNotifyGive(_wifi_task_handle); }
+  const uint32_t deadline = M5.millis() + 250;
+  while ((_wifi_info_task_handle != nullptr || _wifi_task_handle != nullptr)
+      && (int32_t)(M5.millis() - deadline) < 0) {
+    M5.delay(1);
+  }
+  const bool stopped = _wifi_info_task_handle == nullptr
+                    && _wifi_task_handle == nullptr;
+  M5.Log.printf("[wifi] tasks stop complete=%u\r\n", (unsigned)stopped);
+  return stopped;
+#else
+  return true;
 #endif
 }
 
@@ -1218,17 +1318,27 @@ static void apply_ap_config()
   ap_config.ap.ssid_len = strlen(def::app::wifi_ap_ssid);
   ap_config.ap.channel = 1;
   ap_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
-  ap_config.ap.max_connection = 4;
-  esp_wifi_set_config(WIFI_IF_AP, &ap_config);
+  // Setup is a one-phone operation. Reserving four WPA stations wastes scarce
+  // internal RAM and can make the authentication timer allocation fail.
+  ap_config.ap.max_connection = 1;
+  const esp_err_t err = esp_wifi_set_config(WIFI_IF_AP, &ap_config);
+  M5.Log.printf("[wifi] ap config: err=0x%x %s auth=%d max=%u\r\n",
+                err, esp_err_to_name(err), (int)ap_config.ap.authmode,
+                (unsigned)ap_config.ap.max_connection);
 }
 
 void task_wifi_t::task_func(task_wifi_t* me)
 {
   task_http_client_t task_http_client;
+  // The HTTP/TLS worker is not used by Setup AP. Keep its 10 KB stack
+  // unallocated until an OTA/catalog/connectivity request actually needs it;
+  // WPA authentication has a stricter internal-RAM requirement. Each exec
+  // method handles task-allocation failure without notifying a null task.
   bool update_check_started = false;
   uint32_t update_check_deadline = 0;
   bool ota_connect_started = false;
   uint32_t ota_connect_deadline = 0;
+  uint32_t http_server_retry_not_before = 0;
   // 無線ドライバの起動に失敗した場合、同じ要求のままでも一度破棄して再試行する。
   // 失敗した個体がAPなしの状態で固定されないよう、試行間隔は1秒に抑える。
   bool radio_reconfigure_pending = false;
@@ -1325,6 +1435,7 @@ void task_wifi_t::task_func(task_wifi_t* me)
     }
     taskYIELD();
     ulTaskNotifyTake(pdTRUE, wait);
+    if (_wifi_task_stop_requested) { break; }
 
     // -------- レジストリから新しい goal を計算 --------
     auto mode = system_registry->wifi_control.getWifiMode();
@@ -1337,6 +1448,7 @@ void task_wifi_t::task_func(task_wifi_t* me)
       radio_reconfigure_pending = false;
       radio_reconfigure_not_before = 0;
     }
+    if (!goal.http_server) { http_server_retry_not_before = 0; }
     const bool retry_radio = radio_reconfigure_pending && radio_requested
                           && (int32_t)(M5.millis() - radio_reconfigure_not_before) >= 0;
 
@@ -1369,7 +1481,10 @@ void task_wifi_t::task_func(task_wifi_t* me)
           stop_webserver(_ws->http_server);
           _ws->http_server = nullptr;
         }
-        mdns_free();
+        if (_ws && _ws->mdns_started) {
+          mdns_free();
+          _ws->mdns_started = false;
+        }
       }
       if (prev_goal.ssid_scan && !goal.ssid_scan) {
         esp_wifi_clear_ap_list();
@@ -1506,13 +1621,55 @@ void task_wifi_t::task_func(task_wifi_t* me)
       if (((!prev_goal.http_server && goal.http_server) || retry_radio) && _ws) {
         M5.delay(16);
         _ws->http_server = start_webserver();
-        mdns_init();
-        mdns_hostname_set(def::app::wifi_mdns);
-        mdns_service_add(nullptr, "_http", "_tcp", http_port, nullptr, 0);
+        http_server_retry_not_before = _ws->http_server
+          ? 0 : M5.millis() + 1000;
+        // Setup AP always has the stable 192.168.4.1 address. Avoid starting
+        // mDNS there: its task stack competes with the WPA authentication
+        // timer exactly when the phone joins kanplay-ap. File Editor on the
+        // user's LAN still publishes kanplay.local.
+        if (!goal.ap_enabled) {
+          const esp_err_t mdns_err = mdns_init();
+          _ws->mdns_started = mdns_err == ESP_OK;
+          if (_ws->mdns_started) {
+            mdns_hostname_set(def::app::wifi_mdns);
+            mdns_service_add(nullptr, "_http", "_tcp", http_port, nullptr, 0);
+          } else {
+            M5.Log.printf("[wifi] mDNS skipped: 0x%x %s\r\n",
+                          mdns_err, esp_err_to_name(mdns_err));
+          }
+        }
         if (goal.ap_enabled && _ws->ap_netif) {
           esp_netif_ip_info_t ip_info;
           if (esp_netif_get_ip_info(_ws->ap_netif, &ip_info) == ESP_OK) {
             dns_server_start(ip_info.ip.addr);
+          }
+        }
+      }
+    }
+
+    // A transient internal-RAM shortage must not leave the UI permanently on
+    // Starting Server. Retry only the HTTP service after the radio is stable;
+    // there is no need to restart AP/STA or disturb the connected phone.
+    if (goal.http_server && _ws && _ws->wifi_started
+     && _ws->http_server == nullptr
+     && http_server_retry_not_before != 0
+     && (int32_t)(M5.millis() - http_server_retry_not_before) >= 0) {
+      _ws->http_server = start_webserver();
+      if (_ws->http_server == nullptr) {
+        http_server_retry_not_before = M5.millis() + 1000;
+      } else {
+        http_server_retry_not_before = 0;
+        if (goal.ap_enabled && _ws->ap_netif) {
+          esp_netif_ip_info_t ip_info;
+          if (esp_netif_get_ip_info(_ws->ap_netif, &ip_info) == ESP_OK) {
+            dns_server_start(ip_info.ip.addr);
+          }
+        } else if (!goal.ap_enabled && !_ws->mdns_started) {
+          const esp_err_t mdns_err = mdns_init();
+          _ws->mdns_started = mdns_err == ESP_OK;
+          if (_ws->mdns_started) {
+            mdns_hostname_set(def::app::wifi_mdns);
+            mdns_service_add(nullptr, "_http", "_tcp", http_port, nullptr, 0);
           }
         }
       }
@@ -1680,13 +1837,16 @@ void task_wifi_t::task_func(task_wifi_t* me)
     // SSID スキャン: ステーションが接続してから初めて動かす。
     //   - ステーション接続までは AP の radio を占有させない (接続高速化)
     //   - ステーション接続を受けたら AP-only → APSTA に昇格して scan 解禁
-    if (goal.ssid_scan && _ws && _ws->wifi_started && _ap_station_count > 0) {
+    if (goal.ssid_scan && _ws && _ws->wifi_started
+     && _ap_station_count > 0 && _setup_http_seen) {
       maybe_upgrade_to_apsta_for_scan();
       scan_tick();
     }
 
 #endif
   }
+  _wifi_task_handle = nullptr;
+  vTaskDelete(nullptr);
 }
 
 //-------------------------------------------------------------------------

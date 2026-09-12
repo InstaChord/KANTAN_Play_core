@@ -1,4 +1,4 @@
-# ProjectとSample Kit
+# Projectとサンプルキット
 
 KANTAN Samplerには、音色だけを保存する`Sample Kit`と、曲全体を保存する`Project`があります。
 
@@ -6,8 +6,8 @@ KANTAN Samplerには、音色だけを保存する`Sample Kit`と、曲全体を
 
 | 保存形式 | 保存する内容 | 向いている用途 |
 |---|---|---|
-| Sample Kit | 12個のSampler音源、Pad編集設定、Samplerパート音量 | 効果音セット、ドラムセット、別の曲でも使う音色セット |
-| Project | Sample Kitの内容、Beat、Rec、Loop長、Key / Scale、Bass / Melody / Chord、FX、Mixer | 制作中の曲やライブセット全体 |
+| サンプルキット | 12個のサンプル、パッド編集設定、サンプラーパートの音量 | 効果音セット、ドラムセット、別の曲でも使う音色セット |
+| Project | サンプルキットの内容、ビート、Rec、Loop長、Key / Scale、Bass / Melody / Chord、FX、Mixer | 制作中の曲やライブセット全体 |
 
 迷った場合はProjectを保存します。
 
@@ -37,9 +37,9 @@ KANTAN Samplerには、音色だけを保存する`Sample Kit`と、曲全体を
 内蔵Projectの`DISCO Beat`も一覧の先頭から選べます。
 
 !!! warning
-    Projectを読み込むと、現在のSample、Beat、Recなどが置き換わります。必要な状態は先に保存してください。
+    Projectを読み込むと、現在のサンプル、ビート、Recなどが置き換わります。必要な状態は先に保存してください。
 
-## Sample Kitを保存する
+## サンプルキットを保存する
 
 1. `SAMPLER`パートを選びます
 2. メニューの`Sample` → `Save Sample Kit`へ進みます
@@ -50,11 +50,11 @@ KANTAN Samplerには、音色だけを保存する`Sample Kit`と、曲全体を
 - `New`：新しいKitとして保存
 - `Save as Default`：起動時やReset Kitで使う自分用のDefault Kitとして保存
 
-Sample Kitを保存しても、Beat、Rec、Key / Scale、FXは含まれません。
+サンプルキットを保存しても、ビート、Rec、Key / Scale、FXは含まれません。
 
-## Sample Kitを読み込む
+## サンプルキットを読み込む
 
-`Sample` → `Load Sample Kit`から選びます。現在の12 Padと編集設定が置き換わりますが、BeatとRecは残ります。
+`Sample` → `Load Sample Kit`から選びます。現在の12個のパッドと編集設定が置き換わりますが、ビートとRecは残ります。
 
 ## New KitとReset Kit
 
@@ -65,10 +65,10 @@ Sample Kitを保存しても、Beat、Rec、Key / Scale、FXは含まれませ�
 
 ## 自動復元について
 
-本体は直前の状態を自動保存し、次回起動時に復元します。マイク録音したSampleも、SDカード装着時は一時保存されます。
+本体は直前の状態を自動保存し、次回起動時に復元します。マイク録音したサンプルも、SDカード装着時は一時保存されます。
 
 !!! warning
-    SDカードがない状態で録音したSampleは、電源を切ったあと復元できません。大切な録音はSDカードを入れ、ProjectまたはSample Kitとして保存してください。
+    SDカードがない状態で録音したサンプルは、電源を切ったあと復元できません。大切な録音はSDカードを入れ、Projectまたはサンプルキットとして保存してください。
 
 ## ファイルをPCへバックアップする
 

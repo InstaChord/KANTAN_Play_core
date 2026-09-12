@@ -73,6 +73,14 @@ namespace midi_driver {
     virtual void end(void) = 0;
 
     virtual std::vector<uint8_t> read(void) = 0;
+    // Transports with a persistent receive buffer can override this to avoid
+    // allocating and copying a temporary vector on every receive wakeup.
+    virtual bool readInto(MIDI_Decoder& decoder) {
+      auto data = read();
+      if (data.empty()) { return false; }
+      decoder.addData(data.data(), data.size());
+      return true;
+    }
     // Optional periodic transport work (for example BLE reconnection).
     virtual void service(void) {}
     // virtual size_t write(const uint8_t* data, size_t length) = 0;
@@ -159,10 +167,7 @@ return result;
 */
     }
     bool receive(void) {
-      auto data = _transport->read();
-      if (data.empty()) { return false; }
-      _decoder.addData(data);
-      return true;
+      return _transport->readInto(_decoder);
     }
     bool receiveMessage(MIDI_Message* message) {
       receive();

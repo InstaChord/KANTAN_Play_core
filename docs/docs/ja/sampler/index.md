@@ -84,9 +84,9 @@ KANTAN Samplerには、音を鳴らす基本的なサンプラー機能に加え
 
 ## すべての機能を調べる
 
-- Sampleを整える：[Sample編集](tutorials/edit-sample.md)／[応用操作](tutorials/advanced-sample.md)
-- BeatとLoop：[Beat設定](tutorials/beat-settings.md)／[Rec](tutorials/record-loop.md)／[Performance Recording](tutorials/performance-recording.md)
+- サンプルを整える：[サンプル編集](tutorials/edit-sample.md)／[応用操作](tutorials/advanced-sample.md)
+- ビートとLoop：[ビート設定](tutorials/beat-settings.md)／[Rec](tutorials/record-loop.md)／[Performance Recording](tutorials/performance-recording.md)
 - 音楽を加える：[Bass・Melody・Chord](tutorials/music-parts.md)／[Music Player](guides/music-player.md)
-- 保存と管理：[ProjectとSample Kit](reference/save-and-restore.md)／[File Editor](reference/file-editor.md)
+- 保存と管理：[Projectとサンプルキット](reference/save-and-restore.md)／[File Editor](reference/file-editor.md)
 - 接続と保守：[Wi-FiとUpdate](reference/wifi-and-update.md)／[外部コントローラー](reference/external-devices.md)／[System設定とReset](reference/system-and-reset.md)
 - 困ったとき：[トラブルシューティング](reference/troubleshooting.md)／[用語集](reference/glossary.md)／[主な仕様](reference/specifications.md)

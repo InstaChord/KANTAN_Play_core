@@ -10,16 +10,19 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "docs" / "Sample_Sound"
 DESTINATION = SOURCE / "Acoustic_Drums"
 
-# Pattern Beat voices are capped at two seconds. Keep the useful attack and
-# enough body for cymbals without embedding the much longer studio originals.
+# Keep just enough of the sampled attack/body for a playable acoustic Kit.
+# The 12-pad layout needs three toms plus a short crash and open hat, so none
+# of these factory assets needs the long tails of the original recordings.
 SOURCES = (
-    ("Tom_Low_Acc.wav", "01_Acoustic_Tom_Low.wav", 900),
-    ("Tom_Mid_Acc.wav", "02_Acoustic_Tom_Mid.wav", 800),
-    ("Tom_High_Acc", "03_Acoustic_Tom_High.wav", 700),
-    ("Snare_Rim_Acc.wav", "04_Acoustic_Rim.wav", 400),
-    ("Crash.wav", "05_Acoustic_Crash.wav", 1800),
-    ("Ride_Acc.wav", "06_Acoustic_Ride.wav", 1800),
-    ("Saker.wav", "07_Acoustic_Shaker.wav", 650),
+    ("Tom_Low_Acc.wav", "01_Acoustic_Tom_Low.wav", 460),
+    ("Tom_Mid_Acc.wav", "02_Acoustic_Tom_Mid.wav", 450),
+    ("Tom.wav", "03_Acoustic_Tom_High.wav", 260),
+    ("Snare_Rim_Acc.wav", "04_Acoustic_Rim.wav", 250),
+    ("Crash.wav", "05_Acoustic_Crash.wav", 450),
+    ("Ride_Acc.wav", "06_Acoustic_Ride.wav", 450),
+    ("Saker.wav", "07_Acoustic_Shaker.wav", 80),
+    ("Hat.wav", "08_Acoustic_Hat_Open.wav", 350),
+    ("Cowbell.wav", "09_Acoustic_Cowbell.wav", 280),
 )
 
 

@@ -271,7 +271,7 @@ Start / Endを長押しすると、その境界を解除します。確定後の
 
 - Pad Base Noteを自動推定または手動設定
 - Attack後の安定区間を解析し、適性がある素材だけSustain Loopを使用
-- Loop In / Out、Releaseを編集可能
+- Attack、Loop In / Out、Release、サンプル固有のTuneを編集可能
 - Release: 10 / 50 / 100 / 200 / 500 / 750 / 1000 / 1250 / 1500 ms
 - Loop点はゼロクロスだけでなく、前後波形の類似性も使って選択
 - 音程変化、音色変化、減衰が大きい素材は無理にLoopしない

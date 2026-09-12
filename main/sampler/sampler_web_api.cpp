@@ -95,6 +95,7 @@ static bool is_asset_directory(const web_dir_t& dir, const std::string& name)
 }
 
 static bool is_mp3_name(const std::string& name) { return has_suffix(name, ".mp3"); }
+static bool is_ktsynth_name(const std::string& name) { return has_suffix(name, ".ktsynth"); }
 static bool is_midi_name(const std::string& name)
 {
   return has_suffix(name, ".mid") || has_suffix(name, ".midi");
@@ -104,7 +105,8 @@ static bool valid_web_file_name(const web_dir_t& dir, const std::string& name)
 {
   if (!valid_relative_path(name, nullptr)) { return false; }
   const bool beat_midi = strcmp(dir.token, "loops") == 0 && is_midi_name(name);
-  return dir.audio ? (has_suffix(name, ".wav") || is_mp3_name(name) || beat_midi)
+  const bool synth_tone = strcmp(dir.token, "samples") == 0 && is_ktsynth_name(name);
+  return dir.audio ? (has_suffix(name, ".wav") || is_mp3_name(name) || beat_midi || synth_tone)
                    : valid_relative_path(name, dir.suffix);
 }
 
@@ -337,7 +339,10 @@ static esp_err_t get_file(httpd_req_t* req, const web_dir_t& dir, const std::str
     return send_error(req, "500 Internal Server Error", "read failed");
   }
   httpd_resp_set_type(req, dir.audio
-    ? (is_mp3_name(name) ? "audio/mpeg" : is_midi_name(name) ? "audio/midi" : "audio/wav")
+    ? (is_mp3_name(name) ? "audio/mpeg"
+       : is_midi_name(name) ? "audio/midi"
+       : is_ktsynth_name(name) ? "application/vnd.instachord.ktsynth"
+       : "audio/wav")
     : dir.content_type);
   httpd_resp_set_hdr(req, "Content-Disposition", name.c_str());
   auto* data = (uint8_t*)heap_caps_malloc(16 * 1024, MALLOC_CAP_SPIRAM);
@@ -362,6 +367,9 @@ static esp_err_t get_file(httpd_req_t* req, const web_dir_t& dir, const std::str
 static esp_err_t put_file(httpd_req_t* req, const web_dir_t& dir, const std::string& name)
 {
   if (!ensure_dirs()) { return send_error(req, "503 Service Unavailable", "SD card unavailable"); }
+  if (is_ktsynth_name(name) && (size_t)req->content_len > 2u * 1024u * 1024u) {
+    return send_error(req, "413 Payload Too Large", "KANTAN Synth tone too large");
+  }
   if (req->content_len == 0 || (size_t)req->content_len > dir.max_bytes) { return send_error(req, "413 Payload Too Large", "file too large"); }
   std::string path = full_path(dir, name);
   std::string temporary = path + ".upload";

@@ -35,14 +35,14 @@ extra_css:
 nav:
   - ホーム: index.md
   - はじめての5分: quickstart.md
-  - Sampleを追加・編集する:
-    - Sampleを追加する: tutorials/add-sample.md
+  - サンプルを追加・編集する:
+    - サンプルを追加する: tutorials/add-sample.md
     - マイクで録音する: tutorials/record-sample.md
-    - Sampleを編集する: tutorials/edit-sample.md
-    - Sampleの応用操作: tutorials/advanced-sample.md
+    - サンプルを編集する: tutorials/edit-sample.md
+    - サンプルの応用操作: tutorials/advanced-sample.md
   - Loopを作る:
-    - Beatを選ぶ: tutorials/select-beat.md
-    - Beatとタイミングを調整する: tutorials/beat-settings.md
+    - ビートを選ぶ: tutorials/select-beat.md
+    - ビートとタイミングを調整する: tutorials/beat-settings.md
     - 演奏をRecする: tutorials/record-loop.md
     - 演奏全体をWAVへ録音する: tutorials/performance-recording.md
     - FXで変化させる: tutorials/use-fx.md
@@ -50,7 +50,7 @@ nav:
     - 音楽パートを演奏する: tutorials/music-parts.md
   - 基本を知る:
     - 画面とボタン: reference/screen-and-controls.md
-    - ProjectとSample Kit: reference/save-and-restore.md
+    - Projectとサンプルキット: reference/save-and-restore.md
     - File Editor: reference/file-editor.md
     - Wi-FiとUpdate: reference/wifi-and-update.md
     - 外部コントローラー: reference/external-devices.md
@@ -61,7 +61,7 @@ nav:
     - 曲をChopして遊ぶ: guides/chop.md
     - 曲を流しながら演奏する: guides/music-player.md
     - DJのように演奏する: guides/dj-performance.md
-    - Sampleから楽器を作る: guides/sample-synth.md
+    - サンプルから楽器を作る: guides/sample-synth.md
   - 困ったとき・資料:
     - トラブルシューティング: reference/troubleshooting.md
     - 用語集: reference/glossary.md

@@ -9,6 +9,7 @@
 #include <M5Unified.h>
 
 #include "sampler_audio.hpp"
+#include "sampler_amy_engine.hpp"
 
 #include "../common_define.hpp"
 #include "../system_registry.hpp"
@@ -489,6 +490,37 @@ void sampler_audio_t::clearSynthSustainCache(uint8_t cache_slot)
   const uint8_t last = cache_slot < synth_sustain_cache_count
     ? (uint8_t)(cache_slot + 1) : synth_sustain_cache_count;
   for (uint8_t i = first; i < last; ++i) { reset_synth_sustain_cache_entry(synth_sustain_cache[i]); }
+}
+
+size_t sampler_audio_t::releaseUnusedSynthSustainCacheMemory(void)
+{
+  size_t released = 0;
+  for (uint8_t slot = 0; slot < synth_sustain_cache_count; ++slot) {
+    bool in_use = false;
+    for (const auto& voice : voices) {
+      if (voice.active && voice.sustain_cache_slot == slot) {
+        in_use = true;
+        break;
+      }
+    }
+    if (in_use) { continue; }
+
+    auto& cache = synth_sustain_cache[slot];
+    if (cache.attack_pcm != nullptr) {
+      released += cache.attack_capacity * sizeof(int16_t);
+      free(cache.attack_pcm);
+      cache.attack_pcm = nullptr;
+      cache.attack_capacity = 0;
+    }
+    if (cache.pcm != nullptr) {
+      released += cache.capacity * sizeof(int16_t);
+      free(cache.pcm);
+      cache.pcm = nullptr;
+      cache.capacity = 0;
+    }
+    reset_synth_sustain_cache_entry(cache);
+  }
+  return released;
 }
 
 bool sampler_audio_t::isSynthSustainCacheInUse(uint8_t cache_slot)
@@ -2189,12 +2221,17 @@ void sampler_audio_t::task_func(sampler_audio_t* me)
       int64_t deck_r = 0;
       read_deck_stream_frame(&deck_l, &deck_r);
       const mixed_buses_t mixed = output_muted ? mixed_buses_t{} : mix_voices();
+      int32_t amy_l = 0;
+      int32_t amy_r = 0;
+      // Always drain the producer ring, including during a short output mute,
+      // so resuming audio cannot replay stale AMY frames.
+      sampler_amy_engine::readFrame(&amy_l, &amy_r);
       int64_t beat_l = output_muted ? 0 : mixed.beat;
       int64_t beat_r = output_muted ? 0 : mixed.beat;
       // The external SAM2695 input is always a musical Part. Beat audio and
       // pattern drums are rendered by explicitly tagged PCM voices.
-      int64_t parts_l = output_muted ? 0 : (int64_t)i2sbuf[i  ] + mixed.parts;
-      int64_t parts_r = output_muted ? 0 : (int64_t)i2sbuf[i+1] + mixed.parts;
+      int64_t parts_l = output_muted ? 0 : (int64_t)i2sbuf[i  ] + mixed.parts + amy_l;
+      int64_t parts_r = output_muted ? 0 : (int64_t)i2sbuf[i+1] + mixed.parts + amy_r;
       int64_t music_l = output_muted ? 0 : deck_l;
       int64_t music_r = output_muted ? 0 : deck_r;
       const uint8_t target = active_fx_target_mask;

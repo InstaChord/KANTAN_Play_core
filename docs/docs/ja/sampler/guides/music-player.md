@@ -1,6 +1,6 @@
 # 曲を流しながら演奏する
 
-Music Playerでは、SDカードのWAV / MP3を曲全体として再生できます。曲を聴くだけでなく、Sampler Padで効果音や声、合いの手を重ねられます。
+Music Playerでは、SDカードのWAV / MP3を曲全体として再生できます。曲を聴くだけでなく、サンプラーパッドで効果音や声、合いの手を重ねられます。
 
 ここで再生する曲は`Music`です。繰り返し再生するリズム素材の`Beat`や、Recした演奏データの`Loop`とは別に扱います。
 
@@ -23,9 +23,9 @@ File Editorの`Music`タブを開き、WAVまたはMP3をUploadします。Music
 
 ## 3. Musicを操作する
 
-MUSICパートのPLAYモードでは、中央の4 Padで再生を操作します。
+MUSICパートのPLAYモードでは、中央の4つのパッドで再生を操作します。
 
-| Pad | 操作 |
+| パッド | 操作 |
 |---|---|
 | P5 | 10秒戻る |
 | P6 | Stop。曲の先頭へ戻して停止する |
@@ -36,22 +36,22 @@ MUSICパートのPLAYモードでは、中央の4 Padで再生を操作します
 
 メニューの`Music Track`からも、同じPlay / Pause、10秒戻る・進む、Stopを操作できます。
 
-## 4. 曲にSampleを重ねる
+## 4. 曲にサンプルを重ねる
 
 1. P7でMusicを再生します
 2. 下のダイヤルを回して`SAMPLER`パートへ移動します
-3. PLAYモードで好きなPadを鳴らします
+3. PLAYモードで好きなパッドを鳴らします
 
 Musicは止まらずに再生を続けます。曲へ短い声、効果音、パーカッションなどを重ねてみてください。
 
 !!! tip
-    MusicとSampleの音量差が大きい場合は、`Music Track`の`Track Volume`を調整します。Sample側はPadのVolumeまたはSamplerパートのVolumeを調整します。
+    Musicとサンプルの音量差が大きい場合は、`Music Track`の`Track Volume`を調整します。サンプル側はパッドのVolumeまたはサンプラーパートのVolumeを調整します。
 
 ## 5. FXで2つの音を使い分ける
 
 Musicを読み込んだ状態でFXモードへ入ると、FXの対象は次の2つになります。
 
-- P9 `LIVE`：Beat、Sampler、Bass、Melody、Chord
+- P9 `LIVE`：ビート、サンプラー、Bass、Melody、Chord
 - P10 `MUSIC`：Music Playerの曲
 
 たとえば`MUSIC`だけにFilterをかけ、`LIVE`の合いの手はそのまま鳴らせます。両方を選ぶこともできます。
