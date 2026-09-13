@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>KANTAN Sampler - ファームウェア書き込み (β版)</title>
   <meta name="description" content="KANTAN Sampler（β版）のファームウェアをブラウザから直接書き込みできます">
   <script
@@ -209,7 +212,9 @@
     <p class="copyright">MIT License</p>
   </footer>
   <script>
-    fetch("manifest_sampler.json", { cache: "no-store" })
+    // The timestamp bypasses a stale browser/CDN response. The versioned
+    // manifest URL below also gives ESP Web Tools a fresh cache key.
+    fetch(`manifest_sampler.json?check=${Date.now()}`, { cache: "no-store" })
       .then((response) => response.ok ? response.json() : Promise.reject())
       .then((manifest) => {
         document.getElementById("firmware-version").textContent = `v${manifest.version}`;

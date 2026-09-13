@@ -43,11 +43,15 @@ def update_web_manifest(project_dir, is_sampler, device):
         # Versioned archives are for manual rollback only and must never be
         # referenced from the active manifest.
         latest_path = "firmware/KANTAN_Sampler_%s_full.bin" % device
+        # ESP Web Tools and the browser may retain a previously downloaded
+        # full image when the public filename stays unchanged. Keep the stable
+        # filename, but give every release a distinct request URL.
+        versioned_latest_path = "%s?v=%s" % (latest_path, version)
         for build in manifest.get("builds", []):
             for part in build.get("parts", []):
                 if part.get("offset") == 0 and part.get("path", "").startswith("firmware/KANTAN_Sampler_"):
-                    if part.get("path") != latest_path:
-                        part["path"] = latest_path
+                    if part.get("path") != versioned_latest_path:
+                        part["path"] = versioned_latest_path
                         changed = True
     if not changed:
         return
