@@ -375,7 +375,17 @@ LEDは `system_registry->rgbled_control.setColor()` で制御します。
   - `File Server` ONでWi-Fiファイル操作モードを起動する
 - Audio: `Input Source`
   - `Auto` / `Internal` / `External`
-- System: `Display` / `LED` / `Language` / `Info` / `Reset All`
+- System: `Recording Input` / `Menu Sound` / `SD Card` / `Display` / `LED` / `Language` / `Info` / `Reset All`
+  - `SD Card`は`Status`と状態依存の主操作（`Eject SD Card` / `Load SD Card`）を持つ
+  - 状態は`uninitialized` / `mounted` / `ejecting` / `safe_to_remove` / `missing` / `error`として`storage_sd_t`へ集約する。`_is_begin`だけで物理媒体の利用可否を判断しない
+  - `SAFE TO REMOVE`、`MISSING`、`ERROR`からの再マウントは明示的な`loadStorage()`だけが行う。ファイル選択、Resume、自動保存、Web UI更新は再マウントしない
+  - 媒体世代番号をマウント試行、Eject、I/Oエラーごとに更新し、`storage_read_stream_t`の世代が一致しないread / seekを拒否する
+  - Eject前にMusic Playerを`end()`して長寿命ストリームをcloseし、メニュープレビュー、動的一覧、共通`dir_manage_t`一覧を無効化してから`endStorage()`相当のアンマウントを行う
+  - Performance Recording（録音中、flush / header確定中、保存確認中）、処理画面、File Editorを共通busy理由へ含める。busy中のEjectは状態を変えず拒否する
+  - SD書込みの短縮またはread streamの予期しないEOFを媒体エラーへ集約し、アプリ主ループでMusic、録音、File Editorを一度だけ停止・通知する
+  - CoreS3向け現行実装では信頼できるカード検出GPIOを確認できないため、推測の検出や高頻度ポーリングは実装しない。明示Eject / LoadとI/O結果を基本とする
+  - RAM上のSample / Audio Beat / KANTAN Synth / RecイベントはEjectで解放しない。SD一覧だけを破棄し、Load成功時も現在Project / Kitを自動ロードしない
+  - 起動時は媒体のマウント可否だけを一度確認し、SD一覧やProject / Kitは読み込まない。カードなし起動は`missing`で待機し、後挿し後の明示Loadで復旧する
 
 ## SOUNDモード
 

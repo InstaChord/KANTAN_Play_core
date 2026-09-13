@@ -525,6 +525,31 @@ Music読み込み時に既存のBeat / Recがある場合は、Musicの検出周
 Beat Repeatを2倍・4倍に増やし、Beatだけでなく全パートの記録を繰り返します。
 最後に残った小さな差だけを伸縮し、既存のリズムを大きく速めたり遅くしたりしません。
 
+## SDカードの安全な取り外しと再読込
+
+`System > SD Card`を、`Recording Input` / `Menu Sound`の後、`Display`の前に置きます。
+画面には`READY` / `BUSY` / `NOT INSERTED` / `SAFE TO REMOVE` / `ERROR`を表示し、
+装着中の主操作は`Eject SD Card`、それ以外は`Load SD Card`とします。
+
+`Eject SD Card`は二度押しで確認します。MusicのSDストリームとメニュープレビューを閉じ、
+ファイル一覧を無効化してアンマウントした後、`SD CARD / SAFE TO REMOVE`を大きく表示します。
+Performance Recording中または録音結果の保存待ち、Project / Kit等のファイル処理中、
+File Editor使用中は、処理理由を添えた`BUSY`表示でEjectを拒否します。
+
+Eject後も、すでにRAM / PSRAMへ読み込まれたSample、Audio Beat、KANTAN Synth、Recイベントは
+演奏できます。Music、SDからのLoad / Save、File Editor、Performance Recordingは利用できません。
+ファイルパスはProject状態として保持できますが、古いファイルハンドルと一覧は再利用しません。
+
+カードを挿し直した後は`Load SD Card`を明示的に実行します。古い媒体状態を破棄してマウントし、
+標準フォルダーを確認した後、一覧を次回表示時に作り直します。同じカードでも別カードでも、
+現在RAM上で演奏しているProject / Kitを自動的に差し替えません。起動時にカードがない場合も、
+後から挿してこの操作で認識できます。
+
+予期しないI/O失敗では新しいSD処理を停止し、MusicとPerformance Recordingを安全側へ止め、
+同じエラーの連続表示や自動再マウントを行いません。復旧は`System > SD Card > Load SD Card`から行います。
+これは任意のタイミングのホットスワップを保証する機能ではありません。書込み中の物理抜去による
+ファイル破損を完全には防げないため、必ずEject完了表示を待ってから抜くよう案内します。
+
 ## File Editor
 
 各ファイル一覧では、PCから複数ファイルを選択するか、アップロード領域へまとめてドラッグ＆ドロップできます。

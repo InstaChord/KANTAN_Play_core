@@ -10,6 +10,7 @@ Systemメニューには、録音入力、画面、LEDなど本体全体の設�
 |---|---|
 | `Recording Input` | `Auto` / `Internal` / `External`からサンプル録音の入力を選ぶ |
 | `Menu Sound` | メニュー操作音のON / OFF |
+| `SD Card` | SDカードの状態確認、安全な取り外し、挿し直したカードの読込 |
 | `Display` | 画面の明るさ、1〜5 |
 | `LED` | パッドLEDの明るさ、1〜5 |
 | `Language` | `EN` / `JP` |
@@ -23,6 +24,34 @@ Systemメニューには、録音入力、画面、LEDなど本体全体の設�
 - `External`：外部音声入力端子
 
 録音画面には`MIC INPUT`または`LINE INPUT`が表示されます。意図した入力と違う場合はここを確認します。
+
+### SD Card
+
+SDカードをPCなどへ移すときは、電源を切る代わりに次の手順で安全に取り外せます。
+
+1. `System` → `SD Card`を開き、状態が`READY`であることを確認します
+2. `Eject SD Card`を選び、確認のためもう一度押します
+3. `SD CARD / SAFE TO REMOVE`が表示されてからカードを抜きます
+4. PCなどでファイルを変更し、カードを本体へ戻します
+5. `System` → `SD Card` → `Load SD Card`を実行します
+
+`Load SD Card`は、起動時にカードを入れていなかった場合にも使えます。別のカードを挿した場合も、
+現在演奏中のProjectやサンプルキットは勝手に切り替わりません。必要なファイルを各Loadメニューから選びます。
+
+| 状態 | 意味 |
+|---|---|
+| `READY` | SDカードを使用できます |
+| `BUSY` | 録音、保存、File EditorなどがSDカードを使用中です |
+| `NOT INSERTED` | カードがないか、まだ読み込まれていません |
+| `SAFE TO REMOVE` | 安全に取り外せます |
+| `ERROR` | 読み書きに失敗しました。カードを確認して`Load SD Card`を実行します |
+
+Eject後も、すでに読み込んだSample、Beat、KANTAN Synth、Recは演奏できます。
+Music、保存、SDからの読込、File Editor、Performance Recordingは`Load SD Card`が成功するまで使えません。
+
+!!! danger
+    録音、保存、Upload、Rename、Delete中にカードを物理的に抜くと、ファイルが破損することがあります。
+    この機能はどのタイミングでも抜ける「ホットスワップ」ではありません。必ず`SAFE TO REMOVE`を待ってください。
 
 ## 3種類のReset
 

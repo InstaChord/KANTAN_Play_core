@@ -386,7 +386,17 @@ void memory_info_t::release(void) {
 
 bool storage_sd_t::beginStorage(void)
 {
-  if (_is_begin) { return true; }
+  if (isMounted()) { return true; }
+  // An explicit Eject, a missing card, or an I/O failure must never be
+  // defeated by an unrelated file picker or autosave. Only Load SD Card may
+  // probe the medium again.
+  if (_media_state != sd_media_state_t::uninitialized) { return false; }
+  return mountStorage();
+}
+
+bool storage_sd_t::mountStorage(void)
+{
+  _is_begin = false;
 
   spi_lock();
 
@@ -434,9 +444,39 @@ bool storage_sd_t::beginStorage(void)
     }
   }
 
+  _media_state = _is_begin ? sd_media_state_t::mounted : sd_media_state_t::missing;
+  if (!_is_begin) { _media_generation = _media_generation + 1; }
   return _is_begin;
 }
+
+bool storage_sd_t::loadStorage(void)
+{
+  unmountStorage();
+  _media_generation = _media_generation + 1;
+  _media_error_pending = false;
+  _media_state = sd_media_state_t::uninitialized;
+  return mountStorage();
+}
+
+bool storage_sd_t::ejectStorage(void)
+{
+  if (!isMounted()) { return false; }
+  _media_state = sd_media_state_t::ejecting;
+  unmountStorage();
+  _media_generation = _media_generation + 1;
+  _media_error_pending = false;
+  _media_state = sd_media_state_t::safe_to_remove;
+  return true;
+}
+
 void storage_sd_t::endStorage(void)
+{
+  unmountStorage();
+  _media_generation = _media_generation + 1;
+  _media_state = sd_media_state_t::uninitialized;
+}
+
+void storage_sd_t::unmountStorage(void)
 {
   if (!_is_begin) { return; }
 
@@ -457,8 +497,26 @@ void storage_sd_t::endStorage(void)
   spi_unlock();
 }
 
+void storage_sd_t::noteMediaError(void)
+{
+  if (_media_state != sd_media_state_t::mounted) { return; }
+  // Keep the backend-mounted bit until the explicit Load path tears the
+  // driver down. isMounted() still rejects every new operation immediately.
+  _media_state = sd_media_state_t::error;
+  _media_generation = _media_generation + 1;
+  _media_error_pending = true;
+}
+
+bool storage_sd_t::takeMediaError(void)
+{
+  const bool pending = _media_error_pending;
+  _media_error_pending = false;
+  return pending;
+}
+
 int storage_sd_t::getFileSize(const char* path)
 {
+  if (!isMounted() || !path) { return -1; }
   int res = -1;
   spi_lock();
 #if defined(M5UNIFIED_PC_BUILD)
@@ -492,7 +550,7 @@ int storage_sd_t::getFileSize(const char* path)
 
 int storage_sd_t::loadFromFileToMemory(const char* path, uint8_t* dst, size_t max_length)
 {
-  if (!_is_begin) { return -1; }
+  if (!isMounted() || !path || !dst) { return -1; }
 
   spi_lock();
 
@@ -549,7 +607,7 @@ M5_LOGV("sd:loadFromFileToMemory : %s  open:%d\n", path, FP != nullptr);
 
 bool storage_sd_t::openReadStream(const char* path, storage_read_stream_t* stream)
 {
-  if (!_is_begin || !path || !stream) { return false; }
+  if (!isMounted() || !path || !stream) { return false; }
   closeReadStream(stream);
   spi_lock();
 #if defined(M5UNIFIED_PC_BUILD)
@@ -588,13 +646,15 @@ bool storage_sd_t::openReadStream(const char* path, storage_read_stream_t* strea
   }
 #endif
   stream->position = 0;
+  stream->media_generation = _media_generation;
   spi_unlock();
   return stream->isOpen();
 }
 
 int storage_sd_t::readStream(storage_read_stream_t* stream, uint8_t* dst, size_t length)
 {
-  if (!stream || !stream->isOpen() || !dst || length == 0) { return -1; }
+  if (!isMounted() || !stream || !stream->isOpen() || !dst || length == 0
+   || stream->media_generation != _media_generation) { return -1; }
   spi_lock();
   int result = -1;
 #if defined(M5UNIFIED_PC_BUILD) || KANPLAY_USE_VFS_SD
@@ -606,12 +666,14 @@ int storage_sd_t::readStream(storage_read_stream_t* stream, uint8_t* dst, size_t
 #endif
   if (result > 0) { stream->position += (size_t)result; }
   spi_unlock();
+  if (result < 0 || (result == 0 && stream->position < stream->size)) { noteMediaError(); }
   return result;
 }
 
 bool storage_sd_t::seekStream(storage_read_stream_t* stream, size_t position)
 {
-  if (!stream || !stream->isOpen() || position > stream->size) { return false; }
+  if (!isMounted() || !stream || !stream->isOpen() || position > stream->size
+   || stream->media_generation != _media_generation) { return false; }
   spi_lock();
   bool result = false;
 #if defined(M5UNIFIED_PC_BUILD) || KANPLAY_USE_VFS_SD
@@ -642,12 +704,13 @@ void storage_sd_t::closeReadStream(storage_read_stream_t* stream)
   stream->handle = nullptr;
   stream->size = 0;
   stream->position = 0;
+  stream->media_generation = 0;
   spi_unlock();
 }
 
 int storage_sd_t::saveFromMemoryToFile(const char* path, const uint8_t* data, size_t length)
 {
-  if (!_is_begin) { return -1; }
+  if (!isMounted()) { return -1; }
 
   int result = -1;
   spi_lock();
@@ -693,12 +756,13 @@ int storage_sd_t::saveFromMemoryToFile(const char* path, const uint8_t* data, si
 
 #endif
   spi_unlock();
+  if (result < 0 || (size_t)result != length) { noteMediaError(); }
   return result;
 }
 
 int storage_sd_t::appendFromMemoryToFile(const char* path, const uint8_t* data, size_t length)
 {
-  if (!_is_begin || !path || !data) { return -1; }
+  if (!isMounted() || !path || !data) { return -1; }
 
   int result = -1;
   spi_lock();
@@ -732,13 +796,14 @@ int storage_sd_t::appendFromMemoryToFile(const char* path, const uint8_t* data, 
   }
 #endif
   spi_unlock();
+  if (result < 0 || (size_t)result != length) { noteMediaError(); }
   return result;
 }
 
 int storage_sd_t::patchFromMemoryToFile(const char* path, size_t offset,
                                         const uint8_t* data, size_t length)
 {
-  if (!_is_begin || !path || !data) { return -1; }
+  if (!isMounted() || !path || !data) { return -1; }
   int result = -1;
   spi_lock();
 #if defined(M5UNIFIED_PC_BUILD)
@@ -771,12 +836,13 @@ int storage_sd_t::patchFromMemoryToFile(const char* path, size_t offset,
   }
 #endif
   spi_unlock();
+  if (result < 0 || (size_t)result != length) { noteMediaError(); }
   return result;
 }
 
 int storage_sd_t::getFileList(std::vector<file_info_string_t>& list, const char* path, const char* suffix)
 {
-  if (!_is_begin) { return -1; }
+  if (!isMounted()) { return -1; }
 
   file_info_string_t info;
 
@@ -872,7 +938,7 @@ M5_LOGD("file size:%d , %s", size, path);
 
 int storage_sd_t::getDirectoryList(std::vector<file_info_string_t>& list, const char* path)
 {
-  if (!_is_begin || !path) { return -1; }
+  if (!isMounted() || !path) { return -1; }
   spi_lock();
 #if defined(M5UNIFIED_PC_BUILD)
   const char* local_path = path[0] == '/' ? path + 1 : path;
@@ -926,6 +992,7 @@ int storage_sd_t::getDirectoryList(std::vector<file_info_string_t>& list, const 
 
 bool storage_sd_t::makeDirectory(const char* path)
 {
+  if (!isMounted() || !path) { return false; }
   bool res = false;
   spi_lock();
 #if defined(M5UNIFIED_PC_BUILD)
@@ -945,6 +1012,7 @@ bool storage_sd_t::makeDirectory(const char* path)
 
 bool storage_sd_t::removeFile(const char* path)
 {
+  if (!isMounted() || !path) { return false; }
   bool res = false;
   spi_lock();
 #if defined(M5UNIFIED_PC_BUILD)
@@ -964,6 +1032,7 @@ bool storage_sd_t::removeFile(const char* path)
 
 bool storage_sd_t::renameFile(const char* path, const char* newpath)
 {
+  if (!isMounted() || !path || !newpath) { return false; }
 #if defined(M5UNIFIED_PC_BUILD)
   return false;
 #elif KANPLAY_USE_VFS_SD
@@ -1323,7 +1392,7 @@ bool dir_manage_t::updateFileList(void)
   if (_storage == nullptr) { return false; }
   std::vector<file_info_string_t> list;
   int result = _storage->getFileList(list, _path, def::app::fileext_song);
-  if (result < 0) {
+  if (result < 0 && _storage != &storage_sd) {
     _storage->endStorage();
     _storage->beginStorage();
     result = _storage->getFileList(list, _path, def::app::fileext_song);
@@ -1392,6 +1461,13 @@ M5_LOGV("dir_manage_t::update file:%s size:%d", file.filename.c_str(), file.file
   }
 
   return true;
+}
+
+void dir_manage_t::invalidateFileList(void)
+{
+  _file_list_count = 0;
+  if (_file_list) { m5gfx::heap_free(_file_list); _file_list = nullptr; }
+  if (_all_filenames) { m5gfx::heap_free(_all_filenames); _all_filenames = nullptr; }
 }
 
 int dir_manage_t::search(const char* filename) const
@@ -1570,7 +1646,7 @@ bool file_manage_t::saveFile(def::app::data_type_t dir_type, size_t memory_index
 
   auto path = dir->makeFullPath(mem->filename.c_str());
   auto result = st->saveFromMemoryToFile(path.c_str(), mem->data, mem->size);
-  if (result != mem->size) {
+  if (result != mem->size && st != &storage_sd) {
     st->endStorage();
     st->beginStorage();
     result = st->saveFromMemoryToFile(path.c_str(), mem->data, mem->size);
@@ -1604,6 +1680,13 @@ bool file_manage_t::renameFile(def::app::data_type_t dir_type, const char* old_n
   auto oldpath = dir->makeFullPath(old_name);
   auto newpath = dir->makeFullPath(new_name);
   return storage->renameFile(oldpath.c_str(), newpath.c_str());
+}
+
+void file_manage_t::invalidateStorage(storage_base_t* storage)
+{
+  for (auto& dir : dir_manage) {
+    if (dir.getStorage() == storage) { dir.invalidateFileList(); }
+  }
 }
 //-------------------------------------------------------------------------
 }; // namespace kanplay_ns

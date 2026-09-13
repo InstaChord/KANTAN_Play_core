@@ -116,6 +116,8 @@ static volatile bool sampler_web_storage_stop_requested = false;
 static volatile bool sampler_web_storage_stop_done = false;
 static volatile bool sampler_web_storage_remount_requested = false;
 static volatile bool sampler_web_storage_operation_ok = false;
+static uint32_t sd_eject_confirm_until_msec = 0;
+static bool sd_safe_remove_overlay = false;
 
 static sampler_mode_t current_mode = sampler_mode_t::mode_play;
 
@@ -1830,6 +1832,12 @@ static void reset_builtin_sample_kit(void);
 static bool reset_default_or_builtin_kit(void);
 static void load_factory_start_project(void);
 static void reset_sampler_sd_folder_selection(void);
+static void invalidate_sampler_sd_views(void);
+static const char* sampler_sd_busy_reason(void);
+static void eject_sampler_sd(void);
+static void load_sampler_sd(void);
+static void service_sampler_sd_error(void);
+static void draw_sd_safe_remove_screen(void);
 static void process_encoder_value(uint8_t encoder, uint32_t value);
 static bool load_audio_to_pad(uint8_t pad, const char* path, const char* display_name,
                               char* error, size_t error_len, bool beat_target = false);
@@ -7416,6 +7424,7 @@ enum class menu_page_t : uint8_t {
   wifi,
   wifi_setup,
   system,
+  sd_card,
 };
 
 enum class menu_item_kind_t : uint8_t {
@@ -7441,6 +7450,7 @@ enum class menu_value_t : uint8_t {
   wifi_auto_update,
   audio_input_source,
   menu_sound,
+  sd_status,
   harmony_key,
   harmony_scale,
   harmony_tuning,
@@ -7538,6 +7548,7 @@ enum class menu_action_t : uint8_t {
   wifi_info,
   wifi_update,
   wifi_file_editor,
+  sd_primary,
   system_info,
   reset_all_settings,
 };
@@ -7852,11 +7863,17 @@ static constexpr const sampler_menu_item_t menu_wifi_setup_items[] = {
 static constexpr const sampler_menu_item_t menu_system_items[] = {
   { "Recording Input", menu_item_kind_t::value,  menu_page_t::root, menu_value_t::audio_input_source,  menu_action_t::none },
   { "Menu Sound",      menu_item_kind_t::value,  menu_page_t::root, menu_value_t::menu_sound,          menu_action_t::none },
+  { "SD Card",         menu_item_kind_t::submenu, menu_page_t::sd_card, menu_value_t::none,             menu_action_t::none },
   { "Display",    menu_item_kind_t::value,  menu_page_t::root, menu_value_t::display_brightness, menu_action_t::none },
   { "LED",        menu_item_kind_t::value,  menu_page_t::root, menu_value_t::led_brightness,     menu_action_t::none },
   { "Language",   menu_item_kind_t::value,  menu_page_t::root, menu_value_t::language,           menu_action_t::none },
   { "Info",       menu_item_kind_t::action, menu_page_t::root, menu_value_t::none,               menu_action_t::system_info },
   { "Reset All",  menu_item_kind_t::action, menu_page_t::root, menu_value_t::none,               menu_action_t::reset_all_settings },
+};
+
+static constexpr const sampler_menu_item_t menu_sd_card_items[] = {
+  { "Status", menu_item_kind_t::value, menu_page_t::root, menu_value_t::sd_status, menu_action_t::none },
+  { "Eject SD Card", menu_item_kind_t::action, menu_page_t::root, menu_value_t::none, menu_action_t::sd_primary },
 };
 
 static bool menu_visible = false;
@@ -8488,6 +8505,7 @@ static const sampler_menu_item_t* menu_raw_items(menu_page_t page, size_t* count
   case menu_page_t::wifi:         *count = sizeof(menu_wifi_items) / sizeof(menu_wifi_items[0]); return menu_wifi_items;
   case menu_page_t::wifi_setup:   *count = sizeof(menu_wifi_setup_items) / sizeof(menu_wifi_setup_items[0]); return menu_wifi_setup_items;
   case menu_page_t::system:       *count = sizeof(menu_system_items) / sizeof(menu_system_items[0]); return menu_system_items;
+  case menu_page_t::sd_card:      *count = sizeof(menu_sd_card_items) / sizeof(menu_sd_card_items[0]); return menu_sd_card_items;
   }
 }
 
@@ -8523,6 +8541,11 @@ static const sampler_menu_item_t* menu_items(menu_page_t page, size_t* count)
       visible_items[visible_count++] = raw_items[i];
       if (visible_items[visible_count - 1u].value == menu_value_t::background_repeat) {
         visible_items[visible_count - 1u].label = "Beat Repeat";
+      }
+      if (page == menu_page_t::sd_card
+       && visible_items[visible_count - 1u].action == menu_action_t::sd_primary
+       && !kp::storage_sd.isMounted()) {
+        visible_items[visible_count - 1u].label = "Load SD Card";
       }
     }
   }
@@ -8574,6 +8597,7 @@ static const char* menu_page_title(menu_page_t page)
   case menu_page_t::wifi: return "Wi-Fi";
   case menu_page_t::wifi_setup: return "Wi-Fi Setup";
   case menu_page_t::system: return "System";
+  case menu_page_t::sd_card: return "SD Card";
   }
 }
 
@@ -8611,6 +8635,7 @@ static menu_page_t menu_parent_page(menu_page_t page)
   case menu_page_t::ble_device: return menu_page_t::connections;
   case menu_page_t::connection_info: return menu_page_t::connections;
   case menu_page_t::wifi_setup: return menu_page_t::wifi;
+  case menu_page_t::sd_card: return menu_page_t::system;
   case menu_page_t::kit:
   case menu_page_t::music:
   case menu_page_t::project:
@@ -9633,6 +9658,8 @@ static int menu_value_count(menu_value_t value)
     return 2;
   case menu_value_t::audio_input_source:
     return 3;
+  case menu_value_t::sd_status:
+    return 1;
   default:
     return 0;
   }
@@ -9701,6 +9728,7 @@ static int menu_value_get(menu_value_t value)
   case menu_value_t::music_volume:
     return part_volume_step_from_percent(music_track_volume);
   case menu_value_t::performance_recording: return performance_record_armed ? 1 : 0;
+  case menu_value_t::sd_status: return 0;
   default: return 0;
   }
 }
@@ -9718,6 +9746,18 @@ static const char* menu_value_text(menu_value_t value, int index)
   static constexpr const char* input_sources[] = { "Auto", "Internal", "External" };
   static constexpr const char* langs[] = { "EN", "JP" };
   switch (value) {
+  case menu_value_t::sd_status: {
+    if (sampler_sd_busy_reason()) { return "BUSY"; }
+    switch (kp::storage_sd.mediaState()) {
+    case kp::sd_media_state_t::mounted: return "READY";
+    case kp::sd_media_state_t::ejecting: return "BUSY";
+    case kp::sd_media_state_t::safe_to_remove: return "SAFE TO REMOVE";
+    case kp::sd_media_state_t::error: return "ERROR";
+    case kp::sd_media_state_t::uninitialized:
+    case kp::sd_media_state_t::missing:
+    default: return "NOT INSERTED";
+    }
+  }
   case menu_value_t::loop_quantize:
   case menu_value_t::usb_host_power:
   case menu_value_t::usb_keyboard:
@@ -9794,6 +9834,11 @@ static const char* menu_value_text(menu_value_t value, int index)
 
 static bool start_file_editor_session(void)
 {
+  if (!kp::storage_sd.beginStorage()) {
+    show_status_message("LOAD SD CARD IN SYSTEM", 2200, false);
+    draw_menu(true);
+    return false;
+  }
 #if !defined(M5UNIFIED_PC_BUILD)
   if (!kp::task_wifi_t::hasSavedSTAConfig()) {
     show_status_message("Wi-Fi Setup required", 1800, false);
@@ -12036,6 +12081,7 @@ static void menu_open(void)
 static void menu_close(bool redraw = true)
 {
   new_project_confirm_until_msec = 0;
+  sd_eject_confirm_until_msec = 0;
   if (tap_tempo_active) {
     if (tap_tempo_preview_owned) { tap_tempo_stop_playback(); }
     apply_pattern_tempo_bpm_x2(tap_tempo_original_bpm_x2);
@@ -12212,6 +12258,7 @@ static void service_ble_device_ui(uint32_t now)
 
 static void menu_back(void)
 {
+  sd_eject_confirm_until_msec = 0;
   if (new_project_confirm_until_msec != 0) {
     new_project_confirm_until_msec = 0;
     clear_status_message(false);
@@ -13777,6 +13824,131 @@ static void start_new_project(void)
   schedule_internal_synth_restore(120);
 }
 
+static void invalidate_sampler_sd_views(void)
+{
+  kp::file_manage.invalidateStorage(&kp::storage_sd);
+  kit_wav_list.clear();
+  kit_wav_dir[0] = 0;
+  kit_pending_wav_path[0] = 0;
+  kit_pending_wav_name[0] = 0;
+  pending_beat_path[0] = 0;
+  pending_beat_name[0] = 0;
+  pending_beat_source = pending_beat_source_t::none;
+  beat_pad_source_list.clear();
+  clear_menu_preview();
+  if (kit_edit_state != kit_edit_state_t::idle) {
+    kit_edit_state = kit_edit_state_t::idle;
+    menu_depth = menu_page_depth(menu_page);
+    menu_cursor = 0;
+  }
+}
+
+static const char* sampler_sd_busy_reason(void)
+{
+  if (performance_record_active || performance_record_finishing) { return "RECORDING"; }
+  if (performance_record_confirm_active) { return "SAVE RECORDING"; }
+  if (wifi_file_server_qr_active || sampler_web_storage_stop_requested) { return "FILE EDITOR"; }
+  if (processing_screen_visible || music_load_processing) { return "FILE OPERATION"; }
+  return nullptr;
+}
+
+static void eject_sampler_sd(void)
+{
+  const char* busy = sampler_sd_busy_reason();
+  if (busy) {
+    char message[48];
+    snprintf(message, sizeof(message), "SD BUSY: %s", busy);
+    show_status_message(message, 2200, true);
+    return;
+  }
+  const uint32_t now = M5.millis();
+  if (sd_eject_confirm_until_msec == 0
+   || (int32_t)(sd_eject_confirm_until_msec - now) <= 0) {
+    sd_eject_confirm_until_msec = now + 4000;
+    show_status_message("EJECT SD CARD? TAP AGAIN", 4000, true);
+    return;
+  }
+  sd_eject_confirm_until_msec = 0;
+  // Music owns the only long-lived SD stream. Already decoded Sample, Audio
+  // Beat, synth and Rec data remain in RAM and intentionally keep playing.
+  sampler_music_player_t::end();
+  invalidate_sampler_sd_views();
+  const bool ejected = kp::storage_sd.ejectStorage();
+  if (ejected) {
+    clear_status_message(false);
+    sd_safe_remove_overlay = true;
+    ui_surface_exclusive = true;
+    draw_sd_safe_remove_screen();
+  } else {
+    show_status_message("SD CARD ERROR", 2200, true);
+  }
+}
+
+static void draw_sd_safe_remove_screen(void)
+{
+  auto& d = M5.Display;
+  const uint32_t bg = 0x08100Cu;
+  d.startWrite();
+  d.fillScreen(bg);
+  d.drawRect(0, 0, d.width(), d.height(), 0x40D890u);
+  d.drawRect(1, 1, d.width() - 2, d.height() - 2, 0x40D890u);
+  d.setFont(&fonts::efontJA_16_b);
+  d.setTextDatum(m5gfx::textdatum_t::middle_center);
+  d.setTextColor(0xB8FFD8u, bg);
+  d.setTextSize(1, 2);
+  d.drawString("SD CARD", d.width() / 2, d.height() / 2 - 34);
+  d.setTextColor(0xFFFFFFu, bg);
+  d.setTextSize(1, 2);
+  d.drawString("SAFE TO REMOVE", d.width() / 2, d.height() / 2 + 10);
+  d.setTextColor(0x80A898u, bg);
+  d.setTextSize(1);
+  d.drawString("Press any key", d.width() / 2, d.height() - 34);
+  d.endWrite();
+}
+
+static void load_sampler_sd(void)
+{
+  const char* busy = sampler_sd_busy_reason();
+  if (busy) {
+    char message[48];
+    snprintf(message, sizeof(message), "SD BUSY: %s", busy);
+    show_status_message(message, 2200, true);
+    return;
+  }
+  sd_eject_confirm_until_msec = 0;
+  sampler_music_player_t::end();
+  invalidate_sampler_sd_views();
+  show_loading_message("LOADING SD CARD");
+  const bool loaded = kp::storage_sd.loadStorage();
+  const bool ready = loaded && ensure_sampler_sd_dirs();
+  // Rebuild lists lazily on the next picker open. Do not replace the active
+  // RAM Project/Kit merely because the medium may be a different card.
+  invalidate_sampler_sd_views();
+  show_status_message(ready ? "SD CARD READY"
+                            : kp::storage_sd.mediaState() == kp::sd_media_state_t::missing
+                              ? "SD CARD NOT INSERTED" : "SD CARD LOAD FAILED",
+                      2200, true);
+}
+
+static void service_sampler_sd_error(void)
+{
+  if (!kp::storage_sd.takeMediaError()) { return; }
+  sampler_music_player_t::end();
+  if (performance_record_active || performance_record_finishing) {
+    sampler_audio_t::stopOutputStreamCapture();
+    performance_record_active = false;
+    performance_record_finishing = false;
+    performance_record_done = false;
+    performance_record_failed = true;
+    performance_record_armed = false;
+    performance_record_path[0] = 0;
+    request_header_draw();
+  }
+  if (wifi_file_server_qr_active) { stop_file_server_session("SD error"); }
+  invalidate_sampler_sd_views();
+  show_status_message("SD CARD ERROR - LOAD IN SYSTEM", 3200, true);
+}
+
 static void menu_execute_action(menu_action_t action)
 {
   switch (action) {
@@ -14131,6 +14303,10 @@ static void menu_execute_action(menu_action_t action)
     sampler_music_player_t::end();
     start_file_editor_session();
     return;
+  case menu_action_t::sd_primary:
+    if (kp::storage_sd.isMounted()) { eject_sampler_sd(); }
+    else { load_sampler_sd(); }
+    return;
   case menu_action_t::system_info: {
     char msg[64];
     snprintf(msg, sizeof(msg), "v%d.%d.%d RAM %u%%"
@@ -14436,6 +14612,7 @@ static void menu_move(int diff)
   if (next < 0) { next = 0; }
   if (next >= (int)count) { next = (int)count - 1; }
   if (next == old) { return; }
+  sd_eject_confirm_until_msec = 0;
   if (new_project_confirm_until_msec != 0) {
     new_project_confirm_until_msec = 0;
     clear_status_message(false);
@@ -26946,6 +27123,18 @@ static void process_bitmask(uint32_t bitmask, uint32_t event_msec) {
   menu_consumed_release_mask &= ~released_edge;
   released_edge &= ~menu_consumed_releases;
 
+  if (sd_safe_remove_overlay) {
+    if (pressed_edge) {
+      menu_consumed_release_mask |= pressed_edge;
+      sd_safe_remove_overlay = false;
+      ui_surface_exclusive = false;
+      draw_menu_header(true);
+      draw_menu(true);
+      draw_menu_keypad(true);
+    }
+    return;
+  }
+
   if (wifi_update_active || startup_update_check_active || startup_update_check_returning) {
     // Any deliberate button press cancels while Wi-Fi is still connecting.
     // Once the HTTP/flash phase begins the corresponding cancel function
@@ -31519,9 +31708,17 @@ static void service_sampler_web_storage_stop(void)
   if (sampler_web_storage_remount_requested) {
     // HTTPタスクでSDを終了すると、メインループ上のKIT/セッション処理と
     // 競合してWebサーバーごと停止することがある。再接続はここへ集約する。
-    kp::storage_sd.endStorage();
-    M5.delay(4);
-    ok = kp::storage_sd.beginStorage();
+    if (kp::storage_sd.isMounted()) {
+      kp::storage_sd.endStorage();
+      M5.delay(4);
+      ok = kp::storage_sd.beginStorage();
+    } else if (kp::storage_sd.mediaState() == kp::sd_media_state_t::uninitialized) {
+      ok = kp::storage_sd.beginStorage();
+    } else {
+      // SAFE TO REMOVE / MISSING / ERROR are user-controlled recovery
+      // states. A browser refresh must not mount the card behind their back.
+      ok = false;
+    }
   }
   sampler_web_storage_remount_requested = false;
   sampler_web_storage_operation_ok = ok;
@@ -32319,6 +32516,9 @@ static void init(void)
   std::fill(usb_keyboard_assign, usb_keyboard_assign + 256, (int16_t)midi_assign_target_t::none);
   std::fill(usb_gamepad_assign, usb_gamepad_assign + 256, (int16_t)midi_assign_target_t::none);
   load_sampler_folder_settings();
+  // Probe once at boot so System > SD Card can distinguish READY from a
+  // card-less startup. No file list or Project is loaded by this probe.
+  kp::storage_sd.beginStorage();
   const external_input_mode_t boot_input_mode = external_input_mode;
   char boot_ble_address[sizeof(ble_preferred_address)] = {};
   char boot_ble_name[sizeof(ble_preferred_name)] = {};
@@ -32695,6 +32895,7 @@ static void update(void)
     startup_update_check_returning = false;
   }
   if (wifi_update_active || startup_update_check_active) { return; }
+  service_sampler_sd_error();
   service_sampler_web_storage_stop();
   service_sampler_web_command();
   service_music_key_analysis();

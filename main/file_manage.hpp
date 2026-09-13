@@ -31,8 +31,18 @@ struct storage_read_stream_t {
   void* handle = nullptr;
   size_t size = 0;
   size_t position = 0;
+  uint32_t media_generation = 0;
 
   bool isOpen(void) const { return handle != nullptr; }
+};
+
+enum class sd_media_state_t : uint8_t {
+  uninitialized,
+  mounted,
+  ejecting,
+  safe_to_remove,
+  missing,
+  error,
 };
 
 // SDカードなどのファイル入出力を管理するクラス
@@ -87,7 +97,15 @@ class storage_sd_t : public storage_base_t
 {
 public:
   bool beginStorage(void) override;
+  // Explicit user recovery path. Unlike beginStorage(), this may leave the
+  // SAFE TO REMOVE / MISSING / ERROR states and probe newly inserted media.
+  bool loadStorage(void);
+  bool ejectStorage(void);
   void endStorage(void) override;
+  sd_media_state_t mediaState(void) const { return _media_state; }
+  uint32_t mediaGeneration(void) const { return _media_generation; }
+  bool isMounted(void) const { return _media_state == sd_media_state_t::mounted && _is_begin; }
+  bool takeMediaError(void);
   int getFileSize(const char* path) override;
   int loadFromFileToMemory(const char* path, uint8_t* dst, size_t max_length) override;
   int saveFromMemoryToFile(const char* path, const uint8_t* data, size_t length) override;
@@ -102,6 +120,14 @@ public:
   int readStream(storage_read_stream_t* stream, uint8_t* dst, size_t length);
   bool seekStream(storage_read_stream_t* stream, size_t position);
   void closeReadStream(storage_read_stream_t* stream);
+private:
+  bool mountStorage(void);
+  void unmountStorage(void);
+  void noteMediaError(void);
+
+  volatile sd_media_state_t _media_state = sd_media_state_t::uninitialized;
+  volatile uint32_t _media_generation = 1;
+  volatile bool _media_error_pending = false;
 };
 extern storage_sd_t storage_sd;
 
@@ -159,6 +185,7 @@ public:
   size_t getCount(void) const { return _file_list_count; }
   const file_info_t* getInfo(size_t index) const { return &_file_list[index]; }
   bool updateFileList(void);
+  void invalidateFileList(void);
   int search(const char* filename) const;
   std::string getFullPath(size_t index);
   std::string makeFullPath(const char* filename) const;
@@ -237,6 +264,7 @@ public:
 
   // ファイルをリネームする (同一 dir_type 内でのみ)
   bool renameFile(def::app::data_type_t dir_type, const char* old_name, const char* new_name);
+  void invalidateStorage(storage_base_t* storage);
 };
 
 extern file_manage_t file_manage;
