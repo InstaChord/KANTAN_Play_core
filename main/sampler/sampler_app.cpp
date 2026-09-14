@@ -11085,7 +11085,15 @@ static void draw_wifi_setup_qr(void)
   d.fillRect(x, y, window_w, window_h, frame_color);
   char payload[96];
   if (web_page) {
-    snprintf(payload, sizeof(payload), "http://%s.local/", kp::def::app::wifi_mdns);
+    // Setup AP deliberately does not run mDNS. In particular, iOS reserves
+    // .local for mDNS and will not resolve it through the captive DNS server.
+    // The setup AP has a fixed address; keep kanplay.local for File Editor on
+    // the user's normal LAN where mDNS is active.
+    if (file_server) {
+      snprintf(payload, sizeof(payload), "http://%s.local/", kp::def::app::wifi_mdns);
+    } else {
+      snprintf(payload, sizeof(payload), "http://192.168.4.1/");
+    }
   } else {
     snprintf(payload, sizeof(payload), "WIFI:S:%s;T:%s;P:%s;;",
              kp::def::app::wifi_ap_ssid, kp::def::app::wifi_ap_type,
@@ -11102,7 +11110,11 @@ static void draw_wifi_setup_qr(void)
   const int cx = x + window_w / 2;
   if (web_page) {
     char local_url[48];
-    snprintf(local_url, sizeof(local_url), "http://%s.local", kp::def::app::wifi_mdns);
+    if (file_server) {
+      snprintf(local_url, sizeof(local_url), "http://%s.local", kp::def::app::wifi_mdns);
+    } else {
+      snprintf(local_url, sizeof(local_url), "http://192.168.4.1");
+    }
     d.drawString(local_url, cx, y + window_h - 26);
     // URLは読める大きさを維持し、状態案内だけ通常の高さへ戻す。
     // 2行を分離して、接続中・接続済みの長い文言も枠内に収める。
@@ -13888,6 +13900,7 @@ static void eject_sampler_sd(void)
 
 static void draw_sd_safe_remove_screen(void)
 {
+  display_spi_guard_t display_guard;
   auto& d = M5.Display;
   const uint32_t bg = 0x08100Cu;
   d.startWrite();
@@ -27198,6 +27211,10 @@ static void process_bitmask(uint32_t bitmask, uint32_t event_msec) {
       menu_consumed_release_mask |= pressed_edge;
       sd_safe_remove_overlay = false;
       ui_surface_exclusive = false;
+      // The safe-remove overlay owns the full LCD. Rebuild the underlying
+      // surface first so the narrow gutters and rounded button corners do not
+      // retain the overlay color when the menu is restored.
+      draw_all();
       draw_menu_header(true);
       draw_menu(true);
       draw_menu_keypad(true);

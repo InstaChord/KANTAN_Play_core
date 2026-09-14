@@ -74,6 +74,24 @@ static inline bool parse_ktsynth(const uint8_t* data, size_t size, ktsynth_info_
   static constexpr uint32_t maximum_file_bytes = 2u * 1024u * 1024u;
   if (!out || !data || size < 44 || size > maximum_file_bytes) { return false; }
 
+  // Preflight the complete RIFF envelope before parse_wav() touches chunk
+  // bodies. Uploads are untrusted and a truncated fmt chunk must not cause an
+  // out-of-bounds read in the generic WAV parser.
+  if (memcmp(data, "RIFF", 4) || memcmp(data + 8, "WAVE", 4)
+   || (uint64_t)ktsynth_read_u32(data + 4) + 8u != size) {
+    return false;
+  }
+  size_t preflight_pos = 12;
+  while (preflight_pos + 8 <= size) {
+    const uint32_t chunk_bytes = ktsynth_read_u32(data + preflight_pos + 4);
+    const size_t body_pos = preflight_pos + 8;
+    if (chunk_bytes > size - body_pos) { return false; }
+    const size_t advance = 8u + (size_t)chunk_bytes + (chunk_bytes & 1u);
+    if (advance > size - preflight_pos) { return false; }
+    preflight_pos += advance;
+  }
+  if (preflight_pos != size) { return false; }
+
   wav_info_t wav;
   if (!parse_wav(data, size, &wav)
    || wav.audio_format != 1 || wav.channels != 1 || wav.bits_per_sample != 16
@@ -83,14 +101,19 @@ static inline bool parse_ktsynth(const uint8_t* data, size_t size, ktsynth_info_
 
   const uint8_t* metadata = nullptr;
   uint32_t metadata_bytes = 0;
+  const uint8_t* format = nullptr;
   const uint8_t* pcm = nullptr;
   uint32_t pcm_bytes = 0;
-  for (size_t pos = 12; pos + 8 <= size;) {
+  size_t pos = 12;
+  for (; pos + 8 <= size;) {
     const uint8_t* chunk = data + pos;
     const uint32_t chunk_bytes = ktsynth_read_u32(chunk + 4);
     const size_t body_pos = pos + 8;
     if (body_pos > size || chunk_bytes > size - body_pos) { return false; }
-    if (!memcmp(chunk, "KNTN", 4)) {
+    if (!memcmp(chunk, "fmt ", 4)) {
+      if (format) { return false; }
+      format = data + body_pos;
+    } else if (!memcmp(chunk, "KNTN", 4)) {
       if (metadata) { return false; }
       metadata = data + body_pos;
       metadata_bytes = chunk_bytes;
@@ -103,7 +126,7 @@ static inline bool parse_ktsynth(const uint8_t* data, size_t size, ktsynth_info_
     if (advance > size - pos) { return false; }
     pos += advance;
   }
-  if (!metadata || metadata_bytes < fixed_header_bytes || !pcm
+  if (pos != size || !format || !metadata || metadata_bytes < fixed_header_bytes || !pcm
    || pcm != wav.pcm || pcm_bytes != wav.frames * sizeof(int16_t)) {
     return false;
   }

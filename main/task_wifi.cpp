@@ -428,6 +428,12 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
       _ap_started = true;
       _setup_http_seen = false;
       _ap_start_attempts = 0;
+      // Publish AP readiness from the event itself. The low-priority info
+      // task can be delayed while AMY and the Wi-Fi driver are busy, which
+      // otherwise leaves the UI on PREPARING WI-FI even though the AP is up.
+      system_registry->runtime_info.setWiFiStationCount(_ap_station_count);
+      system_registry->runtime_info.setWiFiAPInfo(
+        def::command::wifi_ap_info_t::wai_waiting);
       M5.Log.printf("[wifi] ap start\r\n");
       M5_LOGI("[wifi-timing] t=+%lu WIFI_EVENT_AP_START",
               (unsigned long)(M5.millis() - _setup_t0_ms));
@@ -436,16 +442,27 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
       _ap_started = false;
       _ap_station_count = 0;
       _setup_http_seen = false;
+      system_registry->runtime_info.setWiFiStationCount(0);
+      system_registry->runtime_info.setWiFiAPInfo(
+        def::command::wifi_ap_info_t::wai_off);
       M5.Log.printf("[wifi] ap stop\r\n");
       break;
     case WIFI_EVENT_AP_STACONNECTED:
       _ap_station_count = _ap_station_count + 1;
+      system_registry->runtime_info.setWiFiStationCount(_ap_station_count);
+      system_registry->runtime_info.setWiFiAPInfo(
+        def::command::wifi_ap_info_t::wai_enabled);
       M5.Log.printf("[wifi] ap client connected: count=%d\r\n", _ap_station_count);
       M5_LOGI("[wifi-timing] t=+%lu WIFI_EVENT_AP_STACONNECTED (count=%d)",
               (unsigned long)(M5.millis() - _setup_t0_ms), _ap_station_count);
       break;
     case WIFI_EVENT_AP_STADISCONNECTED:
       if (_ap_station_count > 0) _ap_station_count = _ap_station_count - 1;
+      system_registry->runtime_info.setWiFiStationCount(_ap_station_count);
+      system_registry->runtime_info.setWiFiAPInfo(
+        _ap_station_count > 0
+          ? def::command::wifi_ap_info_t::wai_enabled
+          : def::command::wifi_ap_info_t::wai_waiting);
       M5.Log.printf("[wifi] ap client disconnected: count=%d\r\n", _ap_station_count);
       break;
     case WIFI_EVENT_SCAN_DONE:
@@ -654,7 +671,7 @@ static esp_err_t response_main_handler(httpd_req_t *req)
     "<link rel=\"stylesheet\" href=\"");
   httpd_resp_sendstr_chunk(req, base);
   httpd_resp_sendstr_chunk(req,
-    "/app.css?v=085-beat-view-sync\"></head><body>"
+    "/app.css?v=088-sf2-volume\"></head><body>"
     // sampler-ui/index.htmlと同じ最小シェルを本体側で返す。CSS/JSはGitHub
     // Pagesから読み、APIだけを本体のlocation.originへ向ける。
 #if defined(KANPLAY_SAMPLER)
@@ -675,9 +692,9 @@ static esp_err_t response_main_handler(httpd_req_t *req)
     "<div id=\"app\" style=\"font-family:sans-serif;padding:16px\">Loading…</div>"
 #endif
     "<script>window.KANPLAY={api:location.origin};</script>"
-    "<script src=\"");
+    "<script type=\"module\" src=\"");
   httpd_resp_sendstr_chunk(req, base);
-  httpd_resp_sendstr_chunk(req, "/app.js?v=085-beat-view-sync\" defer></script></body></html>");
+  httpd_resp_sendstr_chunk(req, "/app.js?v=088-sf2-volume\"></script></body></html>");
   httpd_resp_sendstr_chunk(req, nullptr);
   return ESP_OK;
 }

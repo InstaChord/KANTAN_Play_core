@@ -490,7 +490,14 @@ void storage_sd_t::unmountStorage(void)
     _sd_card = nullptr;
   }
 #elif __has_include(<SdFat.h>)
-  SD.end();
+  // SdFat::end() also calls SPI.end().  CoreS3 shares this SPI bus with the
+  // display, so ending the bus here prevents the safe-to-remove screen (and
+  // every subsequent GUI update) from being drawn.  Flush the card and close
+  // only the filesystem volume; a later SD.begin() reinitializes the card.
+  if (SD.card()) {
+    SD.card()->syncDevice();
+  }
+  SD.vol()->end();
 #elif __has_include(<SD.h>)
   SD.end();
 #endif
