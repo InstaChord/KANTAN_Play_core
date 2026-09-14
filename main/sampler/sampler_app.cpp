@@ -1685,7 +1685,12 @@ static uint8_t touch_play_surface_cache_key = 0xFF;
 static uint8_t touch_play_surface_cache_scale = 0xFF;
 static bool performance_ui_arena_suspended = false;
 static bool performance_ui_arena_resume_pending = false;
+static bool performance_ui_arena_restore_in_progress = false;
 static uint32_t performance_ui_arena_resume_msec = 0;
+static uint32_t performance_ui_arena_stable_since_msec = 0;
+static size_t performance_ui_arena_last_free = 0;
+static size_t performance_ui_arena_last_largest = 0;
+static bool performance_loop_event_reserve_released = false;
 static bool page_selector_visible = false;
 static bool page_selector_dirty = false;
 static bool page_selector_slide_in = false;
@@ -1877,6 +1882,8 @@ static void stop_audio_beat(void);
 static void loop_reset_recording_state(void);
 static void loop_reset_recording_state_if_empty(void);
 static void stop_all_audio(bool reset_mixer = true);
+static void cancel_recording_standby(void);
+static void finish_pad_recording(void);
 static void save_loop_as_bgm(void);
 static bool make_beat_from_sample_pad(uint8_t pad);
 static void correct_chop_source_range(const sample_slot_t& source,
@@ -9314,9 +9321,46 @@ static void end_ble_connect_resource_guard(void)
   apply_synth_tones(false);
 }
 
+static void log_wifi_arena_memory(const char* phase, size_t released = 0)
+{
+#if !defined(M5UNIFIED_PC_BUILD)
+  M5.Log.printf("WIFI_ARENA %s free=%u largest=%u psram=%u psram_largest=%u released=%u\r\n",
+                phase ? phase : "-",
+                (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+                (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+                (unsigned)released);
+#else
+  (void)phase;
+  (void)released;
+#endif
+}
+
 static void suspend_performance_ui_arena(void)
 {
   performance_ui_arena_resume_pending = false;
+  performance_ui_arena_stable_since_msec = 0;
+  performance_ui_arena_last_free = 0;
+  performance_ui_arena_last_largest = 0;
+  if (performance_ui_arena_suspended) {
+    log_wifi_arena_memory("suspend-already");
+    return;
+  }
+
+  log_wifi_arena_memory("suspend-before");
+  // Wi-Fi is entered only from an idle menu, but make that prerequisite
+  // explicit so an interrupted preview/recording cannot retain an audio DMA
+  // owner. Finishing a take preserves its PCM; stopping Loop preserves all
+  // Rec/Beat events and only silences their runtime voices.
+  if (recording_standby_active) { cancel_recording_standby(); }
+  if (recording_pad >= 0) { finish_pad_recording(); }
+  performance_ui_arena_suspended = true;
+  clear_menu_preview();
+  stop_all_audio(false);
+  sampler_audio_t::stopAll();
+  M5.delay(4);
+
   if (!sampler_amy_engine::radioConnectionPaused()) {
     sampler_amy_engine::setRadioConnectionPaused(true);
     wifi_amy_paused = true;
@@ -9328,8 +9372,17 @@ static void suspend_performance_ui_arena(void)
     free(recording_internal_dma_reserve);
     recording_internal_dma_reserve = nullptr;
   }
-  if (performance_ui_arena_suspended) { return; }
-  performance_ui_arena_suspended = true;
+
+  // Empty Rec storage normally retains room for 512 events. Lend only that
+  // unused reservation to Wi-Fi. A non-empty vector is never moved or
+  // compacted here, so user Rec/Beat data remains byte-for-byte intact.
+  {
+    loop_events_guard_t guard;
+    if (loop_events.empty() && loop_events.capacity() != 0) {
+      std::vector<loop_event_t>().swap(loop_events);
+      performance_loop_event_reserve_released = true;
+    }
+  }
 
   // Wi-Fi owns the foreground. Release every retained UI surface, including
   // the two internal-RAM primary canvases, before TLS allocates its context.
@@ -9366,33 +9419,80 @@ static void suspend_performance_ui_arena(void)
     recording_buffer_capacity_frames = 0;
     recording_frames = 0;
   }
-  clear_menu_preview();
+  const size_t released_cache_bytes =
+    sampler_audio_t::releaseUnusedSynthSustainCacheMemory();
   update_ui_memory_metrics();
-#if !defined(M5UNIFIED_PC_BUILD)
-  printf("WIFI_GUARD free=%u largest=%u\n",
-         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
-         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
-#endif
+  log_wifi_arena_memory("suspend-after", released_cache_bytes);
 }
 
 static void request_performance_ui_arena_resume(void)
 {
-  if (!performance_ui_arena_suspended) { return; }
+  if (!performance_ui_arena_suspended || performance_ui_arena_resume_pending
+   || performance_ui_arena_restore_in_progress) { return; }
   // Wi-Fi shutdown is asynchronous. Do not recreate PSRAM canvases while the
   // network stack is still releasing its own large allocations.
   performance_ui_arena_resume_pending = true;
   performance_ui_arena_resume_msec = M5.millis() + 1000;
+  performance_ui_arena_stable_since_msec = 0;
+  performance_ui_arena_last_free = 0;
+  performance_ui_arena_last_largest = 0;
+  log_wifi_arena_memory("resume-scheduled");
 }
 
 static void service_performance_ui_arena(uint32_t now)
 {
-  if (!performance_ui_arena_resume_pending
-   || (int32_t)(now - performance_ui_arena_resume_msec) < 0) { return; }
+  if (!performance_ui_arena_resume_pending || performance_ui_arena_restore_in_progress) { return; }
+  if (!performance_ui_arena_suspended) {
+    performance_ui_arena_resume_pending = false;
+    return;
+  }
+
+  // Runtime state is published by task_wifi only after HTTP, DNS/mDNS and the
+  // radio have stopped. Never infer completion merely from the UI request.
+  auto reg = kp::system_registry;
+  if (reg != nullptr
+   && (reg->wifi_control.getOperation() != kp::def::command::wifi_operation_t::wfop_disable
+    || reg->wifi_control.getWifiMode() != kp::def::command::wifi_mode_t::wifi_disable
+    || reg->runtime_info.getWiFiSTAInfo() != kp::def::command::wifi_sta_info_t::wsi_off
+    || reg->runtime_info.getWiFiAPInfo() != kp::def::command::wifi_ap_info_t::wai_off)) {
+    performance_ui_arena_stable_since_msec = 0;
+    return;
+  }
+  if ((int32_t)(now - performance_ui_arena_resume_msec) < 0) { return; }
+
+#if !defined(M5UNIFIED_PC_BUILD)
+  const size_t free_now = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  const size_t largest_now = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  if (performance_ui_arena_stable_since_msec == 0) {
+    performance_ui_arena_stable_since_msec = now ? now : 1;
+    performance_ui_arena_last_free = free_now;
+    performance_ui_arena_last_largest = largest_now;
+    log_wifi_arena_memory("radio-off-stabilizing");
+    return;
+  }
+  // Allow small scheduler allocations, but restart the settling window when
+  // a late network cleanup materially changes the available arena.
+  if (free_now + 2048 < performance_ui_arena_last_free
+   || largest_now + 1024 < performance_ui_arena_last_largest) {
+    performance_ui_arena_stable_since_msec = now ? now : 1;
+  }
+  performance_ui_arena_last_free = free_now;
+  performance_ui_arena_last_largest = largest_now;
+  if (now - performance_ui_arena_stable_since_msec < 500) { return; }
+#endif
+
+  performance_ui_arena_restore_in_progress = true;
   performance_ui_arena_resume_pending = false;
+  log_wifi_arena_memory("restore-before");
 
   // Re-establish the microphone guarantee before optional retained display
   // buffers can fragment internal RAM again.
   retain_internal_mic_dma_reserve();
+  if (performance_loop_event_reserve_released) {
+    loop_events_guard_t guard;
+    loop_events.reserve(loop_event_max);
+    performance_loop_event_reserve_released = false;
+  }
 
   // A connected Bluedroid client and AMY leave much less contiguous internal
   // RAM than the normal sampler boot.  Do not create this ~70 KB surface in
@@ -9434,7 +9534,13 @@ static void service_performance_ui_arena(uint32_t now)
     sampler_amy_engine::setRadioConnectionPaused(false);
     wifi_amy_paused = false;
   }
+  // Rebuild only the selected Melody/Chord/Bass working sets. Source PCM,
+  // per-part settings and user samples were retained throughout the session.
+  apply_synth_tones(false);
   update_ui_memory_metrics();
+  performance_ui_arena_restore_in_progress = false;
+  performance_ui_arena_stable_since_msec = 0;
+  log_wifi_arena_memory("restore-after");
   // Recompose only after every normal sprite has a valid backing buffer.
   // This prevents a stale Wi-Fi screen from surviving the cache hand-off.
   if (!ui_surface_exclusive) {
