@@ -26,10 +26,11 @@ import { decodeAudioFile, midiNoteName } from './converter/audio-input.js';
   let browseFolders = { samples:DEVICE_PRESET, loops:'', kits:'', projects:'', music:'' };
   let loopEventsDraft = null;
   const sf2Player = new PreviewPlayer();
+  const newSf2Layer = () => ({regionId:null,sampleRate:32000,crossfadeMs:10,attackMs:null,releaseMs:null,tuneOffset:0,volumePercent:100,volumeCustomized:false});
+  const newAudioLayer = () => ({file:null,audio:null,pitchSuggestion:null,pitchNote:60,pitchConfirmed:false,sampleRate:32000,tuneOffset:0,volumePercent:100,attackMs:0,releaseMs:120});
   const newSf2Editor = () => ({open:false,method:null,file:null,sf2:null,programs:[],programIndex:null,
-    regions:[],regionId:null,key:60,velocity:110,sampleRate:32000,crossfadeMs:10,
-    attackMs:null,releaseMs:null,tuneOffset:0,volumePercent:100,volumeCustomized:false,name:'',error:'',busy:false,output:null,
-    savedPath:'',overwrite:false,audio:null,pitchSuggestion:null,pitchNote:60,pitchConfirmed:false});
+    regions:[],sf2Layers:[newSf2Layer()],audio:newAudioLayer(),key:60,velocity:110,
+    name:'',error:'',busy:false,output:null,savedPath:'',overwrite:false});
   let sf2Editor = newSf2Editor();
 
   function previewWave(seed) {
@@ -326,186 +327,137 @@ import { decodeAudioFile, midiNoteName } from './converter/audio-input.js';
   }
   function renderSamples() {
     const root = $('#sample-view'); root.innerHTML = '';
-    root.append(sf2ConverterLauncher());
-    if (sf2Editor.open) root.append(sf2ConverterPanel());
     const library = el('div', {class:'panel'}, el('h2', {}, 'Sample source'), folderPanel('samples'));
     library.append(activeFolder('samples') === DEVICE_PRESET
       ? presetFilePanel() : filePanel('samples', '.wav,.mp3,.ktsynth', true));
     root.append(assignmentPanel(), library);
+    renderSynth();
   }
-  function sf2ConverterLauncher() {
-    return sf2Editor.open
-      ? el('div',{class:'sf2-launcher'},el('strong',{},'KANTANシンセを作成中'),el('button',{onclick:()=>{sf2Player.stop(true);sf2Editor.open=false;renderSamples();}},'閉じる'))
-      : el('button',{class:'sf2-open primary',onclick:()=>{sf2Editor.open=true;renderSamples();}},'KANTANシンセを作る');
+  function renderSynth() {
+    const root = $('#synth-view');
+    if (!root) return;
+    root.innerHTML = '';
+    sf2Editor.open = true;
+    root.append(synthConverterPanel());
   }
-  const selectedSf2Region = () => sf2Editor.regions.find(region=>region.id===sf2Editor.regionId)||null;
-  const safeSynthName = value => String(value||'').trim().replace(/[\\/:*?"<>|]/g,'_').replace(/^\.+/,'').slice(0,80);
-  const sf2RegionVolumePercent = region => attenuationCbToGainPercent(region&&region.initialAttenuationCb);
-  const sf2GainQ8 = () => gainPercentToQ8(sf2Editor.volumePercent);
-  function syncSf2Volume(region=selectedSf2Region()) { if(region&&!sf2Editor.volumeCustomized)sf2Editor.volumePercent=sf2RegionVolumePercent(region); }
-  function updateSf2Regions(preserve=true) {
-    const former=preserve?sf2Editor.regionId:null;
-    sf2Editor.regions=sf2Editor.sf2&&sf2Editor.programIndex!==null?resolvePresetRegions(sf2Editor.sf2,Number(sf2Editor.programIndex),sf2Editor.key,sf2Editor.velocity):[];
-    sf2Editor.regionId=sf2Editor.regions.some(region=>region.id===former)?former:sf2Editor.regions.length===1?sf2Editor.regions[0].id:null;
-    syncSf2Volume();
-    sf2Editor.output=null;sf2Editor.overwrite=false;
-  }
-  async function loadSoundFont(file) {
-    sf2Player.stop(true);sf2Editor={...newSf2Editor(),open:true,method:'sf2',file,busy:true};renderSamples();
-    try {
-      if(!/\.sf2$/i.test(file.name))throw new Error(/\.sf3$/i.test(file.name)?'SF3は非対応です。非圧縮のSoundFont 2（.sf2）を選んでください。':'.sf2ファイルを選んでください。');
-      sf2Editor.sf2=parseSf2(await file.arrayBuffer());sf2Editor.programs=listSoundPrograms(sf2Editor.sf2);
-      if(!sf2Editor.programs.length)throw new Error('音色が見つかりません。');
-      sf2Editor.programIndex=initialSoundProgramIndex(sf2Editor.programs);
-      if(sf2Editor.programIndex!==null){const selected=sf2Editor.programs.find(p=>p.index===sf2Editor.programIndex);sf2Editor.name=selected?selected.name:sf2Editor.sf2.name;}
-      updateSf2Regions(false);
-    } catch(err) { sf2Editor.error=err.message; }
-    finally { sf2Editor.busy=false;renderSamples(); }
-  }
-  function sf2Field(label,control,hint='') { return el('label',{class:'sf2-field'},el('span',{},label),control,hint?el('small',{},hint):null); }
-  function sf2Number(label,key,min,max,hint='') {
-    const value=sf2Editor[key],input=el('input',{type:'number',value:value===null?'':value,min,max,step:1,placeholder:value===null?'SoundFont値':''});
-    input.addEventListener('change',()=>{sf2Editor[key]=input.value===''?null:Math.max(min,Math.min(max,Number(input.value)));if(key==='key'||key==='velocity')updateSf2Regions(true);else sf2Editor.output=null;renderSamples();});
+  const safeSynthName = value => {
+    const clean=String(value||'').trim().replace(/[\\/:*?"<>|]/g,'_').replace(/^\.+/,''),encoder=new TextEncoder();let result='';
+    for(const character of clean){if(encoder.encode(result+character).length>63)break;result+=character;}
+    return result;
+  };
+  const sf2Field = (label,control,hint='') => el('label',{class:'sf2-field'},el('span',{},label),control,hint?el('small',{},hint):null);
+  const selectedSf2Layers = () => sf2Editor.sf2Layers.filter(layer=>layer.regionId).map(layer=>({settings:layer,region:sf2Editor.regions.find(region=>region.id===layer.regionId)})).filter(layer=>layer.region);
+  const totalLayerGain = layers => layers.reduce((sum,layer)=>sum+gainPercentToQ8(layer.volumePercent),0);
+  function invalidateSynth(){sf2Editor.output=null;sf2Editor.overwrite=false;}
+  function numberControl(target,key,min,max,label,hint=''){
+    const input=el('input',{type:'number',value:target[key]===null?'':target[key],min,max,step:1,placeholder:target[key]===null?'SoundFont value':''});
+    input.addEventListener('change',()=>{target[key]=input.value===''?null:Math.max(min,Math.min(max,Number(input.value)));if(target===sf2Editor&&(key==='key'||key==='velocity'))updateSf2Regions(true);else invalidateSynth();renderSamples();});
     return sf2Field(label,input,hint);
   }
-  async function previewSf2Region(region=selectedSf2Region()) {
-    if(!region)return;
-    try { const source=extractRegionPcm(sf2Editor.sf2,region),gainQ8=gainPercentToQ8(sf2Editor.volumeCustomized||region.id===sf2Editor.regionId?sf2Editor.volumePercent:sf2RegionVolumePercent(region));await sf2Player.play(source.pcm,{sampleRate:region.sampleRate,previewNote:sf2Editor.key,rootNote:region.rootNote,tuneCents:region.tuneCents+(sf2Editor.tuneOffset||0),sustainMode:region.sustainMode,loopStart:source.loopStart,loopEnd:source.loopEnd,attackMs:sf2Editor.attackMs===null?region.attackMs:sf2Editor.attackMs,gainQ8});sf2Editor.error=''; }
-    catch(err) { sf2Editor.error='試聴できません: '+err.message;renderSamples(); }
+  function rateControl(target,label='Sample Rate'){
+    const input=el('select',{},[8000,12000,18000,24000,32000,44100,48000].map(rate=>el('option',{value:rate,selected:rate===target.sampleRate?'':null},rate/1000+' kHz')));
+    input.addEventListener('change',()=>{target.sampleRate=Number(input.value);invalidateSynth();renderSamples();});return sf2Field(label,input);
   }
-  function sf2Candidate(region,index) {
-    const id='sf2-region-'+index,radio=el('input',{id,type:'radio',name:'sf2-region',value:region.id,checked:region.id===sf2Editor.regionId?'':null});
-    radio.addEventListener('change',()=>{sf2Editor.regionId=region.id;syncSf2Volume(region);sf2Editor.output=null;sf2Editor.overwrite=false;renderSamples();});
-    return el('div',{class:'sf2-candidate'+(region.id===sf2Editor.regionId?' selected':'')},radio,el('label',{for:id,class:'sf2-candidate-name'},region.sampleName||`サウンド ${index+1}`),el('small',{},`${region.instrumentName} · 音域 ${region.keyRange[0]}–${region.keyRange[1]} · 強さ ${region.velRange[0]}–${region.velRange[1]}`),el('button',{type:'button',onclick:()=>previewSf2Region(region),'aria-label':`${region.sampleName||`サウンド ${index+1}`}を試聴`},'試聴'));
+  function volumeControl(target,reset){
+    const value=el('output',{class:'range-value','aria-live':'polite'},`${target.volumePercent}%`),input=el('input',{type:'range',min:0,max:200,step:1,value:target.volumePercent,'aria-label':'Layer volume'});
+    input.addEventListener('input',()=>{target.volumePercent=Number(input.value);target.volumeCustomized=true;invalidateSynth();value.textContent=`${target.volumePercent}%`;sf2Player.setGainQ8(gainPercentToQ8(target.volumePercent));});
+    const resetButton=reset?el('button',{type:'button',onclick:()=>{reset();invalidateSynth();renderSamples();}},'Reset to SF2 value'):null;
+    return el('div',{class:'sf2-volume'},el('div',{class:'sf2-volume-heading'},el('strong',{},'Volume'),resetButton),el('div',{class:'sf2-volume-row'},input,value));
   }
-  function sf2VolumeControl(region) {
-    const value=el('output',{class:'range-value','aria-live':'polite'},`${sf2Editor.volumePercent}%`),input=el('input',{type:'range',min:0,max:200,step:1,value:sf2Editor.volumePercent,'aria-label':'変換後の音量'});
-    input.addEventListener('input',()=>{sf2Editor.volumePercent=Number(input.value);sf2Editor.volumeCustomized=true;sf2Editor.output=null;sf2Editor.overwrite=false;value.textContent=`${sf2Editor.volumePercent}%`;sf2Player.setGainQ8(sf2GainQ8());});
-    const reset=el('button',{type:'button',onclick:()=>{sf2Editor.volumeCustomized=false;syncSf2Volume(region);sf2Editor.output=null;sf2Editor.overwrite=false;sf2Player.setGainQ8(sf2GainQ8());renderSamples();}},'SF2の値に戻す');
-    return el('div',{class:'sf2-volume'},el('div',{class:'sf2-volume-heading'},el('strong',{},'音量'),reset),el('div',{class:'sf2-volume-row'},input,value),el('small',{},'100%が標準です。100%を超えると、音色や再生環境によっては音割れする場合があります。'));
-  }
-
-  function friendlySynthError(error) {
-    const message=String(error&&error.message||error||'不明なエラーです。');
-    if(/same name|already exists|同名|409/i.test(message))return'同じ名前のKANTANシンセがあります。名前を変えるか、上書きを選んでください。';
-    if(/full|storage|write failed|507|容量/i.test(message))return'SDカードの空き容量が足りないか、書き込めません。空き容量を確認してもう一度試してください。';
-    if(/connection|interrupted|timed out|network|通信/i.test(message))return'通信が途切れました。KANTAN SamplerとのWi-Fi接続を確認し、もう一度保存してください。';
-    if(/invalid|format|metadata|CRC|loop|range|422|形式|検証/i.test(message))return'生成ファイルの形式を検証できませんでした。入力ファイルまたは設定を確認してください。';
+  function friendlySynthError(error){
+    const message=String(error&&error.message||error||'An unknown error occurred.');
+    if(/same name|already exists|409/i.test(message))return'A synth sound with the same name already exists. Rename it or choose overwrite.';
+    if(/full|storage|write failed|507/i.test(message))return'The SD card does not have enough free space or could not be written. Check the card and try again.';
+    if(/connection|interrupted|timed out|network/i.test(message))return'The connection was interrupted. Check the Wi-Fi connection to KANTAN Sampler and try again.';
     return message;
   }
-  function buildSf2Output() {
-    const region=selectedSf2Region(),name=safeSynthName(sf2Editor.name);if(!region)throw new Error('使用するサウンドを選んでください。');if(!name)throw new Error('音色名を入力してください。');if(region.unsupported.length)throw new Error('このサウンドには非対応機能があります: '+region.unsupported.join(', '));
-    const source=extractRegionPcm(sf2Editor.sf2,region),ratio=sf2Editor.sampleRate/region.sampleRate,looped=region.sustainMode==='loop';
-    let pcm=resamplePcm(source.pcm,region.sampleRate,sf2Editor.sampleRate),loopStart=looped?Math.round(source.loopStart*ratio):0,loopEnd=looped?Math.round(source.loopEnd*ratio):0;
-    if(looped){pcm=trimLoopTail(pcm,loopEnd,true);loopEnd=Math.min(loopEnd,pcm.length);}
-    const mixed=looped?applyLoopCrossfade(pcm,loopStart,loopEnd,Math.round(sf2Editor.crossfadeMs*sf2Editor.sampleRate/1000)):{pcm,frames:0};
-    const bytes=encodeKtSynth(mixed.pcm,{name,sampleRate:sf2Editor.sampleRate,startFrame:0,endFrameExclusive:mixed.pcm.length,loopStartFrame:looped?loopStart:0,loopEndFrameExclusive:looped?loopEnd:0,loopCrossfadeFrames:mixed.frames,sustainMode:looped?1:0,attackMs:Math.round(sf2Editor.attackMs===null?region.attackMs:sf2Editor.attackMs),releaseMs:Math.round(sf2Editor.releaseMs===null?region.releaseMs:sf2Editor.releaseMs),tuneCents:Math.max(-100,Math.min(100,Math.round(region.tuneCents+(sf2Editor.tuneOffset||0)))),defaultGainQ8:sf2GainQ8(),rootNote:region.rootNote});
-    parseKtSynth(bytes);sf2Editor.output=bytes;return bytes;
+  async function previewSynthOnDevice(buildOutput){
+    sf2Player.stop(true);sf2Editor.busy=true;sf2Editor.error='';renderSamples();
+    try{const bytes=buildOutput();parseKtSynth(bytes);if(PREVIEW){await sleep(250);status('Preview mode: connect KANTAN Sampler to audition the converted sound');return;}await uploadRequest('/api/sampler/preview-ktsynth',new Blob([bytes],{type:'application/vnd.instachord.ktsynth'}),()=>{});await command({action:'previewWav',file:'/sampler/samples/Synth/.web-preview.ktsynth',maxMs:2000},false);}
+    catch(err){sf2Editor.error=friendlySynthError(err);}finally{sf2Editor.busy=false;renderSamples();}
   }
-  async function ensureSynthFolder() {
-    if(PREVIEW){if(!previewFolders.samples.includes('Synth'))previewFolders.samples.push('Synth');return;}
-    try { await request('/api/sampler/folders/samples?path=&name=Synth',{method:'POST'}); }
-    catch(err) { if(!/exist|failed|conflict/i.test(err.message))throw err; }
-  }
-  async function saveSf2ToSd() {
+  function devicePreviewControl(buildOutput,disabled=false){return el('div',{class:'device-preview'},el('button',{class:'primary',disabled:disabled?'':null,onclick:()=>previewSynthOnDevice(buildOutput)},sf2Editor.busy?'Sending to device…':'Audition Converted Sound on Device'),el('small',{},'Temporarily sends the converted KTS2 sound to KANTAN Sampler for playback. It is not saved to your library.'));}
+  function chooseSynthMethod(method){sf2Player.stop(true);sf2Editor={...newSf2Editor(),open:true,method};renderSamples();}
+  function synthMethodPanel(){return el('section',{class:'panel sf2-converter'},el('h2',{},'Create a Synth Sound'),el('p',{},'Create synth sounds for KANTAN Sampler from SoundFont, WAV, or MP3 files. Use them with the Bass, Melody, and Chord parts.'),el('div',{class:'synth-methods'},el('button',{class:'primary',onclick:()=>chooseSynthMethod('sf2')},el('strong',{},'Create from SoundFont (.sf2)'),el('small',{},'Choose up to two source sounds')),el('button',{class:'primary',onclick:()=>chooseSynthMethod('audio')},el('strong',{},'Create from WAV / MP3'),el('small',{},'Create from one audio file'))));}
+  async function ensureSynthFolder(){if(PREVIEW){if(!previewFolders.samples.includes('Synth'))previewFolders.samples.push('Synth');return;}try{await request('/api/sampler/folders/samples?path=&name=Synth',{method:'POST'});}catch(err){if(!/exist|failed|conflict/i.test(err.message))throw err;}}
+  async function saveSynthOutput(builder){
     sf2Editor.busy=true;sf2Editor.error='';renderSamples();
-    try {
-      const bytes=buildSf2Output(),filename=safeSynthName(sf2Editor.name)+'.ktsynth',path='Synth/'+filename;
-      if(PREVIEW){await sleep(350);const at=previewFiles.samples.findIndex(x=>x.name===filename&&x.folder==='Synth'),entry={name:filename,size:bytes.length,folder:'Synth'};if(at>=0&&!sf2Editor.overwrite)throw new Error('a KANTAN Synth tone with the same name already exists');if(at>=0)previewFiles.samples[at]=entry;else previewFiles.samples.push(entry);}
-      else {await ensureSynthFolder();await uploadRequest('/api/sampler/files/samples/'+encodeURIComponent(path)+'?overwrite='+(sf2Editor.overwrite?'1':'0'),new Blob([bytes],{type:'application/vnd.instachord.ktsynth'}),()=>{});}
-      sf2Editor.savedPath='/sampler/samples/'+path;sf2Editor.overwrite=false;
-    } catch(err) { sf2Editor.error=friendlySynthError(err);if(/already exists|same name|同名/i.test(err.message))sf2Editor.overwrite=true; }
-    finally { sf2Editor.busy=false;renderSamples(); }
+    try{const bytes=builder(),filename=safeSynthName(sf2Editor.name)+'.ktsynth',path='Synth/'+filename;parseKtSynth(bytes);if(PREVIEW){await sleep(350);const at=previewFiles.samples.findIndex(file=>file.name===filename&&file.folder==='Synth'),entry={name:filename,size:bytes.length,folder:'Synth'};if(at>=0&&!sf2Editor.overwrite)throw new Error('a KANTAN Synth tone with the same name already exists');if(at>=0)previewFiles.samples[at]=entry;else previewFiles.samples.push(entry);}else{await ensureSynthFolder();await uploadRequest('/api/sampler/files/samples/'+encodeURIComponent(path)+'?overwrite='+(sf2Editor.overwrite?'1':'0'),new Blob([bytes],{type:'application/vnd.instachord.ktsynth'}),()=>{});}sf2Editor.savedPath='/sampler/samples/'+path;sf2Editor.overwrite=false;}
+    catch(err){sf2Editor.error=friendlySynthError(err);if(/already exists|same name/i.test(err.message))sf2Editor.overwrite=true;}finally{sf2Editor.busy=false;renderSamples();}
   }
-  function downloadSf2Output() {
-    try {const bytes=sf2Editor.output||buildSf2Output(),a=el('a',{href:URL.createObjectURL(new Blob([bytes],{type:'application/vnd.instachord.ktsynth'})),download:safeSynthName(sf2Editor.name)+'.ktsynth'});a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);renderSamples();}
-    catch(err){sf2Editor.error=err.message;renderSamples();}
+  function downloadSynthOutput(builder){try{const bytes=sf2Editor.output||builder();parseKtSynth(bytes);const a=el('a',{href:URL.createObjectURL(new Blob([bytes],{type:'application/vnd.instachord.ktsynth'})),download:safeSynthName(sf2Editor.name)+'.ktsynth'});a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);renderSamples();}catch(err){sf2Editor.error=friendlySynthError(err);renderSamples();}}
+
+  function updateSf2Regions(preserve=true){
+    const former=preserve?sf2Editor.sf2Layers.map(layer=>layer.regionId):[];
+    sf2Editor.regions=sf2Editor.sf2&&sf2Editor.programIndex!==null?resolvePresetRegions(sf2Editor.sf2,Number(sf2Editor.programIndex),sf2Editor.key,sf2Editor.velocity):[];
+    sf2Editor.sf2Layers=sf2Editor.sf2Layers.filter(layer=>sf2Editor.regions.some(region=>region.id===layer.regionId));
+    if(!preserve||!sf2Editor.sf2Layers.length){sf2Editor.sf2Layers=[newSf2Layer()];if(sf2Editor.regions.length===1)sf2Editor.sf2Layers[0].regionId=sf2Editor.regions[0].id;}
+    else sf2Editor.sf2Layers.sort((a,b)=>former.indexOf(a.regionId)-former.indexOf(b.regionId));
+    for(const layer of sf2Editor.sf2Layers){const region=sf2Editor.regions.find(item=>item.id===layer.regionId);if(region&&!layer.volumeCustomized)layer.volumePercent=attenuationCbToGainPercent(region.initialAttenuationCb);}
+    invalidateSynth();
   }
-  function chooseSynthMethod(method) {
-    sf2Player.stop(true);sf2Editor={...newSf2Editor(),open:true,method};renderSamples();
+  async function loadSoundFont(file){
+    sf2Player.stop(true);sf2Editor={...newSf2Editor(),open:true,method:'sf2',file,busy:true};renderSamples();
+    try{if(!/\.sf2$/i.test(file.name))throw new Error(/\.sf3$/i.test(file.name)?'SF3 is not supported. Choose an uncompressed SoundFont 2 (.sf2) file.':'Choose an .sf2 file.');sf2Editor.sf2=parseSf2(await file.arrayBuffer());sf2Editor.programs=listSoundPrograms(sf2Editor.sf2);if(!sf2Editor.programs.length)throw new Error('No presets were found.');sf2Editor.programIndex=initialSoundProgramIndex(sf2Editor.programs);if(sf2Editor.programIndex!==null){const selected=sf2Editor.programs.find(program=>program.index===sf2Editor.programIndex);sf2Editor.name=selected?selected.name:sf2Editor.sf2.name;}updateSf2Regions(false);}
+    catch(err){sf2Editor.error=err.message;}finally{sf2Editor.busy=false;renderSamples();}
   }
-  function synthMethodPanel() {
-    return el('section',{class:'panel sf2-converter'},el('h2',{},'KANTANシンセを作る'),el('p',{class:'notice'},'元の音源ファイルは外部へ送信せず、このブラウザ内で処理します。'),el('div',{class:'synth-methods'},el('button',{class:'primary',onclick:()=>chooseSynthMethod('sf2')},el('strong',{},'SoundFont（.sf2）から作る'),el('small',{},'音色と使用サウンドを選びます')),el('button',{class:'primary',onclick:()=>chooseSynthMethod('audio')},el('strong',{},'WAV／MP3から作る'),el('small',{},'音の最初から最後までを使います'))));
+  function toggleSf2Region(region){
+    const at=sf2Editor.sf2Layers.findIndex(layer=>layer.regionId===region.id);
+    if(at>=0){sf2Editor.sf2Layers.splice(at,1);if(!sf2Editor.sf2Layers.length)sf2Editor.sf2Layers.push(newSf2Layer());}
+    else{const empty=sf2Editor.sf2Layers.find(layer=>!layer.regionId);if(empty)empty.regionId=region.id;else if(sf2Editor.sf2Layers.length<2)sf2Editor.sf2Layers.push({...newSf2Layer(),regionId:region.id});const layer=sf2Editor.sf2Layers.find(item=>item.regionId===region.id);if(layer){layer.volumePercent=attenuationCbToGainPercent(region.initialAttenuationCb);layer.volumeCustomized=false;}}
+    invalidateSynth();renderSamples();
   }
-  async function loadAudioSource(file) {
-    sf2Player.stop(true);sf2Editor={...newSf2Editor(),open:true,method:'audio',file,busy:true,name:safeSynthName(file.name.replace(/\.(wav|mp3)$/i,''))};renderSamples();
-    try {
-      if(!/\.(wav|mp3)$/i.test(file.name))throw new Error('WAVまたはMP3ファイルを選んでください。');
-      const audio=await decodeAudioFile(file);
-      if(audio.duration>20)throw new Error(`入力は20秒以内にしてください（現在 ${audio.duration.toFixed(1)}秒）。短い素材を用意してください。`);
-      sf2Editor.audio=audio;sf2Editor.pitchSuggestion=audio.suggestion;
-      const suggestion=audio.suggestion;
-      sf2Editor.pitchNote=suggestion&&suggestion.note!==undefined&&suggestion.reliable!==false?suggestion.note:60;
-      sf2Editor.tuneOffset=suggestion&&suggestion.note!==undefined&&suggestion.reliable!==false?suggestion.tuneCents||0:0;
-    } catch(err) { sf2Editor.error=err.message; }
-    finally { sf2Editor.busy=false;renderSamples(); }
+  async function previewSf2Layer(region,settings){
+    try{const source=extractRegionPcm(sf2Editor.sf2,region);await sf2Player.play(source.pcm,{sampleRate:region.sampleRate,previewNote:sf2Editor.key,rootNote:region.rootNote,tuneCents:region.tuneCents+(settings.tuneOffset||0),sustainMode:region.sustainMode,loopStart:source.loopStart,loopEnd:source.loopEnd,attackMs:settings.attackMs===null?region.attackMs:settings.attackMs,gainQ8:gainPercentToQ8(settings.volumePercent)});sf2Editor.error='';}
+    catch(err){sf2Editor.error='Could not preview: '+err.message;renderSamples();}
   }
-  function setPitchPart(part,value) {
-    const current=sf2Editor.pitchNote;
-    const pitchClass=part==='name'?Number(value):current%12;
-    const octave=part==='octave'?Number(value):Math.floor(current/12)-1;
-    sf2Editor.pitchNote=Math.max(0,Math.min(127,(octave+1)*12+pitchClass));sf2Editor.pitchConfirmed=false;sf2Editor.output=null;renderSamples();
+  function sf2Candidate(region,index){
+    const selected=sf2Editor.sf2Layers.findIndex(layer=>layer.regionId===region.id),id='sf2-region-'+index,input=el('input',{id,type:'checkbox',value:region.id,checked:selected>=0?'':null,disabled:selected<0&&selectedSf2Layers().length>=2?'':null});input.addEventListener('change',()=>toggleSf2Region(region));
+    return el('div',{class:'sf2-candidate'+(selected>=0?' selected':'')},input,el('label',{for:id,class:'sf2-candidate-name'},`${selected>=0?`Layer ${selected+1} · `:''}${region.sampleName||`Sound ${index+1}`}`),el('small',{},`${region.instrumentName} · Key ${region.keyRange[0]}–${region.keyRange[1]} · Velocity ${region.velRange[0]}–${region.velRange[1]}`),el('button',{type:'button',onclick:()=>previewSf2Layer(region,selected>=0?sf2Editor.sf2Layers[selected]:newSf2Layer())},'Preview'));
   }
-  function buildAudioOutput() {
-    if(!sf2Editor.audio)throw new Error('音声ファイルを選んでください。');
-    if(!sf2Editor.pitchConfirmed)throw new Error('元の音程を確認してください。');
-    const name=safeSynthName(sf2Editor.name);if(!name)throw new Error('音色名を入力してください。');
-    const pcm=resamplePcm(sf2Editor.audio.pcm,sf2Editor.audio.sampleRate,sf2Editor.sampleRate);
-    const bytes=encodeKtSynth(pcm,{name,sampleRate:sf2Editor.sampleRate,startFrame:0,endFrameExclusive:pcm.length,loopStartFrame:0,loopEndFrameExclusive:0,loopCrossfadeFrames:0,sustainMode:0,attackMs:0,releaseMs:120,tuneCents:Math.max(-100,Math.min(100,Math.round(sf2Editor.tuneOffset||0))),defaultGainQ8:256,rootNote:sf2Editor.pitchNote});
-    parseKtSynth(bytes);sf2Editor.output=bytes;return bytes;
+  function buildSf2Layer(region,settings){
+    const source=extractRegionPcm(sf2Editor.sf2,region),ratio=settings.sampleRate/region.sampleRate,looped=region.sustainMode==='loop';let pcm=resamplePcm(source.pcm,region.sampleRate,settings.sampleRate),loopStart=looped?Math.round(source.loopStart*ratio):0,loopEnd=looped?Math.round(source.loopEnd*ratio):0;if(looped){pcm=trimLoopTail(pcm,loopEnd,true);loopEnd=Math.min(loopEnd,pcm.length);}const mixed=looped?applyLoopCrossfade(pcm,loopStart,loopEnd,Math.round(settings.crossfadeMs*settings.sampleRate/1000)):{pcm,frames:0};return{pcm:mixed.pcm,sampleRate:settings.sampleRate,startFrame:0,endFrameExclusive:mixed.pcm.length,loopStartFrame:looped?loopStart:0,loopEndFrameExclusive:looped?loopEnd:0,loopCrossfadeFrames:mixed.frames,sustainMode:looped?1:0,attackMs:Math.round(settings.attackMs===null?region.attackMs:settings.attackMs),releaseMs:Math.round(settings.releaseMs===null?region.releaseMs:settings.releaseMs),tuneCents:Math.max(-100,Math.min(100,Math.round(region.tuneCents+(settings.tuneOffset||0)))),defaultGainQ8:gainPercentToQ8(settings.volumePercent),rootNote:region.rootNote};
   }
-  async function saveAudioToSd() {
-    sf2Editor.busy=true;sf2Editor.error='';renderSamples();
-    try {
-      const bytes=buildAudioOutput(),filename=safeSynthName(sf2Editor.name)+'.ktsynth',path='Synth/'+filename;
-      if(PREVIEW){await sleep(350);const at=previewFiles.samples.findIndex(x=>x.name===filename&&x.folder==='Synth'),entry={name:filename,size:bytes.length,folder:'Synth'};if(at>=0&&!sf2Editor.overwrite)throw new Error('a KANTAN Synth tone with the same name already exists');if(at>=0)previewFiles.samples[at]=entry;else previewFiles.samples.push(entry);}
-      else {await ensureSynthFolder();await uploadRequest('/api/sampler/files/samples/'+encodeURIComponent(path)+'?overwrite='+(sf2Editor.overwrite?'1':'0'),new Blob([bytes],{type:'application/vnd.instachord.ktsynth'}),()=>{});}
-      sf2Editor.savedPath='/sampler/samples/'+path;sf2Editor.overwrite=false;
-    } catch(err) {sf2Editor.error=friendlySynthError(err);if(/already exists|same name|同名/i.test(err.message))sf2Editor.overwrite=true;}
-    finally {sf2Editor.busy=false;renderSamples();}
+  function buildSf2Output(){const selected=selectedSf2Layers(),name=safeSynthName(sf2Editor.name);if(!selected.length)throw new Error('Choose at least one source sound.');if(!name)throw new Error('Enter a sound name.');const bytes=encodeKtSynth(selected.map(layer=>buildSf2Layer(layer.region,layer.settings)),{name});parseKtSynth(bytes);sf2Editor.output=bytes;return bytes;}
+  function sf2LayerCard(item,index){
+    const {region,settings}=item,card=el('section',{class:'synth-layer'},el('div',{class:'sf2-launcher'},el('h3',{},`Layer ${index+1}: ${region.sampleName||'Sound'}`),index===1?el('button',{onclick:()=>toggleSf2Region(region)},'Remove Layer 2'):null),el('div',{class:'actions'},el('button',{onclick:()=>previewSf2Layer(region,settings)},`Preview Layer ${index+1}`),el('button',{onclick:()=>sf2Player.stop(true)},'Stop')));
+    card.append(volumeControl(settings,()=>{settings.volumePercent=attenuationCbToGainPercent(region.initialAttenuationCb);settings.volumeCustomized=false;}));
+    card.append(el('details',{class:'sf2-advanced'},el('summary',{},`Layer ${index+1} Settings`),el('div',{class:'sf2-grid'},rateControl(settings),numberControl(settings,'crossfadeMs',0,1000,'Loop Crossfade (ms)'),numberControl(settings,'attackMs',0,5000,'Attack (ms)','Uses the SoundFont value when blank'),numberControl(settings,'releaseMs',10,2000,'Release (ms)','Uses the SoundFont value when blank'),numberControl(settings,'tuneOffset',-100,100,'Pitch Correction (cents)'))));return card;
   }
-  function downloadAudioOutput() {
-    try {const bytes=sf2Editor.output||buildAudioOutput(),a=el('a',{href:URL.createObjectURL(new Blob([bytes],{type:'application/vnd.instachord.ktsynth'})),download:safeSynthName(sf2Editor.name)+'.ktsynth'});a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);renderSamples();}
-    catch(err){sf2Editor.error=friendlySynthError(err);renderSamples();}
+  function sf2Panel(){
+    const file=el('input',{type:'file',accept:'.sf2,application/octet-stream'});file.addEventListener('change',()=>file.files[0]&&loadSoundFont(file.files[0]));const panel=el('section',{class:'panel sf2-converter'},el('div',{class:'sf2-launcher'},el('h2',{},'Create from SoundFont'),el('button',{onclick:()=>chooseSynthMethod(null)},'Back to Input Method')),sf2Field('SoundFont',file,sf2Editor.file?sf2Editor.file.name:'Choose a SoundFont 2 (.sf2) file'));
+    if(sf2Editor.busy)panel.append(el('p',{class:'sf2-working','aria-live':'polite'},'Processing…'));if(sf2Editor.error)panel.append(el('p',{class:'error',role:'alert'},sf2Editor.error));if(!sf2Editor.sf2)return panel;
+    const program=el('select',{},sf2Editor.programs.length>1?el('option',{value:'',selected:sf2Editor.programIndex===null?'':null},'Choose a preset'):null,sf2Editor.programs.map(item=>el('option',{value:item.index,selected:item.index===sf2Editor.programIndex?'':null},item.label)));program.addEventListener('change',()=>{sf2Editor.programIndex=program.value===''?null:Number(program.value);const selected=sf2Editor.programs.find(item=>item.index===sf2Editor.programIndex);if(selected)sf2Editor.name=selected.name;updateSf2Regions(false);renderSamples();});panel.append(sf2Field('Preset',program,`${sf2Editor.sf2.name} · SF2 ${sf2Editor.sf2.version}`));if(sf2Editor.programIndex===null)return panel;
+    panel.append(el('details',{class:'sf2-advanced'},el('summary',{},'Sound Matching Settings'),el('div',{class:'sf2-grid'},numberControl(sf2Editor,'key',0,127,'Root Note','Updates the sound choices'),numberControl(sf2Editor,'velocity',1,127,'Reference Velocity','Updates the sound choices'))));
+    panel.append(el('h3',{},'Source Sounds'));if(sf2Editor.regions.length>1)panel.append(el('p',{class:'warning',role:'status'},'Choose one or two sounds. The second selection becomes Layer 2. Unsupported SoundFont features are ignored.'));if(!sf2Editor.regions.length)panel.append(el('p',{class:'error'},'No sound matches the current root note and velocity.'));else panel.append(el('fieldset',{class:'sf2-candidates'},el('legend',{},'Select up to two sounds'),sf2Editor.regions.map(sf2Candidate)));
+    const selected=selectedSf2Layers();for(const item of selected)if(item.region.unsupported.length)panel.append(el('p',{class:'warning'},`${item.region.sampleName}: unsupported features will be ignored: ${item.region.unsupported.join(', ')}`));selected.forEach((item,index)=>panel.append(sf2LayerCard(item,index)));
+    const layerFrames=selected.map(item=>{const frames=Math.round((item.region.sustainMode==='loop'?item.region.loopEnd-item.region.start:item.region.end-item.region.start)*item.settings.sampleRate/item.region.sampleRate);return{frames,looped:item.region.sustainMode==='loop'};}),estimated=selected.length?estimateKtSynthBytes(sf2Editor.name||'tone',layerFrames):0,gainTooHigh=totalLayerGain(selected.map(item=>item.settings))>512,tooLarge=estimated>KTSYNTH_MAX_BYTES;if(gainTooHigh)panel.append(el('p',{class:'error'},'Combined Layer 1 and Layer 2 volume cannot exceed 200%.'));if(tooLarge)panel.append(el('p',{class:'error'},'The output exceeds 2 MiB. Reduce a sample rate or choose shorter sounds.'));
+    const name=el('input',{type:'text',value:sf2Editor.name,maxlength:80,autocomplete:'off'});name.addEventListener('input',()=>{sf2Editor.name=name.value;invalidateSynth();});panel.append(sf2Field('Sound Name',name,'Filename: '+(safeSynthName(sf2Editor.name)||'(not entered)')+'.ktsynth'),el('p',{class:'sf2-size'},`KTS2 · ${selected.length||0} layer${selected.length===1?'':'s'} · ${estimated?Math.ceil(estimated/1024):0} KB`));
+    const disabled=!selected.length||!safeSynthName(sf2Editor.name)||sf2Editor.busy||gainTooHigh||tooLarge;panel.append(devicePreviewControl(buildSf2Output,disabled),el('div',{class:'sf2-save-row'},el('button',{class:'primary',disabled:disabled?'':null,onclick:()=>saveSynthOutput(buildSf2Output)},sf2Editor.overwrite?'Overwrite and Save to SD Card':'Save to SD Card'),el('button',{disabled:disabled?'':null,onclick:()=>downloadSynthOutput(buildSf2Output)},'Save to Computer')));return panel;
   }
-  function audioConverterPanel() {
-    const file=el('input',{type:'file',accept:'.wav,.mp3,audio/wav,audio/mpeg'});file.addEventListener('change',()=>file.files[0]&&loadAudioSource(file.files[0]));
-    const panel=el('section',{class:'panel sf2-converter'},el('div',{class:'sf2-launcher'},el('h2',{},'WAV／MP3から作る'),el('button',{onclick:()=>chooseSynthMethod(null)},'入力方法に戻る')),el('p',{class:'notice'},'ファイルはブラウザ内でPCMに変換し、先頭から最後までを鳴らします。ループは作成しません。'),sf2Field('音声ファイル',file,sf2Editor.file?sf2Editor.file.name:'20秒以内のWAVまたはMP3'));
-    if(sf2Editor.busy)panel.append(el('p',{class:'sf2-working','aria-live':'polite'},'ブラウザ内で解析中…'));if(sf2Editor.error)panel.append(el('p',{class:'error',role:'alert'},sf2Editor.error));if(!sf2Editor.audio)return panel;
-    const suggestion=sf2Editor.pitchSuggestion,usable=suggestion&&suggestion.note!==undefined&&suggestion.reliable!==false;
-    panel.append(el('section',{class:'pitch-confirm','aria-labelledby':'source-pitch-heading'},el('h3',{id:'source-pitch-heading'},'元の音程'),usable?el('p',{class:'warning'},`自動検出：${midiNoteName(suggestion.note)}（確認してください） · ${suggestion.source}${suggestion.source==='音声解析'?` · 信頼度 ${Math.round(suggestion.confidence*100)}%`:''}`):el('p',{class:'warning'},'音程を判定できませんでした。元の音程を選んでください。'),pitchControls(),el('button',{class:sf2Editor.pitchConfirmed?'':'primary',onclick:()=>{sf2Editor.pitchConfirmed=true;sf2Editor.output=null;renderSamples();}},sf2Editor.pitchConfirmed?`✓ ${midiNoteName(sf2Editor.pitchNote)}で使います`:sf2Editor.pitchNote===60&&!usable?'C4として使う':'この音程で使う')));
-    const name=el('input',{type:'text',value:sf2Editor.name,maxlength:80,autocomplete:'off'});name.addEventListener('input',()=>{sf2Editor.name=name.value;sf2Editor.output=null;sf2Editor.overwrite=false;});panel.append(sf2Field('音色名',name,'保存名: '+(safeSynthName(sf2Editor.name)||'（未入力）')+'.ktsynth'));
-    const rate=el('select',{},[18000,24000,32000,48000].map(n=>el('option',{value:n,selected:n===sf2Editor.sampleRate?'':null},n/1000+' kHz')));rate.addEventListener('change',()=>{sf2Editor.sampleRate=Number(rate.value);sf2Editor.output=null;renderSamples();});
-    const frames=Math.round(sf2Editor.audio.pcm.length*sf2Editor.sampleRate/sf2Editor.audio.sampleRate),estimated=estimateKtSynthBytes(sf2Editor.name||'tone',frames,false),tooLarge=estimated>KTSYNTH_MAX_BYTES;
-    panel.append(el('details',{class:'sf2-advanced'},el('summary',{},'詳細設定'),el('div',{class:'sf2-grid'},sf2Field('出力サンプルレート',rate),sf2Number('音程補正 (cent)','tuneOffset',-100,100),el('div',{class:'sf2-size'},el('span',{},'再生時間'),el('strong',{},sf2Editor.audio.duration.toFixed(1)+' 秒')),el('div',{class:'sf2-size'},el('span',{},'推定出力サイズ'),el('strong',{class:tooLarge?'danger-text':''},Math.ceil(estimated/1024)+' KB')))));
-    if(/\.mp3$/i.test(sf2Editor.file.name))panel.append(el('p',{class:'notice'},'MP3はPCMへデコードするため、出力サイズは元のMP3より大きくなります。'));
-    if(tooLarge)panel.append(el('p',{class:'error',role:'alert'},'出力が2 MiBを超えます。短い素材を使うか、出力サンプルレートを下げてください。'));
-    panel.append(el('div',{class:'actions'},el('button',{onclick:()=>sf2Player.play(sf2Editor.audio.pcm,{sampleRate:sf2Editor.audio.sampleRate,previewNote:60,rootNote:60,tuneCents:0,sustainMode:'off',loopStart:0,loopEnd:0,attackMs:0,attenuationCb:0})},'元の音を試聴'),el('button',{onclick:()=>sf2Player.stop(true)},'停止')));
-    panel.append(el('div',{class:'sf2-save-row'},el('button',{class:'primary',disabled:!sf2Editor.pitchConfirmed||!safeSynthName(sf2Editor.name)||tooLarge||sf2Editor.busy?'':null,onclick:saveAudioToSd},sf2Editor.overwrite?'上書きしてSDカードに保存':'SDカードに保存'),el('button',{disabled:!sf2Editor.pitchConfirmed||tooLarge?'':null,onclick:downloadAudioOutput},'パソコンに保存')));return panel;
+
+  async function loadAudioSource(file){
+    const layer=sf2Editor.audio;sf2Player.stop(true);layer.file=file;layer.audio=null;layer.pitchConfirmed=false;sf2Editor.busy=true;sf2Editor.error='';if(!sf2Editor.name)sf2Editor.name=safeSynthName(file.name.replace(/\.(wav|mp3)$/i,''));renderSamples();
+    try{if(!/\.(wav|mp3)$/i.test(file.name))throw new Error('Choose a WAV or MP3 file.');const audio=await decodeAudioFile(file);if(audio.duration>20)throw new Error(`The audio must be 20 seconds or shorter (currently ${audio.duration.toFixed(1)} seconds).`);layer.audio=audio;layer.pitchSuggestion=audio.suggestion;const suggestion=audio.suggestion;layer.pitchNote=suggestion&&suggestion.note!==undefined&&suggestion.reliable!==false?suggestion.note:60;layer.tuneOffset=suggestion&&suggestion.note!==undefined&&suggestion.reliable!==false?suggestion.tuneCents||0:0;}
+    catch(err){sf2Editor.error=err.message;}finally{sf2Editor.busy=false;invalidateSynth();renderSamples();}
   }
-  function pitchControls() {
-    const note=sf2Editor.pitchNote,names=['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
-    const pitch=el('select',{'aria-label':'音名'},names.map((name,index)=>el('option',{value:index,selected:index===note%12?'':null},name)));pitch.addEventListener('change',()=>setPitchPart('name',pitch.value));
-    const octave=el('select',{'aria-label':'オクターブ'},Array.from({length:11},(_,index)=>index-1).map(value=>el('option',{value,selected:value===Math.floor(note/12)-1?'':null},value)));octave.addEventListener('change',()=>setPitchPart('octave',octave.value));
-    return el('div',{class:'pitch-controls'},el('label',{},'音名',pitch),el('label',{},'オクターブ',octave));
+  function setPitchPart(layer,part,value){const current=layer.pitchNote,pitchClass=part==='name'?Number(value):current%12,octave=part==='octave'?Number(value):Math.floor(current/12)-1;layer.pitchNote=Math.max(0,Math.min(127,(octave+1)*12+pitchClass));layer.pitchConfirmed=false;invalidateSynth();renderSamples();}
+  function pitchControls(layer){const note=layer.pitchNote,names=['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'],pitch=el('select',{'aria-label':'Note'},names.map((name,index)=>el('option',{value:index,selected:index===note%12?'':null},name))),octave=el('select',{'aria-label':'Octave'},Array.from({length:11},(_,index)=>index-1).map(value=>el('option',{value,selected:value===Math.floor(note/12)-1?'':null},value)));pitch.addEventListener('change',()=>setPitchPart(layer,'name',pitch.value));octave.addEventListener('change',()=>setPitchPart(layer,'octave',octave.value));return el('div',{class:'pitch-controls'},el('label',{},'Note',pitch),el('label',{},'Octave',octave));}
+  function audioSourceCard(layer){
+    const file=el('input',{type:'file',accept:'.wav,.mp3,audio/wav,audio/mpeg'});file.addEventListener('change',()=>file.files[0]&&loadAudioSource(file.files[0]));const card=el('section',{class:'synth-layer'},sf2Field('Audio File',file,layer.file?layer.file.name:'WAV or MP3, up to 20 seconds'));if(!layer.audio)return card;
+    const suggestion=layer.pitchSuggestion,usable=suggestion&&suggestion.note!==undefined&&suggestion.reliable!==false;card.append(el('section',{class:'pitch-confirm'},el('h3',{},'Source Pitch'),usable?el('p',{class:'warning'},`Detected: ${midiNoteName(suggestion.note)} (please confirm) · ${suggestion.source}`):el('p',{class:'warning'},'The pitch could not be detected. Choose the source pitch.'),pitchControls(layer),el('button',{class:layer.pitchConfirmed?'':'primary',onclick:()=>{layer.pitchConfirmed=true;invalidateSynth();renderSamples();}},layer.pitchConfirmed?`✓ Use ${midiNoteName(layer.pitchNote)}`:'Use This Pitch')));
+    card.append(el('div',{class:'actions'},el('button',{onclick:()=>sf2Player.play(layer.audio.pcm,{sampleRate:layer.audio.sampleRate,previewNote:layer.pitchNote,rootNote:layer.pitchNote,tuneCents:layer.tuneOffset||0,sustainMode:'off',loopStart:0,loopEnd:0,attackMs:layer.attackMs,gainQ8:gainPercentToQ8(layer.volumePercent)})},'Preview Source Sound'),el('button',{onclick:()=>sf2Player.stop(true)},'Stop')),volumeControl(layer));
+    card.append(el('details',{class:'sf2-advanced'},el('summary',{},'Sound Settings'),el('div',{class:'sf2-grid'},rateControl(layer,'Output Sample Rate'),numberControl(layer,'tuneOffset',-100,100,'Pitch Correction (cents)'),numberControl(layer,'attackMs',0,5000,'Attack (ms)'),numberControl(layer,'releaseMs',10,2000,'Release (ms)'),el('div',{class:'sf2-size'},el('span',{},'Duration'),el('strong',{},layer.audio.duration.toFixed(1)+' sec')))));return card;
   }
-  function sf2ConverterPanel() {
-    if(sf2Editor.savedPath)return el('section',{class:'panel sf2-converter','aria-live':'polite'},el('h2',{},'SDカードに保存しました'),el('p',{class:'success'},sf2Editor.savedPath),el('p',{},'本体の Melody／Chord／Bass の「KANTAN Synth」から選べます。'),el('div',{class:'actions'},el('button',{onclick:sf2Editor.method==='audio'?downloadAudioOutput:downloadSf2Output},'パソコンにも保存'),el('button',{class:'primary',onclick:()=>{sf2Editor=newSf2Editor();sf2Editor.open=true;renderSamples();}},'別の音色を作る')));
-    if(!sf2Editor.method)return synthMethodPanel();
-    if(sf2Editor.method==='audio')return audioConverterPanel();
-    const file=el('input',{type:'file',accept:'.sf2,application/octet-stream'});file.addEventListener('change',()=>file.files[0]&&loadSoundFont(file.files[0]));
-    const panel=el('section',{class:'panel sf2-converter'},el('div',{class:'sf2-launcher'},el('h2',{},'SoundFontから作る'),el('button',{onclick:()=>chooseSynthMethod(null)},'入力方法に戻る')),el('p',{class:'notice'},'SoundFontはこのブラウザ内だけで解析され、本体や外部サーバーへ送信されません。'),sf2Field('SoundFont',file,sf2Editor.file?sf2Editor.file.name:'SoundFont 2（.sf2）を選択'));
-    if(sf2Editor.busy)panel.append(el('p',{class:'sf2-working','aria-live':'polite'},'処理中…'));if(sf2Editor.error)panel.append(el('p',{class:'error','role':'alert'},sf2Editor.error));if(!sf2Editor.sf2)return panel;
-    const program=el('select',{},sf2Editor.programs.length>1?el('option',{value:'',selected:sf2Editor.programIndex===null?'':null},'音色を選んでください'):null,sf2Editor.programs.map(p=>el('option',{value:p.index,selected:p.index===sf2Editor.programIndex?'':null},p.label)));
-    program.addEventListener('change',()=>{sf2Editor.programIndex=program.value===''?null:Number(program.value);sf2Editor.volumeCustomized=false;const p=sf2Editor.programs.find(x=>x.index===sf2Editor.programIndex);if(p)sf2Editor.name=p.name;updateSf2Regions(false);renderSamples();});panel.append(sf2Field('音色',program,`${sf2Editor.sf2.name} · SF2 ${sf2Editor.sf2.version}`));if(sf2Editor.programIndex===null)return panel;
-    panel.append(el('h3',{},'使用するサウンド'));if(sf2Editor.regions.length>1)panel.append(el('p',{class:'warning','role':'status'},'この音色には複数のサウンドが重ねられています。KANTANシンセでは1つだけ使用します。試聴して選んでください。元の音色とは聴こえ方が変わる場合があります。'));
-    if(!sf2Editor.regions.length)panel.append(el('p',{class:'error'},'現在の基準音と強さに該当するサウンドがありません。詳細設定を変更してください。'));else panel.append(el('fieldset',{class:'sf2-candidates'},el('legend',{},sf2Editor.regions.length>1?'1つ選んでください':'使用されるサウンド'),sf2Editor.regions.map(sf2Candidate)));
-    const region=selectedSf2Region();panel.append(el('div',{class:'actions'},el('button',{disabled:region?null:'',onclick:()=>previewSf2Region()},'選んだサウンドを試聴'),el('button',{onclick:()=>sf2Player.stop(false,(sf2Editor.releaseMs===null?(region?region.releaseMs:0):sf2Editor.releaseMs)||0)},'停止')));if(region)panel.append(sf2VolumeControl(region));
-    const name=el('input',{type:'text',value:sf2Editor.name,maxlength:80,autocomplete:'off'});name.addEventListener('input',()=>{sf2Editor.name=name.value;sf2Editor.output=null;sf2Editor.overwrite=false;});panel.append(sf2Field('音色名',name,'保存名: '+(safeSynthName(sf2Editor.name)||'（未入力）')+'.ktsynth'));
-    const rate=el('select',{},[18000,24000,32000,48000].map(n=>el('option',{value:n,selected:n===sf2Editor.sampleRate?'':null},n/1000+' kHz')));rate.addEventListener('change',()=>{sf2Editor.sampleRate=Number(rate.value);sf2Editor.output=null;renderSamples();});const sourceFrames=region?(region.sustainMode==='loop'?region.loopEnd-region.start:region.end-region.start):0,targetFrames=region?Math.round(sourceFrames*sf2Editor.sampleRate/region.sampleRate):0,estimated=region?estimateKtSynthBytes(sf2Editor.name||'tone',targetFrames,region.sustainMode==='loop'):0,tooLarge=estimated>KTSYNTH_MAX_BYTES,tooLong=region&&sourceFrames/region.sampleRate>20;
-    panel.append(el('details',{class:'sf2-advanced'},el('summary',{},'詳細設定'),el('div',{class:'sf2-grid'},sf2Number('基準音','key',0,127,'候補も更新されます'),sf2Number('代表Velocity','velocity',1,127,'候補も更新されます'),sf2Field('サンプルレート',rate),sf2Number('Loop crossfade (ms)','crossfadeMs',0,1000),sf2Number('Attack (ms)','attackMs',0,5000,'空欄時はSoundFont値'),sf2Number('Release (ms)','releaseMs',10,2000,'空欄時はSoundFont値'),sf2Number('音程補正 (cent)','tuneOffset',-100,100),el('div',{class:'sf2-size'},el('span',{},'推定出力サイズ'),el('strong',{class:estimated>KTSYNTH_MAX_BYTES?'danger-text':''},estimated?Math.ceil(estimated/1024)+' KB':'—')))));
-    if(tooLong||tooLarge)panel.append(el('p',{class:'error',role:'alert'},tooLong?'このサウンドは20秒を超えます。短いサウンドを選んでください。':'出力が2 MiBを超えます。短いサウンドを選ぶか、サンプルレートを下げてください。'));
-    panel.append(el('div',{class:'sf2-save-row'},el('button',{class:'primary',disabled:!region||!safeSynthName(sf2Editor.name)||sf2Editor.busy||tooLong||tooLarge?'':null,onclick:saveSf2ToSd},sf2Editor.overwrite?'上書きしてSDカードに保存':'SDカードに保存'),el('button',{disabled:region&&!tooLong&&!tooLarge?null:'',onclick:downloadSf2Output},'パソコンに保存')));return panel;
+  function buildAudioOutput(){const layer=sf2Editor.audio,name=safeSynthName(sf2Editor.name);if(!layer.audio)throw new Error('Choose an audio file.');if(!layer.pitchConfirmed)throw new Error('Confirm the source pitch.');if(!name)throw new Error('Enter a sound name.');const pcm=resamplePcm(layer.audio.pcm,layer.audio.sampleRate,layer.sampleRate),bytes=encodeKtSynth([{pcm,sampleRate:layer.sampleRate,startFrame:0,endFrameExclusive:pcm.length,loopStartFrame:0,loopEndFrameExclusive:0,loopCrossfadeFrames:0,sustainMode:0,attackMs:layer.attackMs,releaseMs:layer.releaseMs,tuneCents:Math.max(-100,Math.min(100,Math.round(layer.tuneOffset||0))),defaultGainQ8:gainPercentToQ8(layer.volumePercent),rootNote:layer.pitchNote}],{name});parseKtSynth(bytes);sf2Editor.output=bytes;return bytes;}
+  function audioPanel(){
+    const panel=el('section',{class:'panel sf2-converter'},el('div',{class:'sf2-launcher'},el('h2',{},'Create from WAV / MP3'),el('button',{onclick:()=>chooseSynthMethod(null)},'Back to Input Method')));if(sf2Editor.error)panel.append(el('p',{class:'error',role:'alert'},sf2Editor.error));if(sf2Editor.busy)panel.append(el('p',{class:'sf2-working'},'Analyzing…'));const layer=sf2Editor.audio;panel.append(audioSourceCard(layer));
+    const name=el('input',{type:'text',value:sf2Editor.name,maxlength:80,autocomplete:'off'});name.addEventListener('input',()=>{sf2Editor.name=name.value;invalidateSynth();});if(layer.audio)panel.append(sf2Field('Sound Name',name,'Filename: '+(safeSynthName(sf2Editor.name)||'(not entered)')+'.ktsynth'));
+    const estimated=layer.audio?estimateKtSynthBytes(sf2Editor.name||'tone',[{frames:Math.round(layer.audio.pcm.length*layer.sampleRate/layer.audio.sampleRate),looped:false}]):0,tooLarge=estimated>KTSYNTH_MAX_BYTES,disabled=!layer.audio||!layer.pitchConfirmed||!safeSynthName(sf2Editor.name)||sf2Editor.busy||tooLarge;if(tooLarge)panel.append(el('p',{class:'error'},'The output exceeds 2 MiB. Reduce the sample rate or choose a shorter sound.'));if(layer.audio)panel.append(el('p',{class:'sf2-size'},`KTS2 · 1 layer · ${Math.ceil(estimated/1024)} KB`),devicePreviewControl(buildAudioOutput,disabled),el('div',{class:'sf2-save-row'},el('button',{class:'primary',disabled:disabled?'':null,onclick:()=>saveSynthOutput(buildAudioOutput)},sf2Editor.overwrite?'Overwrite and Save to SD Card':'Save to SD Card'),el('button',{disabled:disabled?'':null,onclick:()=>downloadSynthOutput(buildAudioOutput)},'Save to Computer')));return panel;
+  }
+  function synthConverterPanel(){
+    if(sf2Editor.savedPath){const builder=sf2Editor.method==='audio'?buildAudioOutput:buildSf2Output;return el('section',{class:'panel sf2-converter','aria-live':'polite'},el('h2',{},'Saved to SD Card'),el('p',{class:'success'},sf2Editor.savedPath),el('p',{},'You can select this sound from KANTAN Synth in the Melody, Chord, or Bass part.'),el('div',{class:'actions'},el('button',{onclick:()=>downloadSynthOutput(builder)},'Save to Computer Too'),el('button',{class:'primary',onclick:()=>{sf2Editor=newSf2Editor();sf2Editor.open=true;renderSamples();}},'Create Another Sound')));}
+    if(!sf2Editor.method)return synthMethodPanel();return sf2Editor.method==='audio'?audioPanel():sf2Panel();
   }
   function renderBeat() {
     const root = $('#beat-view');

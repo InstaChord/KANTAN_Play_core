@@ -46,7 +46,7 @@ export function noteFromFilename(filename) {
   const octave = Number(matches[0][3]);
   const note = pitchClass === undefined ? -1 : (octave + 1) * 12 + pitchClass;
   return note >= 0 && note <= 127
-    ? { note, tuneCents: 0, source: 'ファイル名', confidence: 0.9 }
+    ? { note, tuneCents: 0, source: 'Filename', confidence: 0.9 }
     : null;
 }
 
@@ -107,7 +107,7 @@ export function detectStablePitch(samples, sampleRate) {
     ? samples
     : Float32Array.from(samples, value => value / 32768);
   if (!Number.isFinite(sampleRate) || sampleRate < 8000 || pcm.length < sampleRate * 0.12) {
-    return { reliable: false, confidence: 0, reason: '素材が短すぎます' };
+    return { reliable: false, confidence: 0, reason: 'The source is too short' };
   }
   const windowLength = Math.min(4096, Math.max(2048, 2 ** Math.floor(Math.log2(pcm.length / 3))));
   if (windowLength < 1024 || pcm.length < windowLength) return { reliable: false, confidence: 0 };
@@ -131,7 +131,7 @@ export function detectStablePitch(samples, sampleRate) {
     spreadCents,
     windows: windows.length,
     reliable: confidence >= 0.72 && spreadCents <= 25,
-    source: '音声解析',
+    source: 'Audio analysis',
   };
 }
 
@@ -157,7 +157,7 @@ export function audioBufferToMonoPcm(audioBuffer) {
 export async function decodeAudioFile(file) {
   const arrayBuffer = await file.arrayBuffer();
   const Audio = globalThis.AudioContext || globalThis.webkitAudioContext;
-  if (!Audio) throw new Error('このブラウザでは音声をデコードできません。');
+  if (!Audio) throw new Error('Audio decoding is not available in this browser.');
   const context = new Audio();
   try {
     const decoded = await context.decodeAudioData(arrayBuffer.slice(0));
@@ -171,7 +171,7 @@ export async function decodeAudioFile(file) {
       suggestion: choosePitchSuggestion(arrayBuffer, file.name, pcm, decoded.sampleRate),
     };
   } catch (error) {
-    throw new Error(`音声を解析できません。WAVまたはMP3を選んでください。 (${error.message})`);
+    throw new Error(`The audio could not be analyzed. Choose a WAV or MP3 file. (${error.message})`);
   } finally {
     if (context.close) await context.close();
   }

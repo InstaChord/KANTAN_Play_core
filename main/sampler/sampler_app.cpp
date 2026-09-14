@@ -51,6 +51,7 @@
 #include "sampler_mp3.hpp"
 #include "sampler_music_player.hpp"
 #include "sampler_ktkit.hpp"
+#include "sampler_ktsynth.hpp"
 #include "sampler_performance_probe.hpp"
 
 #if defined(KANPLAY_RELEASE_SYNTH_SAM_PCM) && defined(KANPLAY_AMY_INTEGRATION)
@@ -27689,18 +27690,24 @@ static bool decode_menu_wav_preview(const uint8_t* wav, size_t wav_size, uint32_
 {
   wav_info_t info;
   if (!wav || wav_size <= 44 || max_ms == 0 || !parse_wav(wav, wav_size, &info)) { return false; }
-  uint32_t preview_frames = std::min<uint32_t>(info.frames, ((uint64_t)info.sample_rate * max_ms) / 1000);
+  ktsynth_info_t synth_info;
+  const bool ktsynth = parse_ktsynth(wav, wav_size, &synth_info);
+  const uint32_t start_frame = ktsynth ? synth_info.start_frame : 0;
+  const uint32_t end_frame = ktsynth ? synth_info.end_frame : info.frames;
+  uint32_t preview_frames = std::min<uint32_t>(end_frame - start_frame,
+    ((uint64_t)info.sample_rate * max_ms) / 1000);
   if (preview_frames == 0) { return false; }
   int16_t* pcm = audio_pcm_alloc((size_t)preview_frames * sizeof(int16_t));
   if (!pcm) { return false; }
   for (uint32_t i = 0; i < preview_frames; ++i) {
-    pcm[i] = wav_mono_frame(info, i);
+    pcm[i] = wav_mono_frame(info, start_frame + i);
   }
   menu_preview_pcm = pcm;
   menu_preview_frames = preview_frames;
   menu_preview_sample_rate = info.sample_rate;
   if (sampler_audio_t::play(menu_preview_voice, menu_preview_pcm, menu_preview_frames,
-                            menu_preview_sample_rate, false, false, 224, 256)) {
+                            menu_preview_sample_rate, false, false,
+                            ktsynth ? synth_info.default_gain_q8 : 224, 256)) {
     synth_menu_preview_sample_active = true;
     synth_menu_preview_stop_msec = M5.millis()
       + (uint32_t)(((uint64_t)menu_preview_frames * 1000u
@@ -27747,7 +27754,10 @@ static bool play_menu_audio_preview(const char* path, uint32_t max_ms)
   if (!path || !path[0] || max_ms == 0 || !kp::storage_sd.beginStorage()) { return false; }
   int size = kp::storage_sd.getFileSize(path);
   if (size <= 4 || (size_t)size > max_audio_file_size) { return false; }
-  const size_t read_size = std::min<size_t>((size_t)size, max_preview_source_size);
+  // KANTAN Synth metadata and CRC cover the full container, so read the whole
+  // validated-size file for a faithful generated-tone preview.
+  const size_t read_size = has_lower_suffix(path, ".ktsynth")
+    ? (size_t)size : std::min<size_t>((size_t)size, max_preview_source_size);
   uint8_t* tmp = temp_alloc(read_size);
   if (!tmp) { return false; }
   int len = kp::storage_sd.loadFromFileToMemory(path, tmp, read_size);

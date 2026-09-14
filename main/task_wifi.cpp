@@ -678,7 +678,7 @@ static esp_err_t response_main_handler(httpd_req_t *req)
     "<link rel=\"stylesheet\" href=\"");
   httpd_resp_sendstr_chunk(req, base);
   httpd_resp_sendstr_chunk(req,
-    "/app.css?v=088-sf2-volume\"></head><body>"
+    "/app.css?v=091-kts2-layers\"></head><body>"
     // sampler-ui/index.htmlと同じ最小シェルを本体側で返す。CSS/JSはGitHub
     // Pagesから読み、APIだけを本体のlocation.originへ向ける。
 #if defined(KANPLAY_SAMPLER)
@@ -690,18 +690,20 @@ static esp_err_t response_main_handler(httpd_req_t *req)
     "<button class=\"tab\" data-view=\"kit-view\">Kit</button>"
     "<button class=\"tab\" data-view=\"project-view\">Project</button>"
     "<button class=\"tab\" data-view=\"music-view\">Music</button>"
+    "<button class=\"tab\" data-view=\"synth-view\">Synth</button>"
     "</nav><section id=\"sample-view\" class=\"view active\"></section>"
     "<section id=\"beat-view\" class=\"view\"></section>"
     "<section id=\"kit-view\" class=\"view\"></section>"
     "<section id=\"project-view\" class=\"view\"></section>"
-    "<section id=\"music-view\" class=\"view\"></section></main>"
+    "<section id=\"music-view\" class=\"view\"></section>"
+    "<section id=\"synth-view\" class=\"view\"></section></main>"
 #else
     "<div id=\"app\" style=\"font-family:sans-serif;padding:16px\">Loading…</div>"
 #endif
     "<script>window.KANPLAY={api:location.origin};</script>"
     "<script type=\"module\" src=\"");
   httpd_resp_sendstr_chunk(req, base);
-  httpd_resp_sendstr_chunk(req, "/app.js?v=088-sf2-volume\"></script></body></html>");
+  httpd_resp_sendstr_chunk(req, "/app.js?v=091-kts2-layers\"></script></body></html>");
   httpd_resp_sendstr_chunk(req, nullptr);
   return ESP_OK;
 }

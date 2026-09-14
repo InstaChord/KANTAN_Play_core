@@ -84,6 +84,11 @@ input,select { min-width:0; border:1px solid var(--line); border-radius:4px; pad
 .pitch-controls label { display:grid; gap:5px; color:var(--muted); font-size:12px; }
 .pitch-controls select { min-height:42px; color:var(--text); font-size:16px; }
 .sf2-working,.success,.warning,.error { padding:10px; border-radius:5px; }
+.device-preview { display:grid; gap:5px; margin:8px 0 12px; padding:10px; border:1px solid #3d7285; border-radius:6px; background:#14232b; }
+.device-preview button { justify-self:start; min-height:40px; }
+.device-preview small { color:var(--muted); }
+.synth-layer { display:grid; gap:10px; margin:14px 0; padding:14px; border:1px solid #365462; border-radius:7px; background:#101c22; }
+.synth-layer h3 { margin:0; }
 .sf2-working { background:#14232b; }
 .success { background:#123426; color:#9ce6bd; }
 .warning { background:#3b2e13; color:#ffd98a; }
@@ -106,8 +111,8 @@ input,select { min-width:0; border:1px solid var(--line); border-radius:4px; pad
   #status { grid-column:1 / -1; grid-row:2; margin:0; overflow-wrap:anywhere; }
   #refresh { grid-column:2; grid-row:1; min-height:36px; }
 
-  .tabs { gap:3px; margin:0 -10px 12px; padding:0 10px; }
-  .tab { flex:1 1 0; min-height:40px; padding:8px 4px; }
+  .tabs { gap:3px; margin:0 -10px 12px; padding:0 10px; overflow-x:auto; }
+  .tab { flex:0 0 auto; min-width:76px; min-height:40px; padding:8px 7px; }
   .grid { grid-template-columns:1fr; gap:10px; }
   .panel { padding:10px; border-radius:6px; }
   .panel h2 { font-size:16px; }
@@ -148,6 +153,9 @@ input,select { min-width:0; border:1px solid var(--line); border-radius:4px; pad
   .synth-methods { grid-template-columns:1fr; }
   .sf2-save-row { align-items:stretch; flex-direction:column; }
   .sf2-save-row button { min-height:46px; }
+  .synth-layer { padding:10px; }
+  .synth-layer .sf2-launcher { align-items:stretch; flex-direction:column; }
+  .synth-layer .sf2-launcher button { align-self:flex-start; }
   .sf2-candidate { grid-template-columns:auto minmax(0,1fr); }
   .sf2-candidate button { grid-column:2; grid-row:3; justify-self:start; }
 }
