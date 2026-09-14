@@ -13865,7 +13865,7 @@ static void eject_sampler_sd(void)
   if (sd_eject_confirm_until_msec == 0
    || (int32_t)(sd_eject_confirm_until_msec - now) <= 0) {
     sd_eject_confirm_until_msec = now + 4000;
-    show_status_message("EJECT SD CARD? TAP AGAIN", 4000, true);
+    show_status_message("EJECT SD CARD? OK AGAIN", 4000, true);
     return;
   }
   sd_eject_confirm_until_msec = 0;
@@ -27135,6 +27135,25 @@ static void process_bitmask(uint32_t bitmask, uint32_t event_msec) {
     return;
   }
 
+  if (sd_eject_confirm_until_msec != 0) {
+    const bool confirmation_valid =
+      (int32_t)(sd_eject_confirm_until_msec - event_msec) > 0;
+    if (pressed_edge && confirmation_valid) {
+      // The physical OK key is button 9; ENC2 push is the alternate menu OK.
+      const uint32_t confirm_mask = (1u << 9) | bb::ENC2_PUSH;
+      menu_consumed_release_mask |= pressed_edge;
+      if (pressed_edge & confirm_mask) {
+        eject_sampler_sd();
+      } else {
+        sd_eject_confirm_until_msec = 0;
+        clear_status_message(true);
+      }
+    } else if (!confirmation_valid) {
+      sd_eject_confirm_until_msec = 0;
+    }
+    return;
+  }
+
   if (wifi_update_active || startup_update_check_active || startup_update_check_returning) {
     // Any deliberate button press cancels while Wi-Fi is still connecting.
     // Once the HTTP/flash phase begins the corresponding cancel function
@@ -27281,6 +27300,18 @@ static void process_touch(uint32_t value) {
   bool pressed = value & 1;
   int x = ((int16_t)(value & 0xFFFF)) >> 1;
   int y = ((int16_t)(value >> 16)) >> 1;
+
+  if (sd_eject_confirm_until_msec != 0) {
+    if (pressed) {
+      if ((int32_t)(sd_eject_confirm_until_msec - M5.millis()) > 0) {
+        eject_sampler_sd();
+      } else {
+        sd_eject_confirm_until_msec = 0;
+        clear_status_message(true);
+      }
+    }
+    return;
+  }
 
   if (wifi_update_active || startup_update_check_active || startup_update_check_returning) {
     if (pressed) {
