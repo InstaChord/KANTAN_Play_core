@@ -50,6 +50,16 @@ test('two descriptors can share Layer 1 PCM without KT2D or duplicate CRC input'
   const broken=bytes.slice();broken[broken.length-1]^=1;assert.throws(()=>parseKtSynth(broken),/CRC/);
 });
 
+test('Saw Lead fixture keeps shared PCM, layer settings, chunks, and CRC after re-save',async()=>{
+  const fixture=new Uint8Array(await readFile(new URL('../../Sample_Sound/KANTAN_Synth/Saw_Lead_Test-F_4.ktsynth',import.meta.url))),parsed=parseKtSynth(fixture);
+  assert.equal(parsed.verified,true);assert.equal(parsed.hasSmpl,false);assert.equal(parsed.layers.length,2);assert.equal(chunkOffset(fixture,'KT2D'),-1);
+  assert.equal(parsed.layers[0].pcmSourceLayer,0);assert.equal(parsed.layers[1].pcmSourceLayer,0);assert.equal(parsed.layers[0].pcm,parsed.layers[1].pcm);
+  for(const layer of parsed.layers){assert.equal(layer.sampleRate,48000);assert.equal(layer.frameCount,256);assert.equal(layer.rootNote,66);assert.equal(layer.loopStartFrame,64);assert.equal(layer.loopEndFrameExclusive,192);assert.equal(layer.attackMs,1);assert.equal(layer.holdMs,1);assert.equal(layer.decayMs,1000);assert.equal(layer.sustainLevelQ15,32768);assert.equal(layer.releaseMs,500);assert.equal(layer.defaultGainQ8,128);}
+  assert.equal(parsed.layers[0].tuneCents,-19);assert.equal(parsed.layers[0].delay100us,10);assert.equal(parsed.layers[1].tuneCents,-27);assert.equal(parsed.layers[1].delay100us,3);
+  const saved=encodeKtSynth(parsed.layers,{name:parsed.name},{includeSmpl:parsed.hasSmpl}),reopened=parseKtSynth(saved);
+  assert.equal(chunkOffset(saved,'KT2D'),-1);assert.equal(reopened.layers[1].pcmSourceLayer,0);assert.equal(reopened.metadata.contentCrc32,parsed.metadata.contentCrc32);assert.deepEqual(saved,fixture);
+});
+
 test('an existing KANTAN Synth can be loaded, edited and encoded again',()=>{
   const first=Int16Array.from({length:480},(_,i)=>i*3),second=Int16Array.from({length:360},(_,i)=>-i*2);
   const original=parseKtSynth(encodeKtSynth([ktsLayer(first,{rootNote:60,defaultGainQ8:256}),ktsLayer(second,{sampleRate:18000,rootNote:72,tuneCents:-7,attackMs:20,releaseMs:700,defaultGainQ8:200,loopStartFrame:40,loopEndFrameExclusive:320,loopCrossfadeFrames:20,sustainMode:1})],{name:'Editable'}));

@@ -13,11 +13,11 @@ export function crc32IsoHdlc(...parts){let crc=0xffffffff,t=table();for(const pa
 export function utf8Name(name){const encoder=new TextEncoder();let value='';for(const char of String(name)){const next=value+char;if(encoder.encode(next).length>63)break;value=next;}const bytes=encoder.encode(value);check(bytes.length>0,'Sound name cannot be empty');return{value,bytes};}
 const padded=n=>n+(n&1);
 const chunkBytes=n=>8+padded(n);
-export function estimateKtSynthBytes(name,layers){
+export function estimateKtSynthBytes(name,layers,{includeSmpl=true}={}){
   const layerList=Array.isArray(layers)?layers:[{frames:Number(layers)||0,looped:false}];
   check(layerList.length>=1&&layerList.length<=KTSYNTH_MAX_LAYERS,'One or two layers are required');
   const metadata=HEADER_BYTES+utf8Name(name).bytes.length;
-  const smpl=layerList[0]&&(layerList[0].looped||layerList[0].sustainMode===1||layerList[0].sustainMode==='loop');
+  const smpl=includeSmpl&&layerList[0]&&(layerList[0].looped||layerList[0].sustainMode===1||layerList[0].sustainMode==='loop');
   return 12+chunkBytes(16)+(smpl?chunkBytes(60):0)+chunkBytes(metadata)
     +layerList.reduce((sum,layer,index)=>(index===0||(layer.pcmSourceLayer??index)===index)?sum+chunkBytes(Math.max(0,Math.floor(layer.frames??layer.frameCount??layer.pcm?.length??0))*2):sum,0);
 }
@@ -64,7 +64,7 @@ function writeDescriptor(dv,p,m){dv.setUint32(p,m.sampleRate,true);dv.setUint32(
 function writePcm(out,dv,p,id,pcm){ascii(dv,p,id);dv.setUint32(p+4,pcm.length*2,true);for(let i=0;i<pcm.length;i++)dv.setInt16(p+8+i*2,pcm[i],true);return p+chunkBytes(pcm.length*2);}
 export function encodeKtSynth(layerInputs,input,{includeSmpl=true}={}){
   const layers=[];for(const [index,layer] of (Array.isArray(layerInputs)?layerInputs:[layerInputs]).entries())layers.push(normalizedLayer(layer,index,layers));
-  const named=utf8Name(input.name),smpl=includeSmpl&&layers[0].sustainMode===1,total=estimateKtSynthBytes(named.value,layers);
+  const named=utf8Name(input.name),smpl=includeSmpl&&layers[0].sustainMode===1,total=estimateKtSynthBytes(named.value,layers,{includeSmpl});
   const ownsLayer2=layers.length===2&&layers[1].pcmSourceLayer===1,physicalLayers=ownsLayer2?layers:[layers[0]];validateKtSynthMetadata({layers},physicalLayers.map(layer=>layer.pcm.length*2),total);
   const out=new Uint8Array(total),dv=new DataView(out.buffer);ascii(dv,0,'RIFF');dv.setUint32(4,total-8,true);ascii(dv,8,'WAVE');let p=12;
   writeFmt(dv,p,layers[0].sampleRate);p+=chunkBytes(16);if(smpl){writeSmpl(dv,p,layers[0]);p+=chunkBytes(60);}
@@ -83,5 +83,5 @@ export function parseKtSynth(input){
   check(layers[0].sampleRate===dv.getUint32(fmt.offset+4,true)&&layers[0].frameCount===data.size/2,'Layer 1 does not match fmt/data');validateKtSynthMetadata({layers},chunks.map(chunk=>chunk.size),bytes.length);
   const crcPayload=Uint8Array.from(bytes.subarray(k,k+kntn.size));new DataView(crcPayload.buffer).setUint32(16,0,true);check(crc32IsoHdlc(crcPayload,...chunks.map(chunk=>bytes.subarray(chunk.offset,chunk.offset+chunk.size)))===dv.getUint32(k+16,true),'CRC does not match');
   const smpl=cs.get('smpl');if(smpl&&layers[0].sustainMode===1){check(smpl.size>=60&&dv.getUint32(smpl.offset+28,true)>=1,'smpl loop is missing');check(dv.getUint32(smpl.offset+44,true)===layers[0].loopStartFrame&&dv.getUint32(smpl.offset+48,true)===layers[0].loopEndFrameExclusive-1,'smpl and KNTN loop ranges do not match');}
-  const name=new TextDecoder('utf-8',{fatal:true}).decode(bytes.subarray(k+header,k+header+nameBytes));return{name,layers,metadata:{name,layerCount,layers,contentCrc32:dv.getUint32(k+16,true)},verified:true};
+  const name=new TextDecoder('utf-8',{fatal:true}).decode(bytes.subarray(k+header,k+header+nameBytes));return{name,layers,hasSmpl:Boolean(smpl),metadata:{name,layerCount,layers,contentCrc32:dv.getUint32(k+16,true)},verified:true};
 }

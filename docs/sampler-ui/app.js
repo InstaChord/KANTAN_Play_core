@@ -1,6 +1,6 @@
-import { parseSf2, listSoundPrograms, initialSoundProgramIndex, resolvePresetRegions, extractRegionPcm } from './converter/sf2.js?v=094-kts2-v21';
-import { resamplePcm, trimLoopTail, PreviewPlayer } from './converter/audio.js?v=094-kts2-v21';
-import { encodeKtSynth, parseKtSynth, estimateKtSynthBytes, gainPercentToQ8, attenuationCbToGainPercent, KTSYNTH_MAX_BYTES } from './converter/ktsynth.js?v=094-kts2-v21';
+import { parseSf2, listSoundPrograms, initialSoundProgramIndex, resolvePresetRegions, extractRegionPcm } from './converter/sf2.js?v=096-kts2-fixture';
+import { resamplePcm, trimLoopTail, PreviewPlayer } from './converter/audio.js?v=096-kts2-fixture';
+import { encodeKtSynth, parseKtSynth, estimateKtSynthBytes, gainPercentToQ8, attenuationCbToGainPercent, KTSYNTH_MAX_BYTES } from './converter/ktsynth.js?v=096-kts2-fixture';
 import { decodeAudioFile, midiNoteName } from './converter/audio-input.js';
 
 (() => {
@@ -29,7 +29,7 @@ import { decodeAudioFile, midiNoteName } from './converter/audio-input.js';
   const newSf2Layer = () => ({regionId:null,pcmMode:'own',sampleRate:32000,crossfadeMs:10,delayMs:null,attackMs:null,holdMs:null,decayMs:null,sustainPercent:null,releaseMs:null,tuneOffset:0,volumePercent:100,volumeCustomized:false});
   const newAudioLayer = () => ({file:null,audio:null,pitchSuggestion:null,pitchNote:60,pitchConfirmed:false,sampleRate:32000,tuneOffset:0,volumePercent:100,delayMs:0,attackMs:0,holdMs:0,decayMs:0,sustainPercent:100,releaseMs:120});
   const newSf2Editor = () => ({open:false,method:null,file:null,sf2:null,programs:[],programIndex:null,
-    regions:[],sf2Layers:[newSf2Layer()],audio:newAudioLayer(),ktsLayers:[],key:60,velocity:110,
+    regions:[],sf2Layers:[newSf2Layer()],audio:newAudioLayer(),ktsLayers:[],includeSmpl:true,key:60,velocity:110,
     name:'',error:'',busy:false,output:null,savedPath:'',overwrite:false});
   let sf2Editor = newSf2Editor();
 
@@ -449,7 +449,7 @@ import { decodeAudioFile, midiNoteName } from './converter/audio-input.js';
     sf2Player.stop(true);sf2Editor={...newSf2Editor(),open:true,method:'ktsynth',file,busy:true};renderSamples();
     try{
       if(!/\.ktsynth$/i.test(file.name))throw new Error('Choose a .ktsynth file.');
-      const parsed=parseKtSynth(new Uint8Array(await file.arrayBuffer()));sf2Editor.name=parsed.name;
+      const parsed=parseKtSynth(new Uint8Array(await file.arrayBuffer()));sf2Editor.name=parsed.name;sf2Editor.includeSmpl=parsed.hasSmpl;
       sf2Editor.ktsLayers=parsed.layers.map((layer,index)=>({sourcePcm:layer.pcm,independentPcm:index===1&&layer.pcmSourceLayer===1?layer.pcm:null,sourceSampleRate:layer.sampleRate,sourceStartFrame:layer.startFrame,sourceEndFrame:layer.endFrameExclusive,sourceLoopStart:layer.loopStartFrame,sourceLoopEnd:layer.loopEndFrameExclusive,sustainMode:layer.sustainMode,pcmMode:index===1&&layer.pcmSourceLayer===0?'same':'own',sampleRate:layer.sampleRate,crossfadeMs:layer.sampleRate?layer.loopCrossfadeFrames*1000/layer.sampleRate:0,delayMs:layer.delay100us/10,attackMs:layer.attackMs,holdMs:layer.holdMs,decayMs:layer.decayMs,sustainPercent:q15ToPercent(layer.sustainLevelQ15),releaseMs:layer.releaseMs,tuneOffset:layer.tuneCents,volumePercent:gainQ8ToPercent(layer.defaultGainQ8),volumeCustomized:true,rootNote:layer.rootNote}));
     }catch(err){sf2Editor.error=friendlySynthError(err);}finally{sf2Editor.busy=false;invalidateSynth();renderSamples();}
   }
@@ -458,7 +458,7 @@ import { decodeAudioFile, midiNoteName } from './converter/audio-input.js';
     const loopStartFrame=looped?Math.max(startFrame,Math.min(endFrameExclusive-1,limit(settings.sourceLoopStart))):0,loopEndFrameExclusive=looped?Math.max(loopStartFrame+1,Math.min(endFrameExclusive,limit(settings.sourceLoopEnd))):0,loopLimit=looped?Math.min(65535,Math.floor((loopEndFrameExclusive-loopStartFrame)/4)):0,loopCrossfadeFrames=looped?Math.max(0,Math.min(loopLimit,Math.round(settings.crossfadeMs*outputRate/1000))):0;
     return{pcm,pcmSourceLayer:shared?0:index,sampleRate:outputRate,startFrame,endFrameExclusive,loopStartFrame,loopEndFrameExclusive,loopCrossfadeFrames,sustainMode:looped?1:0,delayMs:settings.delayMs,attackMs:Math.round(settings.attackMs),holdMs:Math.round(settings.holdMs),decayMs:Math.round(settings.decayMs),sustainLevelQ15:percentToQ15(settings.sustainPercent),releaseMs:Math.round(settings.releaseMs),tuneCents:Math.max(-100,Math.min(100,Math.round(settings.tuneOffset||0))),defaultGainQ8:gainPercentToQ8(settings.volumePercent),rootNote:Math.round(settings.rootNote)};
   }
-  function buildImportedKtsOutput(){const name=safeSynthName(sf2Editor.name);if(!sf2Editor.ktsLayers.length)throw new Error('Choose a KANTAN Synth file.');if(!name)throw new Error('Enter a sound name.');const layers=[];sf2Editor.ktsLayers.forEach((settings,index)=>layers.push(buildImportedKtsLayer(settings,index,layers)));const bytes=encodeKtSynth(layers,{name});parseKtSynth(bytes);sf2Editor.output=bytes;return bytes;}
+  function buildImportedKtsOutput(){const name=safeSynthName(sf2Editor.name);if(!sf2Editor.ktsLayers.length)throw new Error('Choose a KANTAN Synth file.');if(!name)throw new Error('Enter a sound name.');const layers=[];sf2Editor.ktsLayers.forEach((settings,index)=>layers.push(buildImportedKtsLayer(settings,index,layers)));const bytes=encodeKtSynth(layers,{name},{includeSmpl:sf2Editor.includeSmpl});parseKtSynth(bytes);sf2Editor.output=bytes;return bytes;}
   async function previewImportedKtsLayer(settings){
     try{const index=sf2Editor.ktsLayers.indexOf(settings),built=[];for(let i=0;i<=index;i++)built.push(buildImportedKtsLayer(sf2Editor.ktsLayers[i],i,built));const layer=built[index];await sf2Player.play(layer.pcm,{sampleRate:layer.sampleRate,previewNote:layer.rootNote,rootNote:layer.rootNote,tuneCents:layer.tuneCents,sustainMode:layer.sustainMode===1?'loop':'off',loopStart:layer.loopStartFrame,loopEnd:layer.loopEndFrameExclusive,delayMs:layer.delayMs,attackMs:layer.attackMs,holdMs:layer.holdMs,decayMs:layer.decayMs,sustainLevelQ15:layer.sustainLevelQ15,releaseMs:layer.releaseMs,gainQ8:layer.defaultGainQ8});sf2Editor.error='';}
     catch(err){sf2Editor.error='Could not preview: '+err.message;renderSamples();}
@@ -473,7 +473,7 @@ import { decodeAudioFile, midiNoteName } from './converter/audio-input.js';
     const file=el('input',{type:'file',accept:'.ktsynth,application/vnd.instachord.ktsynth'});file.addEventListener('change',()=>file.files[0]&&loadKtSynth(file.files[0]));const panel=el('section',{class:'panel sf2-converter'},el('div',{class:'sf2-launcher'},el('h2',{},'Edit Synth'),el('button',{onclick:()=>chooseSynthMethod(null)},'Back')),sf2Field('Synth File',file,sf2Editor.file?sf2Editor.file.name:'Choose .ktsynth'));
     if(sf2Editor.busy)panel.append(el('p',{class:'sf2-working','aria-live':'polite'},'Processing…'));if(sf2Editor.error)panel.append(el('p',{class:'error',role:'alert'},sf2Editor.error));if(!sf2Editor.ktsLayers.length)return panel;
     sf2Editor.ktsLayers.forEach((layer,index)=>panel.append(importedKtsLayerCard(layer,index)));
-    const estimated=estimateKtSynthBytes(sf2Editor.name||'tone',sf2Editor.ktsLayers.map((layer,index)=>({frames:Math.round(layer.sourcePcm.length*layer.sampleRate/layer.sourceSampleRate),looped:layer.sustainMode===1,pcmSourceLayer:index===1&&layer.pcmMode==='same'?0:index}))),gainTooHigh=totalLayerGain(sf2Editor.ktsLayers)>512,tooLarge=estimated>KTSYNTH_MAX_BYTES;if(gainTooHigh)panel.append(el('p',{class:'error'},'Combined Layer 1 and Layer 2 volume cannot exceed 200%.'));if(tooLarge)panel.append(el('p',{class:'error'},'The output exceeds 2 MiB. Reduce a sample rate.'));
+    const estimated=estimateKtSynthBytes(sf2Editor.name||'tone',sf2Editor.ktsLayers.map((layer,index)=>({frames:Math.round(layer.sourcePcm.length*layer.sampleRate/layer.sourceSampleRate),looped:layer.sustainMode===1,pcmSourceLayer:index===1&&layer.pcmMode==='same'?0:index})),{includeSmpl:sf2Editor.includeSmpl}),gainTooHigh=totalLayerGain(sf2Editor.ktsLayers)>512,tooLarge=estimated>KTSYNTH_MAX_BYTES;if(gainTooHigh)panel.append(el('p',{class:'error'},'Combined Layer 1 and Layer 2 volume cannot exceed 200%.'));if(tooLarge)panel.append(el('p',{class:'error'},'The output exceeds 2 MiB. Reduce a sample rate.'));
     const name=el('input',{type:'text',value:sf2Editor.name,maxlength:80,autocomplete:'off'});name.addEventListener('input',()=>{sf2Editor.name=name.value;invalidateSynth();});panel.append(sf2Field('Sound Name',name,'Filename: '+(safeSynthName(sf2Editor.name)||'(not entered)')+'.ktsynth'),el('p',{class:'sf2-size'},`KTS2 · ${sf2Editor.ktsLayers.length} layer${sf2Editor.ktsLayers.length===1?'':'s'} · ${Math.ceil(estimated/1024)} KB`));
     const disabled=!safeSynthName(sf2Editor.name)||sf2Editor.busy||gainTooHigh||tooLarge;panel.append(devicePreviewControl(buildImportedKtsOutput,disabled),el('div',{class:'sf2-save-row'},el('button',{class:'primary',disabled:disabled?'':null,onclick:()=>saveSynthOutput(buildImportedKtsOutput)},sf2Editor.overwrite?'Overwrite on SD':'Save to SD'),el('button',{disabled:disabled?'':null,onclick:()=>downloadSynthOutput(buildImportedKtsOutput)},'Download')));return panel;
   }
