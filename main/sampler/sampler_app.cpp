@@ -1860,7 +1860,8 @@ static bool load_audio_beat_memory(const uint8_t* data, size_t len, const char* 
 static uint8_t* temp_alloc(size_t bytes);
 static void clear_menu_preview(void);
 static bool play_sound_page_preview(void);
-static bool play_menu_audio_preview(const char* path, uint32_t max_ms);
+static bool play_menu_audio_preview(const char* path, uint32_t max_ms,
+                                    bool hold_synth = false);
 static bool play_menu_builtin_preview(const char* builtin_id, uint32_t max_ms);
 static bool play_menu_builtin_background_preview(const char* builtin_id, uint32_t max_ms);
 static const background_source_t* find_builtin_audio_beat(const char* builtin_id);
@@ -27686,7 +27687,8 @@ static void preview_synth_menu_selection(void)
   }
 }
 
-static bool decode_menu_wav_preview(const uint8_t* wav, size_t wav_size, uint32_t max_ms)
+static bool decode_menu_wav_preview(const uint8_t* wav, size_t wav_size, uint32_t max_ms,
+                                    bool hold_synth = false)
 {
   wav_info_t info;
   if (!wav || wav_size <= 44 || max_ms == 0 || !parse_wav(wav, wav_size, &info)) { return false; }
@@ -27694,8 +27696,10 @@ static bool decode_menu_wav_preview(const uint8_t* wav, size_t wav_size, uint32_
   const bool ktsynth = parse_ktsynth(wav, wav_size, &synth_info);
   const uint32_t start_frame = ktsynth ? synth_info.start_frame : 0;
   const uint32_t end_frame = ktsynth ? synth_info.end_frame : info.frames;
-  uint32_t preview_frames = std::min<uint32_t>(end_frame - start_frame,
-    ((uint64_t)info.sample_rate * max_ms) / 1000);
+  uint32_t preview_frames = hold_synth && ktsynth
+    ? end_frame - start_frame
+    : std::min<uint32_t>(end_frame - start_frame,
+        ((uint64_t)info.sample_rate * max_ms) / 1000);
   if (preview_frames == 0) { return false; }
   int16_t* pcm = audio_pcm_alloc((size_t)preview_frames * sizeof(int16_t));
   if (!pcm) { return false; }
@@ -27705,11 +27709,29 @@ static bool decode_menu_wav_preview(const uint8_t* wav, size_t wav_size, uint32_
   menu_preview_pcm = pcm;
   menu_preview_frames = preview_frames;
   menu_preview_sample_rate = info.sample_rate;
-  if (sampler_audio_t::play(menu_preview_voice, menu_preview_pcm, menu_preview_frames,
-                            menu_preview_sample_rate, false, false,
-                            ktsynth ? synth_info.default_gain_q8 : 224, 256)) {
+  const bool sustain = hold_synth && ktsynth
+                    && synth_info.sustain_mode == ktsynth_sustain_mode_t::loop;
+  const uint32_t sustain_start = sustain
+    ? synth_info.loop_start_frame - start_frame : 0;
+  const uint32_t sustain_end = sustain
+    ? synth_info.loop_end_frame - start_frame : 0;
+  const bool started = hold_synth && ktsynth
+    ? sampler_audio_t::playSynth(menu_preview_voice, menu_preview_pcm, menu_preview_frames,
+        menu_preview_sample_rate, sustain, false, synth_info.default_gain_q8, 256,
+        synth_info.attack_ms, synth_info.release_ms, sustain_start, sustain_end,
+        (uint16_t)synth_info.loop_crossfade_frames, 0)
+    : sampler_audio_t::play(menu_preview_voice, menu_preview_pcm, menu_preview_frames,
+        menu_preview_sample_rate, false, false,
+        ktsynth ? synth_info.default_gain_q8 : 224, 256);
+  if (started) {
+    if (hold_synth && ktsynth) {
+      const uint16_t tune_scale_q12 = (uint16_t)std::clamp<int>(
+        (int)lroundf(powf(2.0f, (float)synth_info.tune_cents / 1200.0f) * 4096.0f),
+        2048, 8192);
+      sampler_audio_t::setVoicePitchScaleQ12(menu_preview_voice, tune_scale_q12);
+    }
     synth_menu_preview_sample_active = true;
-    synth_menu_preview_stop_msec = M5.millis()
+    synth_menu_preview_stop_msec = hold_synth && ktsynth ? 0 : M5.millis()
       + (uint32_t)(((uint64_t)menu_preview_frames * 1000u
                   + menu_preview_sample_rate - 1u) / menu_preview_sample_rate);
     return true;
@@ -27741,7 +27763,7 @@ static bool decode_menu_mp3_preview(const uint8_t* data, size_t size, uint32_t m
   return false;
 }
 
-static bool play_menu_audio_preview(const char* path, uint32_t max_ms)
+static bool play_menu_audio_preview(const char* path, uint32_t max_ms, bool hold_synth)
 {
   static constexpr const size_t max_audio_file_size = 3200 * 1024;
   // A preview never needs the entire Long Sample. One MiB covers two seconds
@@ -27765,7 +27787,7 @@ static bool play_menu_audio_preview(const char* path, uint32_t max_ms)
   if (len > 4) {
     result = has_lower_suffix(path, ".mp3")
       ? decode_menu_mp3_preview(tmp, (size_t)len, max_ms)
-      : decode_menu_wav_preview(tmp, (size_t)len, max_ms);
+      : decode_menu_wav_preview(tmp, (size_t)len, max_ms, hold_synth);
   }
   free(tmp);
   return result;
@@ -32146,6 +32168,10 @@ static void service_sampler_web_command(void)
     stop_all_audio();
     return;
   }
+  if (strcmp(action, "stopSynthPreview") == 0) {
+    clear_menu_preview();
+    return;
+  }
   if (strcmp(action, "previewWav") == 0) {
     const char* path = doc["file"] | "";
     if (strncmp(path, "builtin:", 8) == 0) {
@@ -32161,7 +32187,7 @@ static void service_sampler_web_command(void)
       // アサイン前のSD上音源を専用プレビューVoiceへ短時間だけ展開する。
       // Padプールと設定は変更しない。
       uint32_t max_ms = std::clamp<uint32_t>(doc["maxMs"] | 2000, 250, 2000);
-      play_menu_audio_preview(path, max_ms);
+      play_menu_audio_preview(path, max_ms, doc["hold"] | false);
     }
     return;
   }

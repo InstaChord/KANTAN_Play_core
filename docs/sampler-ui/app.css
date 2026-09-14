@@ -39,6 +39,7 @@ input,select { min-width:0; border:1px solid var(--line); border-radius:4px; pad
 .upload-dropzone.has-files { border-style:solid; border-color:#3d879f; }
 .upload-dropzone.disabled { opacity:.6; pointer-events:none; }
 .upload-area > button { min-width:112px; }
+.synth-upload { grid-template-columns:1fr; }
 .upload-progress { margin:8px 0 12px; padding:9px 10px; border:1px solid #3d7285; border-radius:5px; background:#14232b; }
 .upload-progress[hidden] { display:none; }
 .upload-progress-head { display:flex; align-items:center; gap:7px; min-height:20px; color:var(--text); }
@@ -85,7 +86,8 @@ input,select { min-width:0; border:1px solid var(--line); border-radius:4px; pad
 .pitch-controls select { min-height:42px; color:var(--text); font-size:16px; }
 .sf2-working,.success,.warning,.error { padding:10px; border-radius:5px; }
 .device-preview { display:grid; gap:5px; margin:8px 0 12px; padding:10px; border:1px solid #3d7285; border-radius:6px; background:#14232b; }
-.device-preview button { justify-self:start; min-height:40px; }
+.device-preview button { min-height:40px; }
+.device-preview .actions { margin-top:0; }
 .device-preview small { color:var(--muted); }
 .synth-layer { display:grid; gap:10px; margin:14px 0; padding:14px; border:1px solid #365462; border-radius:7px; background:#101c22; }
 .synth-layer h3 { margin:0; }

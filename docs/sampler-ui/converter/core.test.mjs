@@ -123,6 +123,7 @@ test('the simple UI keeps layered selection and primary save in the visible flow
   const source=await readFile(new URL('../app.js',import.meta.url),'utf8');
   const html=await readFile(new URL('../index.html',import.meta.url),'utf8');
   const api=await readFile(new URL('../../../main/sampler/sampler_web_api.cpp',import.meta.url),'utf8');
+  const firmware=await readFile(new URL('../../../main/sampler/sampler_app.cpp',import.meta.url),'utf8');
   const parser=await readFile(new URL('../../../main/sampler/sampler_ktsynth.hpp',import.meta.url),'utf8');
   assert.match(source,/Sounds/);assert.match(source,/Choose up to 2/);
   assert.match(source,/sf2Layers:\[newSf2Layer\(\)\]/);assert.match(source,/type:'checkbox'/);
@@ -145,6 +146,9 @@ test('the simple UI keeps layered selection and primary save in the visible flow
   assert.match(source,/Synth Sound/);assert.match(source,/Bass, Melody, and Chord/);
   assert.doesNotMatch(source,/external server|within this browser/i);
   assert.match(source,/unsupported features are ignored/i);assert.match(source,/Play on KANTAN Sampler/);
+  assert.match(source,/function synthFilePicker/);assert.match(source,/addEventListener\('drop'/);assert.match(source,/WAV or MP3 · max 20 sec/);
+  assert.match(source,/hold:true/);assert.match(source,/stopSynthPreview/);assert.match(source,/'Off'/);
+  assert.match(firmware,/doc\["hold"\]/);assert.match(firmware,/playSynth\(menu_preview_voice/);assert.match(firmware,/strcmp\(action, "stopSynthPreview"\)/);
   assert.match(source,/\/api\/sampler\/preview-ktsynth/);assert.match(source,/\.web-preview\.ktsynth/);
   assert.match(api,/response_ktsynth_preview/);assert.match(api,/Synth\/\.web-preview\.ktsynth/);
   assert.match(parser,/memcmp\(metadata, "KTS2", 4\)/);assert.match(parser,/"KT2D"/);
