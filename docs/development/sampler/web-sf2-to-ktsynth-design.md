@@ -11,7 +11,7 @@
 
 KANTANシンセ作成は Sample / Beat / Kit / Project / Music に続く独立した `Synth` タブに置く。WEBファイラーの表示文言は英語で統一し、最初に `Create from SoundFont (.sf2)`、`Create from WAV / MP3`、`Edit a KANTAN Synth File` から選ぶ。変換開始後も入力方法に戻れるようにし、スマートフォンではタブ列を横スクロール可能にして主操作が切れない一列レイアウトにする。
 
-既存のKTS2 `.ktsynth` は1〜2レイヤーのPCMと各レイヤー設定を検証後に読み込み、SF2変換後と同じレイヤーカードで音量、サンプルレート、root note、pitch correction、Attack、Release、Loop crossfadeを変更して再保存できる。サンプルレート変更時は再生範囲とLoop範囲も同じ比率で変換する。元のSF2にあったプリセット構造、generator、modulator、フィルター、LFO、エフェクトなどはKTS2に含まれないため復元対象外とする。
+既存のKTS2 v2.1 `.ktsynth` は1〜2レイヤーのPCMと各レイヤー設定を検証後に読み込み、SF2変換後と同じレイヤーカードで音量、サンプルレート、root note、pitch correction、Delay、Attack、Hold、Decay、Sustain、Release、Loop crossfadeを変更して再保存できる。サンプルレート変更時は再生範囲とLoop範囲も同じ比率で変換する。旧v2.0互換出力は行わない。元のSF2にあったプリセット構造、generator、modulator、フィルター、LFO、エフェクトなどはKTS2に含まれないため復元対象外とする。
 
 SF2の簡易設定には SoundFont、音色、使用するサウンド、試聴、音量、音色名、主操作「SDカードに保存」を常時表示する。音量はSF2のinitial attenuationから求めた値を初期値として0〜200%で調整し、試聴と `.ktsynth` の `defaultGainQ8`（0〜512）へ同じ値を反映する。100%を標準とし、100%超では音割れの可能性を案内する。
 
@@ -19,11 +19,11 @@ SF2の簡易設定には SoundFont、音色、使用するサウンド、試聴�
 
 > Choose one or two sounds. The second selection becomes Layer 2. Unsupported SoundFont features are ignored.
 
-各カードはサンプル名と楽器名を主表示し、音域・強さは補足表示に留め、個別の試聴ボタンとチェックボックスを持つ。候補を選ぶまで生成・保存はできない。詳細設定の基準音または代表Velocityで候補が変わった場合、カードを即時再描画し、同一候補が残らない限り選択を解除する。音量、サンプルレート、Loop crossfade、Attack、Release、音程補正はLayerごとに独立させ、2層の音量合計は200%以下とする。
+各カードはサンプル名と楽器名を主表示し、音域・強さは補足表示に留め、個別の試聴ボタンとチェックボックスを持つ。候補を選ぶまで生成・保存はできない。詳細設定の基準音または代表Velocityで候補が変わった場合、カードを即時再描画し、同一候補が残らない限り選択を解除する。音量、サンプルレート、Loop crossfade、Delay、Attack、Hold、Decay、Sustain、Release、音程補正はLayerごとに独立させ、2層の音量合計は200%以下とする。Layer 2には `Same waveform as Layer 1` / `Different waveform` を表示する。同一Region波形の場合は前者を初期値とし、`pcmSourceLayer=0`でLayer 0のdataを共有してKT2Dを出力しない。別波形は`pcmSourceLayer=1`としてKT2Dへ格納する。
 
 SF2 generatorにKANTANシンセが再現しないフィルター、LFO、エフェクトなどが含まれる場合も変換を止めない。対象名を「変換時に無視される非対応機能」として警告し、対応している波形、root key/tuning、Loop、Envelope、音量だけで保存する。
 
-詳細設定には基準音、代表Velocity、サンプルレート、Loop crossfade、Attack、Release、音程補正、推定出力サイズを置く。完了画面には `/sampler/samples/Synth/<name>.ktsynth` と、本体のMelody／Chord／Bassから選べることを示す。PC保存は補助操作とする。
+詳細設定には基準音、代表Velocity、サンプルレート、Loop crossfade、DAHDSR Envelope、音程補正、推定出力サイズを置く。SF2のpreset global/localとinstrument global/localを合成し、timecentsをミリ秒、sustainVolEnvをQ15へ変換する。generator 33/35/36/37/38を実値として出力し、generator 50はendloopAddrsCoarseOffsetとしてLoop終端へ加算する。完了画面には `/sampler/samples/Synth/<name>.ktsynth` と、本体のMelody／Chord／Bassから選べることを示す。PC保存は補助操作とする。
 
 ### WAV／MP3の音程と容量
 

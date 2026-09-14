@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {resolvePresetRegions,extractRegionPcm,initialSoundProgramIndex} from './sf2.js';
-import {resamplePcm,applyLoopCrossfade} from './audio.js';
+import {resolvePresetRegions,extractRegionPcm,initialSoundProgramIndex,sustainCentibelsToQ15} from './sf2.js';
+import {resamplePcm,applyLoopCrossfade,PreviewPlayer} from './audio.js';
 import {crc32IsoHdlc,encodeKtSynth,parseKtSynth,validateKtSynthMetadata,gainPercentToQ8,attenuationCbToGainPercent,KTSYNTH_MAX_BYTES} from './ktsynth.js';
 import {detectStablePitch,midiNoteName,noteFromFilename,parseWavUnityNote} from './audio-input.js';
 
 const gen=(op,raw)=>({op,raw,signed:raw>32767?raw-65536:raw,lo:raw&255,hi:raw>>>8});
+const signedGen=(op,value)=>gen(op,value<0?value+65536:value);
 const zone=(...entries)=>({entries,byOp:new Map(entries.map(g=>[g.op,g]))});
 function layeredSf2(){
   const samples=Int16Array.from({length:64},(_,i)=>Math.round(Math.sin(i/5)*12000));
@@ -20,21 +21,33 @@ test('a layered tone exposes every matching sound instead of choosing the first'
   assert.deepEqual([...extractRegionPcm(sf2,regions[1]).pcm],[...sf2.samples.slice(32,64)]);
 });
 
-const ktsLayer=(pcm,overrides={})=>({pcm,sampleRate:24000,startFrame:0,endFrameExclusive:pcm.length,loopStartFrame:0,loopEndFrameExclusive:0,loopCrossfadeFrames:0,sustainMode:0,attackMs:10,releaseMs:400,tuneCents:0,defaultGainQ8:256,rootNote:60,...overrides});
+test('preset and instrument global/local envelope generators are combined',()=>{
+  const sf2={samples:new Int16Array(40000),presets:[{name:'Envelope',zones:[zone(signedGen(33,-1200),gen(37,100)),zone(gen(41,0),signedGen(33,1200))]}],instruments:[{name:'Combined',zones:[zone(signedGen(35,-1200),signedGen(36,0)),zone(gen(53,0),signedGen(38,1200),gen(37,100),gen(50,1))]}],sampleHeaders:[{name:'Wave',start:0,end:40000,startLoop:100,endLoop:200,sampleRate:32000,originalPitch:60,pitchCorrection:0,sampleLink:0,sampleType:1}]};
+  const region=resolvePresetRegions(sf2,0,60,110)[0];assert.equal(region.delayMs,1000);assert.equal(region.attackMs,1);assert.equal(region.holdMs,500);assert.equal(region.decayMs,1000);assert.equal(region.sustainLevelQ15,sustainCentibelsToQ15(200));assert.equal(region.releaseMs,2000);assert.equal(region.loopEnd,200+32768);
+  const ids=resolvePresetRegions({...sf2,instruments:[{...sf2.instruments[0],zones:[sf2.instruments[0].zones[0],sf2.instruments[0].zones[1],zone(gen(53,0),signedGen(52,7))]}]},0,60,110).map(item=>item.id);assert.equal(new Set(ids).size,2);
+});
+
+const ktsLayer=(pcm,overrides={})=>({pcm,sampleRate:24000,startFrame:0,endFrameExclusive:pcm.length,loopStartFrame:0,loopEndFrameExclusive:0,loopCrossfadeFrames:0,sustainMode:0,delayMs:0,attackMs:10,holdMs:0,decayMs:0,sustainLevelQ15:32768,releaseMs:400,tuneCents:0,defaultGainQ8:256,rootNote:60,...overrides});
 function chunkOffset(bytes,id){const dv=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);for(let p=12;p+8<=bytes.length;){const size=dv.getUint32(p+4,true);if(String.fromCharCode(...bytes.subarray(p,p+4))===id)return p;p+=8+size+(size&1);}return-1;}
 
 test('single-layer KTS2 resampling, crossfade and verification round-trip',()=>{
   const source=Int16Array.from({length:640},(_,i)=>Math.round(Math.sin(i/11)*14000));
   const pcm=resamplePcm(source,32000,24000),mixed=applyLoopCrossfade(pcm,60,420,20);
   const bytes=encodeKtSynth([ktsLayer(mixed.pcm,{loopStartFrame:60,loopEndFrameExclusive:420,loopCrossfadeFrames:mixed.frames,sustainMode:1})],{name:'Web Tone'});
-  const parsed=parseKtSynth(bytes);assert.ok(bytes.length<KTSYNTH_MAX_BYTES);assert.equal(parsed.verified,true);assert.equal(parsed.metadata.layerCount,1);assert.equal(new TextDecoder().decode(bytes.subarray(chunkOffset(bytes,'KNTN')+8,chunkOffset(bytes,'KNTN')+12)),'KTS2');
+  const parsed=parseKtSynth(bytes),kntn=chunkOffset(bytes,'KNTN'),dv=new DataView(bytes.buffer);assert.ok(bytes.length<KTSYNTH_MAX_BYTES);assert.equal(parsed.verified,true);assert.equal(parsed.metadata.layerCount,1);assert.equal(new TextDecoder().decode(bytes.subarray(kntn+8,kntn+12)),'KTS2');assert.equal(dv.getUint16(kntn+14,true),1);
   bytes[bytes.length-1]^=1;assert.throws(()=>parseKtSynth(bytes),/CRC/);
 });
 
 test('two-layer KTS2 preserves independent rate, root, loop and gain',()=>{
   const a=Int16Array.from({length:480},(_,i)=>i*3),b=Int16Array.from({length:360},(_,i)=>-i*2);
-  const bytes=encodeKtSynth([ktsLayer(a,{sampleRate:24000,rootNote:60,defaultGainQ8:300}),ktsLayer(b,{sampleRate:18000,rootNote:72,tuneCents:-7,defaultGainQ8:212,loopStartFrame:40,loopEndFrameExclusive:320,loopCrossfadeFrames:20,sustainMode:1})],{name:'Dual Tone'});
-  const parsed=parseKtSynth(bytes);assert.equal(parsed.metadata.layerCount,2);assert.equal(parsed.layers[0].sampleRate,24000);assert.equal(parsed.layers[1].sampleRate,18000);assert.equal(parsed.layers[1].rootNote,72);assert.equal(parsed.layers[1].tuneCents,-7);assert.equal(parsed.layers[1].loopEndFrameExclusive,320);assert.equal(parsed.layers[0].defaultGainQ8+parsed.layers[1].defaultGainQ8,512);assert.ok(chunkOffset(bytes,'KT2D')>0);
+  const bytes=encodeKtSynth([ktsLayer(a,{sampleRate:24000,rootNote:60,defaultGainQ8:300}),ktsLayer(b,{sampleRate:18000,pcmSourceLayer:1,rootNote:72,tuneCents:-7,delayMs:1.2,holdMs:9,decayMs:1200,sustainLevelQ15:16384,releaseMs:8000,defaultGainQ8:212,loopStartFrame:40,loopEndFrameExclusive:320,loopCrossfadeFrames:20,sustainMode:1})],{name:'Dual Tone'});
+  const parsed=parseKtSynth(bytes);assert.equal(parsed.metadata.layerCount,2);assert.equal(parsed.layers[0].sampleRate,24000);assert.equal(parsed.layers[1].sampleRate,18000);assert.equal(parsed.layers[1].pcmSourceLayer,1);assert.equal(parsed.layers[1].rootNote,72);assert.equal(parsed.layers[1].tuneCents,-7);assert.equal(parsed.layers[1].delay100us,12);assert.equal(parsed.layers[1].holdMs,9);assert.equal(parsed.layers[1].decayMs,1200);assert.equal(parsed.layers[1].sustainLevelQ15,16384);assert.equal(parsed.layers[1].releaseMs,8000);assert.equal(parsed.layers[1].loopEndFrameExclusive,320);assert.equal(parsed.layers[0].defaultGainQ8+parsed.layers[1].defaultGainQ8,512);assert.ok(chunkOffset(bytes,'KT2D')>0);
+});
+
+test('two descriptors can share Layer 1 PCM without KT2D or duplicate CRC input',()=>{
+  const pcm=Int16Array.from({length:480},(_,i)=>i*5-1000),shared={...ktsLayer(pcm,{pcmSourceLayer:0,defaultGainQ8:200,tuneCents:17,delayMs:.3,attackMs:40,holdMs:80,decayMs:900,sustainLevelQ15:12000,releaseMs:6000}),pcm:undefined},bytes=encodeKtSynth([ktsLayer(pcm,{defaultGainQ8:256,tuneCents:-5}),shared],{name:'Shared Wave'}),parsed=parseKtSynth(bytes);
+  assert.equal(chunkOffset(bytes,'KT2D'),-1);assert.equal(parsed.layers[1].pcmSourceLayer,0);assert.equal(parsed.layers[1].pcm,parsed.layers[0].pcm);assert.equal(parsed.layers[1].tuneCents,17);assert.equal(parsed.layers[1].delay100us,3);assert.equal(parsed.layers[1].sustainLevelQ15,12000);assert.equal(parsed.layers[1].releaseMs,6000);
+  const broken=bytes.slice();broken[broken.length-1]^=1;assert.throws(()=>parseKtSynth(broken),/CRC/);
 });
 
 test('an existing KANTAN Synth can be loaded, edited and encoded again',()=>{
@@ -53,17 +66,19 @@ test('SF2 volume maps consistently between percent, attenuation and KTSYNTH gain
 });
 
 test('duration and 2 MiB limits fail instead of truncating',()=>{
-  const base={sampleRate:48000,frameCount:1,startFrame:0,endFrameExclusive:1,rootNote:60,tuneCents:0,attackMs:0,releaseMs:120,defaultGainQ8:256,sustainMode:0,loopStartFrame:0,loopEndFrameExclusive:0,loopCrossfadeFrames:0,pcmChunk:0};
+  const base={sampleRate:48000,frameCount:1,startFrame:0,endFrameExclusive:1,rootNote:60,tuneCents:0,delay100us:0,attackMs:0,holdMs:0,decayMs:0,sustainLevelQ15:32768,releaseMs:120,defaultGainQ8:256,sustainMode:0,loopStartFrame:0,loopEndFrameExclusive:0,loopCrossfadeFrames:0,pcmSourceLayer:0,envelopeFlags:0};
   assert.throws(()=>validateKtSynthMetadata({...base,frameCount:48000*21,endFrameExclusive:48000*21},48000*21*2),/20 seconds/);
   assert.throws(()=>validateKtSynthMetadata(base,2,KTSYNTH_MAX_BYTES+1),/2 MiB/);
-  assert.throws(()=>validateKtSynthMetadata({layers:[base,{...base,pcmChunk:1,defaultGainQ8:257}]},[2,2]),/Combined layer volume/);
+  assert.throws(()=>validateKtSynthMetadata({layers:[base,{...base,pcmSourceLayer:1,defaultGainQ8:257}]},[2,2]),/Combined layer volume/);
+  assert.throws(()=>validateKtSynthMetadata({...base,releaseMs:10001},2),/10000 ms/);assert.throws(()=>validateKtSynthMetadata({...base,sustainLevelQ15:32769},2),/sustain level/);
 });
 
-test('KTS2 rejects missing or duplicate KT2D and layerCount mismatch',()=>{
+test('KTS2 v2.1 rejects PCM-source/chunk mismatches, duplicates and v2.0',()=>{
   const pcm=new Int16Array(32),dual=encodeKtSynth([ktsLayer(pcm,{defaultGainQ8:256}),ktsLayer(pcm,{defaultGainQ8:256})],{name:'Checks'}),kt2d=chunkOffset(dual,'KT2D'),kntn=chunkOffset(dual,'KNTN');
-  const missing=dual.slice(0,kt2d);new DataView(missing.buffer).setUint32(4,missing.length-8,true);assert.throws(()=>parseKtSynth(missing),/layerCount does not match KT2D/);
-  const mismatch=dual.slice();mismatch[kntn+8+20]=1;assert.throws(()=>parseKtSynth(mismatch),/layerCount does not match KT2D/);
+  const missing=dual.slice(0,kt2d);new DataView(missing.buffer).setUint32(4,missing.length-8,true);assert.throws(()=>parseKtSynth(missing),/PCM source descriptors/);
+  const mismatch=dual.slice();mismatch[kntn+8+20]=1;assert.throws(()=>parseKtSynth(mismatch),/Unused Layer 2 descriptor|PCM source descriptors/);
   const chunk=dual.slice(kt2d),duplicate=new Uint8Array(dual.length+chunk.length);duplicate.set(dual);duplicate.set(chunk,dual.length);new DataView(duplicate.buffer).setUint32(4,duplicate.length-8,true);assert.throws(()=>parseKtSynth(duplicate),/duplicated/);
+  const old=dual.slice();new DataView(old.buffer).setUint16(kntn+14,0,true);assert.throws(()=>parseKtSynth(old),/Unsupported KNTN version/);
 });
 
 function wavWithUnityNote(note,fraction=0){
@@ -87,6 +102,13 @@ test('multi-window pitch detection accepts a stable single tone and rejects nois
   assert.equal(detectStablePitch(noise,rate).reliable,false);
 });
 
+test('browser preview schedules Delay, Attack, Hold, Decay and Sustain before playback',async()=>{
+  const events=[],parameter={value:0,setValueAtTime:(value,time)=>events.push(['set',value,time]),linearRampToValueAtTime:(value,time)=>events.push(['ramp',value,time]),cancelScheduledValues:()=>{},setTargetAtTime:()=>{}},source={playbackRate:{value:1},connect:gain=>gain,start:time=>events.push(['start',time]),stop:()=>{}},gain={gain:parameter,connect:()=>({})};
+  class AudioContextMock{constructor(){this.currentTime=2;this.destination={};}resume(){return Promise.resolve();}createBuffer(){return{getChannelData:()=>new Float32Array(8)};}createBufferSource(){return source;}createGain(){return gain;}}
+  global.window={AudioContext:AudioContextMock};const player=new PreviewPlayer();await player.play(new Int16Array(8),{sampleRate:8000,previewNote:60,rootNote:60,tuneCents:0,sustainMode:'off',loopStart:0,loopEnd:0,delayMs:100,attackMs:200,holdMs:300,decayMs:400,sustainLevelQ15:16384,releaseMs:900,gainQ8:256});delete global.window;
+  assert.deepEqual(events.map(event=>event.slice(0,2)),[['set',0],['set',0],['ramp',1],['set',1],['ramp',.5],['start',2.1]]);assert.ok(Math.abs(events[2][2]-2.3)<1e-9);assert.ok(Math.abs(events[3][2]-2.6)<1e-9);assert.equal(events[4][2],3);assert.equal(player.releaseMs,900);
+});
+
 test('the simple UI keeps layered selection and primary save in the visible flow',async()=>{
   const source=await readFile(new URL('../app.js',import.meta.url),'utf8');
   const html=await readFile(new URL('../index.html',import.meta.url),'utf8');
@@ -100,6 +122,8 @@ test('the simple UI keeps layered selection and primary save in the visible flow
   assert.match(source,/Edit a KANTAN Synth File/);assert.match(source,/Open and edit an existing \.ktsynth file/);
   assert.match(source,/parseKtSynth\(new Uint8Array\(await file\.arrayBuffer\(\)\)\)/);
   assert.match(source,/ktsLayers:\[\]/);
+  assert.match(source,/Same waveform as Layer 1/);assert.match(source,/Different waveform/);assert.match(source,/pcmSourceLayer/);
+  assert.match(source,/Delay \(ms\)/);assert.match(source,/Hold \(ms\)/);assert.match(source,/Decay \(ms\)/);assert.match(source,/Sustain Level \(%\)/);assert.match(source,/releaseMs',10,10000/);
   assert.match(source,/Overwrite and Save to SD Card/);assert.match(source,/Melody, Chord, or Bass/);
   assert.match(source,/\.sf3\$\/i/);assert.match(source,/application\/vnd\.instachord\.ktsynth/);
   assert.match(source,/Create from WAV \/ MP3/);assert.match(source,/Detected:/);
