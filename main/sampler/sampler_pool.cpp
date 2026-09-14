@@ -771,29 +771,39 @@ static bool load_synth_wav_slot(sample_slot_t& destination, const char* display_
 }
 
 static bool load_synth_ktsynth_slot(sample_slot_t& destination, const char* display_name,
-                                    const uint8_t* file_data, size_t file_size)
+                                    const uint8_t* file_data, size_t file_size,
+                                    const sample_slot_t* shared_source = nullptr)
 {
   ktsynth_info_t info;
   if (!parse_ktsynth(file_data, file_size, &info)) { return false; }
   const uint32_t target_rate = info.wav.sample_rate == 44100 ? 48000 : info.wav.sample_rate;
   const uint32_t frames = resampled_frame_count(info.wav.frames, info.wav.sample_rate, target_rate);
+  sample_asset_t* asset = shared_source && shared_source->sample_rate == target_rate
+    && shared_source->asset && shared_source->asset->frames == frames
+    && shared_source->pcm == shared_source->asset->pcm
+      ? shared_source->asset : nullptr;
   if (frames < 16 || frames > target_rate * sampler_pool_t::max_sample_sec
-   || (size_t)frames * sizeof(int16_t)
-       > sampler_pool_t::freeBytes() + replaceable_slot_bytes(destination)) {
+   || (!asset && (size_t)frames * sizeof(int16_t)
+       > sampler_pool_t::freeBytes() + replaceable_slot_bytes(destination))) {
     return false;
   }
+  const bool shared = asset != nullptr;
+  // Retain before erasing: destination may already refer to this asset.
+  if (shared) { pool_retain_asset(asset); }
   erase_synth_source_slot(destination);
-  sample_asset_t* asset = pool_create_asset(frames);
-  if (!asset) { return false; }
-  for (uint32_t i = 0; i < frames; ++i) {
-    asset->pcm[i] = wav_resampled_mono_frame(info.wav, i, target_rate);
-    report_import_progress(i);
+  if (!shared) {
+    asset = pool_create_asset(frames);
+    if (!asset) { return false; }
+    for (uint32_t i = 0; i < frames; ++i) {
+      asset->pcm[i] = wav_resampled_mono_frame(info.wav, i, target_rate);
+      report_import_progress(i);
+    }
   }
   char authored_name[64] = {};
   const size_t copy_name_bytes = std::min<size_t>(info.name_bytes, sizeof(authored_name) - 1);
   if (copy_name_bytes) { memcpy(authored_name, info.name, copy_name_bytes); }
   initialize_asset_sample_slot(destination, asset, 0, frames, target_rate,
-                               authored_name[0] ? authored_name : display_name);
+                               authored_name[0] ? authored_name : display_name, !shared);
   destination.start_frame = remap_ktsynth_frame(info.start_frame, info.wav.sample_rate,
                                                  target_rate, frames);
   destination.end_frame = remap_ktsynth_frame(info.end_frame, info.wav.sample_rate,
@@ -870,6 +880,21 @@ bool sampler_pool_t::loadSynthKtSynth(uint8_t synth_index, const char* display_n
   return synth_index < synth_source_count
       && load_synth_ktsynth_slot(synth_source[synth_index], display_name,
                                   file_data, file_size);
+}
+
+bool sampler_pool_t::shareSynth(uint8_t destination, uint8_t source,
+                                const char* display_name,
+                                const uint8_t* file_data, size_t file_size)
+{
+  if (destination >= synth_source_count || source >= synth_source_count
+   || destination == source || !synth_source[source].isValid()
+   || synth_source[source].asset == nullptr) {
+    return false;
+  }
+  // Share only immutable PCM. Reload authored metadata so another part's
+  // Trim/Envelope/Gain edits never become this part's new tone defaults.
+  return load_synth_ktsynth_slot(synth_source[destination], display_name,
+                                file_data, file_size, &synth_source[source]);
 }
 
 void sampler_pool_t::eraseSynth(uint8_t synth_index)

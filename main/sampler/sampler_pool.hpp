@@ -147,6 +147,11 @@ public:
                                 uint32_t sample_rate);
   static bool loadSynthKtSynth(uint8_t synth_index, const char* display_name,
                                const uint8_t* file_data, size_t file_size);
+  // Reuse an already decoded synth PCM asset while keeping independent
+  // per-part metadata. Intended for identical immutable builtin tones.
+  static bool shareSynth(uint8_t destination, uint8_t source,
+                         const char* display_name,
+                         const uint8_t* file_data, size_t file_size);
   static void eraseSynth(uint8_t synth_index);
   // Optional UI hook for long import conversions. The audio data path stays
   // independent from the UI; callers clear this immediately after import.

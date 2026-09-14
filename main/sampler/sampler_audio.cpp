@@ -10,6 +10,8 @@
 
 #include "sampler_audio.hpp"
 #include "sampler_amy_engine.hpp"
+#include "sampler_performance_probe.hpp"
+#include "sampler_pcm_render.hpp"
 
 #include "../common_define.hpp"
 #include "../system_registry.hpp"
@@ -95,6 +97,10 @@ struct voice_t {
   // observable on every audio frame; otherwise a dense Pad-sourced chord can
   // keep a cached false value after its physical Note Off.
   volatile bool release_requested = false;
+#if defined(KANPLAY_SAMPLER_LATENCY_PROBE)
+  volatile uint32_t probe_edge_usec = 0;
+  volatile uint8_t probe_kind = 0; // 1 live-on, 2 live-off, 3 rec-on, 4 rec-off
+#endif
   volatile bool active = false;
   uint8_t fx_target = sampler_audio_t::fx_target_parts;
 };
@@ -167,6 +173,47 @@ struct synth_sustain_cache_t {
   uint8_t stride = 1;
 };
 static synth_sustain_cache_t synth_sustain_cache[synth_sustain_cache_count];
+
+// Optional accelerators must not consume the heap needed by BLE/Mic tasks.
+// Allocate the actual window, not 24KB for every selected or previewed tone.
+static constexpr size_t synth_cache_budget_bytes = 48u * 1024u;
+static constexpr size_t synth_cache_internal_headroom = 48u * 1024u;
+static constexpr size_t synth_cache_contiguous_headroom = 16u * 1024u;
+
+static bool synth_cache_can_allocate(size_t bytes)
+{
+  size_t used = 0;
+  for (const auto& cache : synth_sustain_cache) {
+    used += (cache.capacity + cache.attack_capacity) * sizeof(int16_t);
+  }
+  if (used + bytes > synth_cache_budget_bytes) { return false; }
+#if !defined(M5UNIFIED_PC_BUILD)
+  const uint32_t caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+  if (heap_caps_get_free_size(caps) < bytes + synth_cache_internal_headroom
+   || heap_caps_get_largest_free_block(caps) < bytes + synth_cache_contiguous_headroom) {
+    return false;
+  }
+#endif
+  return true;
+}
+
+static void reserve_synth_cache_window(int16_t*& pcm, uint32_t& capacity,
+                                       uint32_t frames)
+{
+  if (frames <= capacity) { return; }
+  // Caller checked that no voice can still read this cache.
+  free(pcm);
+  pcm = nullptr;
+  capacity = 0;
+  const size_t bytes = frames * sizeof(int16_t);
+  if (!synth_cache_can_allocate(bytes)) { return; }
+#if defined(M5UNIFIED_PC_BUILD)
+  pcm = (int16_t*)malloc(bytes);
+#else
+  pcm = (int16_t*)heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+#endif
+  capacity = pcm ? frames : 0;
+}
 
 static void reset_synth_sustain_cache_entry(synth_sustain_cache_t& entry)
 {
@@ -357,12 +404,13 @@ static void update_voice_steps(void)
   }
 }
 
-bool sampler_audio_t::play(uint8_t voice, const int16_t* pcm, uint32_t frames, uint32_t sample_rate,
+static bool prepare_voice(uint8_t voice, const int16_t* pcm, uint32_t frames, uint32_t sample_rate,
                            bool loop, bool reverse, uint16_t volume_q8, uint16_t pitch_q8,
                            uint32_t start_frame, uint32_t edge_fade_in_end,
-                           uint32_t edge_fade_out_start)
+                           uint32_t edge_fade_out_start, uint32_t probe_edge_usec,
+                           uint8_t probe_kind)
 {
-  if (voice >= max_voice || pcm == nullptr || frames == 0 || sample_rate == 0) { return false; }
+  if (voice >= sampler_audio_t::max_voice || pcm == nullptr || frames == 0 || sample_rate == 0) { return false; }
 
   auto& v = voices[voice];
   deactivate_voice(voice);
@@ -413,6 +461,23 @@ bool sampler_audio_t::play(uint8_t voice, const int16_t* pcm, uint32_t frames, u
   v.edge_fade_in_end = std::min<uint32_t>(edge_fade_in_end, frames);
   v.edge_fade_out_start = std::min<uint32_t>(edge_fade_out_start, frames);
   v.release_requested = false;
+#if defined(KANPLAY_SAMPLER_LATENCY_PROBE)
+  v.probe_edge_usec = probe_edge_usec;
+  v.probe_kind = probe_kind;
+#endif
+  return true;
+}
+
+bool sampler_audio_t::play(uint8_t voice, const int16_t* pcm, uint32_t frames, uint32_t sample_rate,
+                           bool loop, bool reverse, uint16_t volume_q8, uint16_t pitch_q8,
+                           uint32_t start_frame, uint32_t edge_fade_in_end,
+                           uint32_t edge_fade_out_start, uint32_t probe_edge_usec,
+                           uint8_t probe_kind)
+{
+  if (!prepare_voice(voice, pcm, frames, sample_rate, loop, reverse, volume_q8,
+      pitch_q8, start_frame, edge_fade_in_end, edge_fade_out_start,
+      probe_edge_usec, probe_kind)) { return false; }
+  auto& v = voices[voice];
   v.active = true;
   activate_voice(voice);
   return true;
@@ -427,6 +492,7 @@ void sampler_audio_t::primeSynthSustainCache(uint8_t cache_slot, const int16_t* 
   auto& cache = synth_sustain_cache[cache_slot];
   attack_cache_limit = std::clamp<uint32_t>(attack_cache_limit, 32, synth_attack_cache_max_frames);
   sustain_cache_limit = std::clamp<uint32_t>(sustain_cache_limit, 32, synth_sustain_cache_max_frames);
+  if (isSynthSustainCacheInUse(cache_slot)) { return; }
   if (!pcm || sustain_end <= sustain_start || sustain_end - sustain_start < 32) {
     reset_synth_sustain_cache_entry(cache);
     return;
@@ -435,19 +501,14 @@ void sampler_audio_t::primeSynthSustainCache(uint8_t cache_slot, const int16_t* 
    && (cache.attack_frames != 0 || cache.frames != 0)) {
     return;
   }
-  if (!cache.attack_pcm) {
-#if defined (M5UNIFIED_PC_BUILD)
-    cache.attack_pcm = (int16_t*)malloc(attack_cache_limit * sizeof(int16_t));
-#else
-    cache.attack_pcm = (int16_t*)heap_caps_malloc(attack_cache_limit * sizeof(int16_t),
-                                                   MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-#endif
-    cache.attack_capacity = cache.attack_pcm ? attack_cache_limit : 0;
+  const uint32_t loop_frames = sustain_end - sustain_start;
+  // Sustain is the continuous multi-voice load. Reserve it first; an attack
+  // can safely read the original PCM when BLE leaves little internal RAM.
+  if (loop_frames <= sustain_cache_limit) {
+    reserve_synth_cache_window(cache.pcm, cache.capacity, loop_frames);
   }
-  if (!cache.attack_pcm) {
-    reset_synth_sustain_cache_entry(cache);
-    return;
-  }
+  reserve_synth_cache_window(cache.attack_pcm, cache.attack_capacity,
+                             std::min(sustain_start, attack_cache_limit));
   cache.attack_frames = std::min<uint32_t>(sustain_start, cache.attack_capacity);
   for (uint32_t i = 0; i < cache.attack_frames; ++i) { cache.attack_pcm[i] = pcm[i]; }
   cache.source = pcm;
@@ -455,22 +516,12 @@ void sampler_audio_t::primeSynthSustainCache(uint8_t cache_slot, const int16_t* 
   cache.end = sustain_end;
   cache.frames = 0;
   cache.stride = 1;
-  const uint32_t loop_frames = sustain_end - sustain_start;
   // A synth loop needs sample-accurate material. Downsampling it into the
   // cache turns the cached source into a sample-and-hold waveform, which is
   // especially audible as a metallic tone at Loop In/Out. Cache only an
   // entire loop at its original resolution; longer loops stay in PSRAM.
   if (loop_frames > sustain_cache_limit) {
     return;
-  }
-  if (!cache.pcm) {
-#if defined (M5UNIFIED_PC_BUILD)
-    cache.pcm = (int16_t*)malloc(sustain_cache_limit * sizeof(int16_t));
-#else
-    cache.pcm = (int16_t*)heap_caps_malloc(sustain_cache_limit * sizeof(int16_t),
-                                            MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-#endif
-    cache.capacity = cache.pcm ? sustain_cache_limit : 0;
   }
   if (!cache.pcm) {
     return;
@@ -539,10 +590,12 @@ bool sampler_audio_t::playSynth(uint8_t voice, const int16_t* pcm, uint32_t fram
                                 uint32_t sustain_start, uint32_t sustain_end,
                                 uint16_t sustain_crossfade, uint16_t auto_release_ms,
                                 bool linear_interpolation, uint8_t render_divider,
-                                uint8_t sustain_cache_slot)
+                                uint8_t sustain_cache_slot, uint32_t probe_edge_usec,
+                                uint8_t probe_kind)
 {
-  if (!play(voice, pcm, frames, sample_rate, sustain_loop, reverse,
-            volume_q8, pitch_q8, 0)) {
+  if (!prepare_voice(voice, pcm, frames, sample_rate, sustain_loop, reverse,
+            volume_q8, pitch_q8, 0, 0, UINT32_MAX,
+            probe_edge_usec, probe_kind)) {
     return false;
   }
   auto& v = voices[voice];
@@ -582,12 +635,21 @@ bool sampler_audio_t::playSynth(uint8_t voice, const int16_t* pcm, uint32_t fram
   v.release_step_q15 = release_ms == 0 ? 32768
     : (uint16_t)std::max<uint32_t>(1, (32768u + release_frames - 1) / release_frames);
   v.auto_release_frames = (output_sample_rate * (uint32_t)auto_release_ms) / 1000u;
+  // Publish only after loop/cache/envelope parameters are complete. I2S may
+  // preempt the note producer between any two of the assignments above.
+  v.active = true;
+  activate_voice(voice);
   return true;
 }
 
-void sampler_audio_t::release(uint8_t voice)
+void sampler_audio_t::release(uint8_t voice, uint32_t probe_edge_usec,
+                              uint8_t probe_kind)
 {
   if (voice < max_voice && voices[voice].active) {
+#if defined(KANPLAY_SAMPLER_LATENCY_PROBE)
+    voices[voice].probe_edge_usec = probe_edge_usec;
+    voices[voice].probe_kind = probe_kind;
+#endif
     voices[voice].release_requested = true;
   }
 }
@@ -1132,18 +1194,37 @@ struct mixed_buses_t {
   int64_t parts = 0;
 };
 
-static inline mixed_buses_t mix_voices(void)
+static inline void record_voice_probe(voice_t& v)
+{
+#if defined(KANPLAY_SAMPLER_LATENCY_PROBE)
+    const uint32_t probe_edge_usec = v.probe_edge_usec;
+    if (probe_edge_usec != 0) {
+      const uint8_t kind = v.probe_kind;
+      v.probe_edge_usec = 0;
+      v.probe_kind = 0;
+      performance_probe::metric_t metric;
+      switch (kind) {
+      case 1: metric = performance_probe::metric_t::live_note_on_to_audio; break;
+      case 2: metric = performance_probe::metric_t::live_note_off_to_audio; break;
+      case 3: metric = performance_probe::metric_t::rec_note_on_to_audio; break;
+      case 4: metric = performance_probe::metric_t::rec_note_off_to_audio; break;
+      default: metric = performance_probe::metric_t::count; break;
+      }
+      if (metric != performance_probe::metric_t::count) {
+        performance_probe::record(metric, M5.micros() - probe_edge_usec);
+      }
+    }
+#endif
+}
+
+static inline mixed_buses_t mix_voices(uint32_t active)
 {
   mixed_buses_t mixed;
-  uint32_t active = __atomic_load_n(&active_voice_mask, __ATOMIC_ACQUIRE);
   while (active) {
     const uint8_t n = (uint8_t)__builtin_ctz(active);
     active &= active - 1;
     auto& v = voices[n];
-    if (!v.active) {
-      deactivate_voice(n);
-      continue;
-    }
+    if (!v.active) { continue; }
     // Seeking a running loop at a non-zero crossing can click. Fade only this
     // voice for two milliseconds, move its position while silent, then fade
     // it back in. The request itself still comes from the UI without touching
@@ -1223,7 +1304,7 @@ static inline mixed_buses_t mix_voices(void)
             : (idx1 >= v.frames ? idx : idx1);
         }
         const int32_t s1 = voice_pcm_at(v, idx1);
-        s += ((s1 - s) * (int32_t)frac) >> 16;
+        s = pcm_render::interpolate(s, s1, frac);
       }
       if (!v.reverse && v.playback_rate_q16 >= 0 && v.loop_crossfade_frames
        && idx >= loop_end - v.loop_crossfade_frames && idx < loop_end) {
@@ -1308,6 +1389,44 @@ static inline mixed_buses_t mix_voices(void)
     }
   }
   return mixed;
+}
+
+// 48 stereo frames: 768 bytes of fixed internal RAM, no PCM copies or queue.
+// Voice-major rendering reuses one voice's state/source while it is hot in
+// cache. Event publication is observed on every 1ms block, including release.
+static mixed_buses_t mixed_block[i2s_dma_frame_num / 2];
+static void mix_voice_block(void)
+{
+  for (auto& frame : mixed_block) { frame = {}; }
+  uint32_t active = __atomic_load_n(&active_voice_mask, __ATOMIC_ACQUIRE);
+  uint32_t general = 0;
+  while (active) {
+    const uint8_t index = (uint8_t)__builtin_ctz(active);
+    active &= active - 1u;
+    auto& voice = voices[index];
+    if (!voice.active) { deactivate_voice(index); continue; }
+    record_voice_probe(voice);
+#if defined(KANPLAY_SAMPLER_PCM_REFERENCE)
+    // Same timing build and input path, original sample-major mixer only.
+    // This provides a controlled on-device A/B without changing presets.
+    general |= 1u << index;
+#else
+    if (pcm_render::supports(voice)) {
+      pcm_render::render(voice, mixed_block, i2s_dma_frame_num / 2,
+                         voice.fx_target == sampler_audio_t::fx_target_beat);
+      if (!voice.active) { deactivate_voice(index); }
+    } else {
+      general |= 1u << index;
+    }
+#endif
+  }
+  if (general) {
+    for (auto& frame : mixed_block) {
+      const auto other = mix_voices(general);
+      frame.beat += other.beat;
+      frame.parts += other.parts;
+    }
+  }
 }
 
 static inline int32_t saturate32(int64_t value)
@@ -2111,8 +2230,9 @@ void sampler_audio_t::task_func(sampler_audio_t* me)
   for (;;) {
     int32_t min_level = INT32_MAX;
     int32_t max_level = INT32_MIN;
+    mix_voice_block();
     for (int i = 0; i < i2s_dma_frame_num; i += 2) {
-      const mixed_buses_t mixed = mix_voices();
+      const mixed_buses_t mixed = mixed_block[i / 2];
       int64_t deck_l = 0;
       int64_t deck_r = 0;
       read_deck_stream_frame(&deck_l, &deck_r);
@@ -2185,9 +2305,16 @@ void sampler_audio_t::task_func(sampler_audio_t* me)
   uint8_t raw_wave_phase = 0;
 
   for (;;) {
-    _i2s_read(i2sbuf, buf_size, &transfer_size, 128);
+    const esp_err_t read_result = _i2s_read(i2sbuf, buf_size, &transfer_size, 128);
+    if (read_result != ESP_OK || transfer_size != buf_size) {
+      performance_probe::count(performance_probe::counter_t::i2s_read_error);
+    }
     kp::system_registry->task_status.setWorking(kp::system_registry_t::reg_task_status_t::bitindex_t::TASK_I2S);
     const uint32_t processing_started_usec = M5.micros();
+#if defined(KANPLAY_SAMPLER_LATENCY_PROBE)
+    const uint8_t block_voice_count = (uint8_t)__builtin_popcount(
+      __atomic_load_n(&active_voice_mask, __ATOMIC_ACQUIRE));
+#endif
     if (live_wave_clear_pending) {
       const int len = kp::system_registry->raw_wave_length;
       auto wav_buf = kp::system_registry->raw_wave;
@@ -2212,6 +2339,8 @@ void sampler_audio_t::task_func(sampler_audio_t* me)
     int32_t min_level = INT32_MAX;
     int32_t max_level = INT32_MIN;
 
+    if (!output_muted) { mix_voice_block(); }
+
     for (int i = 0; i < i2s_dma_frame_num; i += 2) {
       // 入力(SAM音源/マイク)のパススルーにボイスをミキシング
       record_input_frame(i2sbuf[i], i2sbuf[i+1]);
@@ -2220,7 +2349,7 @@ void sampler_audio_t::task_func(sampler_audio_t* me)
       int64_t deck_l = 0;
       int64_t deck_r = 0;
       read_deck_stream_frame(&deck_l, &deck_r);
-      const mixed_buses_t mixed = output_muted ? mixed_buses_t{} : mix_voices();
+      const mixed_buses_t mixed = output_muted ? mixed_buses_t{} : mixed_block[i / 2];
       int32_t amy_l = 0;
       int32_t amy_r = 0;
       // Always drain the producer ring, including during a short output mute,
@@ -2296,6 +2425,20 @@ void sampler_audio_t::task_func(sampler_audio_t* me)
     if (capture_raw_wave) { push_raw_wave(min_level, max_level); }
 
     const uint32_t processing_usec = M5.micros() - processing_started_usec;
+#if defined(KANPLAY_SAMPLER_LATENCY_PROBE)
+    // Idle blocks must not hide polyphonic overloads in the p95 histogram.
+    if (block_voice_count) {
+      performance_probe::record(performance_probe::metric_t::audio_block, processing_usec);
+      const auto metric = block_voice_count <= 2 ? performance_probe::metric_t::audio_1_2_voices
+        : block_voice_count <= 4 ? performance_probe::metric_t::audio_3_4_voices
+        : block_voice_count <= 6 ? performance_probe::metric_t::audio_5_6_voices
+                                : performance_probe::metric_t::audio_7_plus_voices;
+      performance_probe::record(metric, processing_usec);
+    }
+#endif
+    if (processing_usec >= 1000u) {
+      performance_probe::count(performance_probe::counter_t::audio_deadline_miss);
+    }
     const uint8_t instant_load = (uint8_t)std::min<uint32_t>(255, (processing_usec * 256u) / 1000u);
     const uint8_t previous_load = processing_load_q8;
     processing_load_q8 = (uint8_t)((previous_load * 7u + instant_load + 4u) >> 3);
@@ -2305,7 +2448,10 @@ void sampler_audio_t::task_func(sampler_audio_t* me)
     raw_wave_divider = processing_load_q8 >= 192 ? 2 : 1;
 
     kp::system_registry->task_status.setSuspend(kp::system_registry_t::reg_task_status_t::bitindex_t::TASK_I2S);
-    _i2s_write(bufdata, buf_size, &transfer_size, 128);
+    const esp_err_t write_result = _i2s_write(bufdata, buf_size, &transfer_size, 128);
+    if (write_result != ESP_OK || transfer_size != buf_size) {
+      performance_probe::count(performance_probe::counter_t::i2s_write_error);
+    }
   }
 #endif
 }

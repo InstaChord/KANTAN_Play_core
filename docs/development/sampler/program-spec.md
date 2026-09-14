@@ -937,6 +937,23 @@ Pad 9〜12はMix A〜Dです。
 画面上のPad領域をタッチするとPad演奏します。
 モードタブ領域のタッチでモード切替します。
 
+## 多重発音の負荷・発音遅延の計測
+
+- 通常の前方向PCMは1ms分をボイスごとにまとめて描画する。固定作業領域は768バイトで、ボイスごとのPCM複製、追加タスク、先読みキューを作らない。逆再生、Seek、Touchフィルター、Chop境界Fadeは従来の汎用レンダラーへ戻す
+- 通常経路の位置更新・Gain・Envelope・補間は範囲を保証した32bit演算を使う。48kHz出力、既存の内部24kHz設定、Attack/Release、Loop Crossfade、拍合わせは維持する。シンセの設定がすべて揃ってからボイスを有効化する
+- Recで新しいNote Offを保存するときは対応するNote Onだけを検索し、最小Gate補正後に再生スナップショットへ追記する。毎回の全Note Off×全Note On走査と全再生インデックス再構築を省く。テンポ変更等で全体を変えたときの一括補正は維持する
+- `sampler_s3_latency_probe`、`sampler_s3_latency_reference`、`sampler_s3_debug`で低負荷の発音計測を有効にする。通常の`sampler_s3`ではボイスの計測用フィールドも無効化する。比較には本番同等の`-O2`を使うprobe/referenceを使用し、referenceではPCMミキサーだけ従来方式に戻す
+- 物理Pad入力履歴の押下・離上待ち時間、ライブ／Rec別のNote On・Note Offから最初のミキサー処理まで、Recイベント保存、Recイベント一括再生、ボイス探索、1ms I2Sブロック処理時間を計測する。イベント遅延は1ms幅、CPU処理時間は100µs幅のヒストグラムとする
+- I2S処理時間はPCM発音中のブロックだけ集計し、1〜2／3〜4／5〜6／7以上の発音数別にも集計する。Rec一括再生もイベントを処理した回だけ集計し、アイドル期間による平均・p95の希釈を避ける。1ms超過、I2S読み書きエラー／短い転送は別カウンターとする（実出力のunderrunを直接数えた値ではない）
+- 計測中はSerialへ出力しない。Loop停止後かつ入力優先期間外に、5秒間隔で件数、平均、p95上限、最大を`PERF`行として出力する
+- Hold/Sustainの最小GateやAttack/Release時間は音色仕様であり、入力履歴待ちおよびNoteイベント反映時間とは分離して評価する
+- 判定基準は音声処理への追加待ちが現行I2S 1ブロック（96個の32bit word、48 stereo frame、48kHzのため1ms）以内、I2Sブロック処理p95が1ms未満とする。物理入力から実出力の目標p95 20msは拍合わせ待ちを分離して実機計測する。ミキサー到達カウンターはDAC出力・DMAバッファ待ち・音色の立ち上がりを測定しない
+- 同じ内蔵KANTAN Synth音色を複数パートへ割り当てた場合、デコード済みPCM Assetを参照カウントで共有する。各パートのStart/End、Loop、Envelope、Gainなどのメタデータは独立して保持する
+- PCMポインタ、再生範囲、Sustain Loop範囲、Crossfadeが一致するパートは、内部RAMのAttack/Sustain作業キャッシュも共有する。どれかが異なれば自動的にパート別キャッシュへ分離する
+- 作業キャッシュは実際の区間長で確保し、6スロット合計48KiBを上限とする。確保前に内部RAM空き48KiBと連続領域16KiBの余裕を判定し、不足時は元のPSRAMへフォールバックする。Chordのキャッシュ準備を優先する。発音中のキャッシュは書換・拡張・解放しない。BLE接続／Mic開始時の未使用キャッシュ解放は維持する
+- Rec再生は1msの専用タスクと固定スナップショットを使い、同時刻イベントをNote Off、Pitch Bend、Note Onの順に処理する。ライブ即時発音は入力履歴を処理するメインタスクから直接音源へ渡す。拍合わせによるPlay最大24ms／Recグリッド半分の発音待ちは従来どおりとする
+- 実機での比較は[PCM多重発音レスポンス 実機A/B比較手順](pcm-response-validation-ja.md)、実装内容・ホスト比較結果・実機で未確認の範囲は[PCM response validation](pcm-response-validation.md)を参照する
+
 ## 既知の制約
 
 - ProjectでSampler WAV参照、Beat Audio/Pattern、EDIT情報、Recイベント、FX値をJSON保存できます。Sample KitはSampler Padの音源と編集設定だけを保存します。
@@ -947,6 +964,8 @@ Pad 9〜12はMix A〜Dです。
 - Audio Beat未使用時のLoop長は新規記録時の `END` Fnタイミングで確定します。Audio Beat使用時はAudio長とRepeatから決まります。
 - FXは現状マスターFXのみで、Pad個別FXは未実装です。
 - `esp-idf-size --ng` 警告がPlatformIOビルド中に出ますが、ファームウェア生成と書き込みは成功します。
+- `sampler_s3_debug`は既存コードの`snprintf`切り詰め警告を`-Werror=format-truncation`でエラー化するため、現状は全体リンクまで完了しません。発音計測の翻訳単位はコンパイル対象に入り、通常の`sampler_s3`は成功します。
+- `sampler_native_m1mac`は既存のESP32専用TLSメモリ実装と一部のメモリ診断がPCビルドから除外されておらず、`esp_heap_caps.h`および`MALLOC_CAP_*`で停止します。今回のPCM共有／発音計測変更より前段のシミュレーター基盤問題として扱います。
 
 ## 今後の実装候補
 

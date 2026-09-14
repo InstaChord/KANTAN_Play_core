@@ -51,6 +51,7 @@
 #include "sampler_mp3.hpp"
 #include "sampler_music_player.hpp"
 #include "sampler_ktkit.hpp"
+#include "sampler_performance_probe.hpp"
 
 #if defined(KANPLAY_RELEASE_SYNTH_SAM_PCM) && defined(KANPLAY_AMY_INTEGRATION)
 #error "The public SAM2695 + PCM backend and AMY integration are mutually exclusive"
@@ -1937,7 +1938,8 @@ static void trigger_synth_pad(performance_page_t page, uint8_t pad, int chord_fl
 static void trigger_beat_pad(uint8_t pad, bool live_performance,
                              uint8_t velocity = beat_velocity_default);
 static void stop_beat_voices(bool include_live = true);
-static void release_synth_trigger(performance_page_t page, uint8_t pad);
+static void release_synth_trigger(performance_page_t page, uint8_t pad,
+                                  uint8_t probe_kind = 0);
 static void stop_synth_page(performance_page_t page);
 static void set_touch_play_active(bool active);
 static void handle_touch_play(int x, int y, bool pressed);
@@ -2077,8 +2079,8 @@ static volatile uint32_t loop_playback_revision = 0;
 // transport region so a dense arrangement does not require scanning all 256
 // entries for every tick.  Four 64-bit words cover the fixed event array.
 static constexpr uint8_t loop_playback_bucket_count = 32;
-static constexpr uint8_t loop_playback_bucket_words = (loop_event_max + 63) / 64;
-static uint64_t loop_playback_bucket_mask[loop_playback_bucket_count][loop_playback_bucket_words] = {};
+static constexpr uint8_t loop_playback_bucket_words = (loop_event_max + 31) / 32;
+static uint32_t loop_playback_bucket_mask[loop_playback_bucket_count][loop_playback_bucket_words] = {};
 static uint32_t loop_playback_bucket_length_ms = 0;
 
 //-------------------------------------------------------------------------
@@ -2659,7 +2661,7 @@ static void add_loop_playback_bucket_event(size_t index, const loop_event_t& eve
 {
   if (!loop_playback_buckets_ready() || index >= loop_event_max) { return; }
   const uint8_t bucket = loop_playback_bucket_for_pos(loop_event_playback_pos(event));
-  loop_playback_bucket_mask[bucket][index >> 6] |= 1ull << (index & 63);
+  loop_playback_bucket_mask[bucket][index >> 5] |= 1u << (index & 31);
 }
 
 // Record events are normally append-only.  When the playback snapshot is
@@ -21092,6 +21094,7 @@ static uint8_t allocate_pitched_voice(pitched_voice_owner_t owner, uint8_t trigg
                                       bool live_performance)
 {
   (void)live_performance;
+  const uint32_t probe_started = performance_probe::clockUsec();
   uint8_t selected = 0;
   uint32_t oldest = UINT32_MAX;
   for (uint8_t i = 0; i < external_midi_voice_count; ++i) {
@@ -21109,6 +21112,8 @@ static uint8_t allocate_pitched_voice(pitched_voice_owner_t owner, uint8_t trigg
   uint32_t generation = pitched_voice_generation++;
   if (generation == 0) { generation = pitched_voice_generation++; }
   pitched_voice_state[selected] = { owner, trigger, note, pitched_voice_age++, generation };
+  performance_probe::record(performance_probe::metric_t::voice_allocation,
+                            performance_probe::clockUsec() - probe_started);
   return selected;
 }
 
@@ -21129,7 +21134,8 @@ static uint16_t sample_pitch_for_note(const sample_slot_t& slot, uint8_t note)
   return (uint16_t)std::clamp<uint32_t>(pitch, 32, 2048);
 }
 
-static void release_synth_trigger(performance_page_t page, uint8_t pad)
+static void release_synth_trigger(performance_page_t page, uint8_t pad,
+                                  uint8_t probe_kind)
 {
   if (pad >= def::pad::pad_count) { return; }
   auto& state = synth_trigger_state[(uint8_t)page][pad];
@@ -21145,6 +21151,9 @@ static void release_synth_trigger(performance_page_t page, uint8_t pad)
     ? pitched_voice_owner_t::chord
     : page == performance_page_t::bass ? pitched_voice_owner_t::bass
                                        : pitched_voice_owner_t::melody;
+  const uint32_t probe_edge_usec = probe_kind == 0 ? 0
+    : performance_probe::eventUsec(probe_kind == 2
+        ? performance_event_time() : M5.millis());
   for (uint8_t i = 0; i < state.note_count; ++i) {
     if (!state.midi && state.voices[i] != 0xFF) {
       const uint8_t voice = state.voices[i];
@@ -21153,7 +21162,9 @@ static void release_synth_trigger(performance_page_t page, uint8_t pad)
       if (pitched_voice_state[voice].owner == owner
        && pitched_voice_state[voice].trigger == pad
        && pitched_voice_state[voice].generation == state.voice_generation[i]) {
-        sampler_audio_t::release(external_midi_voice_base + voice);
+        sampler_audio_t::release(external_midi_voice_base + voice,
+          i == 0 ? probe_edge_usec : 0,
+          i == 0 ? probe_kind : 0);
         pitched_voice_state[voice] = {};
       }
     } else if (state.midi) {
@@ -21400,6 +21411,10 @@ static void trigger_synth_pad(performance_page_t page, uint8_t pad, int chord_fl
   // release remain smooth while leaving the I2S task headroom for Note Off.
   const uint8_t render_divider = (page == performance_page_t::chord
                                || (loop_playing && sustain)) ? 2 : 1;
+  const uint32_t probe_edge_usec = performance_probe::eventUsec(
+    live_performance ? performance_event_time() : M5.millis());
+  const uint8_t sustain_cache_slot = synth_sustain_cache_slot(page);
+  const uint16_t pitch_scale_q12 = sample_page_pitch_scale_q12(page, slot);
   for (uint8_t i = 0; i < note_count; ++i) {
     uint8_t voice = allocate_pitched_voice(owner, pad, notes[i], live_performance);
     state.notes[i] = notes[i];
@@ -21415,9 +21430,11 @@ static void trigger_synth_pad(performance_page_t page, uint8_t pad, int chord_fl
       // four extra PSRAM reads per frame that previously stalled UI changes.
       render_divider == 1,
       render_divider,
-      synth_sustain_cache_slot(page));
+      sustain_cache_slot,
+      i == 0 ? probe_edge_usec : 0,
+      i == 0 ? (live_performance ? 1 : 3) : 0);
     sampler_audio_t::setVoicePitchScaleQ12(external_midi_voice_base + voice,
-                                            sample_page_pitch_scale_q12(page, slot));
+                                            pitch_scale_q12);
   }
 }
 
@@ -22460,31 +22477,38 @@ static void push_loop_event(performance_page_t page, uint8_t pad,
                             uint8_t chord_flags = 0,
                             uint8_t velocity = beat_velocity_default)
 {
+  const uint32_t probe_started = performance_probe::clockUsec();
   loop_event_t event { page, pad, type, pos_ms, layer, chord_flags, velocity };
   bool snapshot_appended = false;
   bool accepted = false;
   bool layer_removed = false;
   {
     loop_events_guard_t guard;
-    if (type == loop_event_type_t::note_off && layer != 0
-     && !loop_note_on_exists_unlocked(page, pad, layer)) {
-      return;
+    if (type == loop_event_type_t::note_off && layer != 0) {
+      const auto note_on = std::find_if(loop_events.begin(), loop_events.end(),
+        [page, pad, layer](const loop_event_t& candidate) {
+          return candidate.page == page && candidate.pad == pad
+              && candidate.layer == layer && candidate.type == loop_event_type_t::note_on;
+        });
+      if (note_on == loop_events.end()) { return; }
+      // Only this new release can collapse onto its On. The previous full
+      // normalization scanned every On for every Off while interrupts were
+      // disabled, then forced a complete playback-index rebuild on each tap.
+      if (page != performance_page_t::sample && page != performance_page_t::drum
+       && loop_length_msec > 1
+       && note_on->pos_ms % loop_length_msec == event.pos_ms % loop_length_msec) {
+        event.pos_ms = loop_note_off_after_note_on(note_on->pos_ms, loop_length_msec);
+      }
     }
     const size_t required = type == loop_event_type_t::note_on
                          && page != performance_page_t::drum ? 2u : 1u;
     accepted = reserve_loop_event_room_unlocked(
       required, type == loop_event_type_t::note_off ? layer : 0, &layer_removed);
-    // A Note Off may be moved below to preserve a minimum gate, so rebuild the
-    // playback snapshot for releases instead of appending a stale position.
-    if (accepted && type != loop_event_type_t::note_off) {
+    // Position is final before publishing, so releases can append too.
+    if (accepted) {
       snapshot_appended = append_loop_playback_snapshot(event);
     }
     if (accepted) { loop_events.push_back(event); }
-    if (accepted && type == loop_event_type_t::note_off) {
-      if (normalize_synth_note_off_positions_unlocked(loop_length_msec)) {
-        event = loop_events.back();
-      }
-    }
   }
   if (!accepted) {
     if (layer_removed) {
@@ -22504,6 +22528,8 @@ static void push_loop_event(performance_page_t page, uint8_t pad,
     loop_timeline_dirty_span_count = 0;
   }
   if (snapshot_appended) { loop_playback_revision = loop_events_revision; }
+  performance_probe::record(performance_probe::metric_t::rec_event_store,
+                            performance_probe::clockUsec() - probe_started);
 }
 
 static void loop_transport_started_visual(void)
@@ -22663,7 +22689,7 @@ static void trigger_loop_event(const loop_event_t& event, bool live_input = fals
       // has already retriggered this pad, the older release must not stop it.
       if (event.layer != 0
        && synth_sounding_layer[(uint8_t)event.page][pad] != event.layer) { return; }
-      release_synth_trigger(event.page, (uint8_t)pad);
+      release_synth_trigger(event.page, (uint8_t)pad, live_input ? 2 : 4);
     } else if (live_input || !loop_is_muted(event.page, (uint8_t)pad)) {
       if (event.layer != 0
        && synth_deferred_note_on_layer[(uint8_t)event.page][pad] == event.layer) {
@@ -24385,7 +24411,7 @@ static void performance_pad_release(int pad)
     loop_record_synth_pad_release(current_page, pad);
   } else {
     if (!release_deferred_live_synth(current_page, pad)) {
-      release_synth_trigger(current_page, (uint8_t)pad);
+      release_synth_trigger(current_page, (uint8_t)pad, 2);
     }
   }
   request_pad_state_draw(pad);
@@ -25084,11 +25110,39 @@ static void apply_synth_page_volume(performance_page_t page, bool force)
 
 static uint8_t synth_sustain_cache_slot(performance_page_t page)
 {
+  const auto cache_key_matches = [](performance_page_t a,
+                                    performance_page_t b) {
+    const auto* lhs = synth_sample_slot_const(a);
+    const auto* rhs = synth_sample_slot_const(b);
+    if (!lhs || !rhs || !lhs->isValid() || !rhs->isValid()
+     || lhs->pcm + lhs->playStart() != rhs->pcm + rhs->playStart()) {
+      return false;
+    }
+    uint32_t lhs_start = 0, lhs_end = 0;
+    uint32_t rhs_start = 0, rhs_end = 0;
+    uint16_t lhs_crossfade = 0, rhs_crossfade = 0;
+    return synth_sustain_parameters(*lhs, lhs->playStart(),
+             &lhs_start, &lhs_end, &lhs_crossfade)
+        && synth_sustain_parameters(*rhs, rhs->playStart(),
+             &rhs_start, &rhs_end, &rhs_crossfade)
+        && lhs_start == rhs_start && lhs_end == rhs_end
+        && lhs_crossfade == rhs_crossfade;
+  };
+
+  // Identical part sources use one internal-RAM attack/loop cache. Slot
+  // metadata remains independent, so a later per-part edit automatically
+  // separates the cache keys without touching audible voices.
+  if (page == performance_page_t::chord
+   && cache_key_matches(performance_page_t::melody, page)) { return 0; }
+  if (page == performance_page_t::bass) {
+    if (cache_key_matches(performance_page_t::melody, page)) { return 0; }
+    if (cache_key_matches(performance_page_t::chord, page)) { return 1; }
+  }
   switch (page) {
   case performance_page_t::melody: return 0;
   case performance_page_t::chord:  return 1;
   case performance_page_t::bass:   return 2;
-  default:                         return 0xFF;
+  default:                          return 0xFF;
   }
 }
 
@@ -25148,9 +25202,11 @@ static void apply_synth_tones(bool force)
   }
   // This does no work while the selected Pad/Repeat settings are unchanged.
   // On a change it prepares the shared sustain working set before playing.
+  // Chord shares one source among up to four voices; it gets first use of
+  // the bounded optional cache budget when BLE has reduced the free heap.
+  prime_synth_sustain_cache(performance_page_t::chord);
   prime_synth_sustain_cache(performance_page_t::melody);
   prime_synth_sustain_cache(performance_page_t::bass);
-  prime_synth_sustain_cache(performance_page_t::chord);
 }
 
 static void apply_mixer_part(mixer_part_t part)
@@ -26348,6 +26404,9 @@ static void refresh_loop_playback_events(void)
 // events, with no second fixed array that can drop a Note Off when it fills.
 static void dispatch_due_loop_events(uint32_t prev_pos, uint32_t pos)
 {
+  if (prev_pos == pos || loop_playback_event_count == 0) { return; }
+  const uint32_t probe_started = performance_probe::clockUsec();
+  bool dispatched = false;
   const bool indexed = loop_playback_buckets_ready() && loop_playback_event_count >= 24;
   for (uint8_t priority = 0; priority < 3; ++priority) {
     auto dispatch_index = [&](size_t index) {
@@ -26355,15 +26414,16 @@ static void dispatch_due_loop_events(uint32_t prev_pos, uint32_t pos)
       const auto& event = loop_playback_events[index];
       if (loop_event_dispatch_priority(event.type) == priority
        && loop_event_crossed(prev_pos, pos, loop_event_playback_pos(event))) {
+        dispatched = true;
         trigger_loop_event(event);
       }
     };
     auto dispatch_bucket = [&](uint8_t bucket) {
       for (uint8_t word = 0; word < loop_playback_bucket_words; ++word) {
-        uint64_t bits = loop_playback_bucket_mask[bucket][word];
+        uint32_t bits = loop_playback_bucket_mask[bucket][word];
         while (bits) {
-          const uint8_t bit = (uint8_t)__builtin_ctzll(bits);
-          dispatch_index((size_t)word * 64u + bit);
+          const uint8_t bit = (uint8_t)__builtin_ctz(bits);
+          dispatch_index((size_t)word * 32u + bit);
           bits &= bits - 1u;
         }
       }
@@ -26388,6 +26448,10 @@ static void dispatch_due_loop_events(uint32_t prev_pos, uint32_t pos)
       }
       for (uint8_t bucket = 0; bucket <= last; ++bucket) { dispatch_bucket(bucket); }
     }
+  }
+  if (dispatched) {
+    performance_probe::record(performance_probe::metric_t::rec_dispatch_batch,
+                              performance_probe::clockUsec() - probe_started);
   }
 }
 
@@ -27119,6 +27183,12 @@ static void process_bitmask(uint32_t bitmask, uint32_t event_msec) {
   uint32_t pressed_edge  = bitmask & ~prev_bitmask;
   uint32_t released_edge = ~bitmask & prev_bitmask;
   prev_bitmask = bitmask;
+  for (int btn = 0; btn < 15; ++btn) {
+    const uint32_t mask = 1u << btn;
+    if (button_to_pad(btn) < 0) { continue; }
+    if (pressed_edge & mask) { performance_probe::recordInputEdge(true, event_msec); }
+    if (released_edge & mask) { performance_probe::recordInputEdge(false, event_msec); }
+  }
   const uint32_t menu_consumed_releases = released_edge & menu_consumed_release_mask;
   menu_consumed_release_mask &= ~released_edge;
   released_edge &= ~menu_consumed_releases;
@@ -28209,10 +28279,26 @@ static const ktsynth_source_t* find_builtin_ktsynth_source(const char* name)
 static bool load_builtin_ktsynth(uint8_t synth_index,
                                  const ktsynth_source_t& source)
 {
-  if (!sampler_pool_t::loadSynthKtSynth(synth_index, source.name,
-                                        source.data, source.size())) {
-    return false;
+  // Builtin sources are immutable. When another part already decoded the
+  // same tone, share its PCM asset and retain independent slot metadata.
+  // This avoids a second decode/resample pass and, more importantly during
+  // performance, makes the I2S working-set cache shareable as well.
+  bool loaded = false;
+  for (uint8_t index = 0; index < sampler_pool_t::synth_source_count; ++index) {
+    if (index == synth_index) { continue; }
+    const auto& existing = sampler_pool_t::synth_source[index];
+    if (existing.isValid() && !strncmp(existing.file_path, "builtin:", 8)
+     && !strcmp(builtin_sample_name(existing.file_path), source.name)) {
+      loaded = sampler_pool_t::shareSynth(synth_index, index,
+                                          source.name, source.data, source.size());
+      if (loaded) { break; }
+    }
   }
+  if (!loaded) {
+    loaded = sampler_pool_t::loadSynthKtSynth(synth_index, source.name,
+                                               source.data, source.size());
+  }
+  if (!loaded) { return false; }
   snprintf(sampler_pool_t::synth_source[synth_index].name,
            sizeof(sampler_pool_t::synth_source[synth_index].name),
            "%s", source.name);
@@ -32889,6 +32975,16 @@ static void update(void)
   }
 
   uint32_t msec = M5.millis();
+
+  // Serial formatting is intentionally outside the measured performance
+  // window. Counters remain lock-free while playing; results are printed
+  // only after transport and physical input are idle.
+#if defined(KANPLAY_SAMPLER_LATENCY_PROBE)
+  if (!loop_playing && !sound_priority_active(msec) && !physical_input_pending()
+   && !sampler_cpu_has_active_voice()) {
+    performance_probe::reportIfDue(msec);
+  }
+#endif
 
   service_sampler_cpu_clock(msec);
 
