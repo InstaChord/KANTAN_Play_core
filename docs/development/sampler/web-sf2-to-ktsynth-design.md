@@ -9,7 +9,9 @@
 
 ## 画面フローと設計判断
 
-KANTANシンセ作成は Sample / Beat / Kit / Project / Music に続く独立した `Synth` タブに置く。WEBファイラーの表示文言は英語で統一し、最初に `Create from SoundFont (.sf2)` と `Create from WAV / MP3` を選ぶ。変換開始後も入力方法に戻れるようにし、スマートフォンではタブ列を横スクロール可能にして主操作が切れない一列レイアウトにする。
+KANTANシンセ作成は Sample / Beat / Kit / Project / Music に続く独立した `Synth` タブに置く。WEBファイラーの表示文言は英語で統一し、最初に `Create from SoundFont (.sf2)`、`Create from WAV / MP3`、`Edit a KANTAN Synth File` から選ぶ。変換開始後も入力方法に戻れるようにし、スマートフォンではタブ列を横スクロール可能にして主操作が切れない一列レイアウトにする。
+
+既存のKTS2 `.ktsynth` は1〜2レイヤーのPCMと各レイヤー設定を検証後に読み込み、SF2変換後と同じレイヤーカードで音量、サンプルレート、root note、pitch correction、Attack、Release、Loop crossfadeを変更して再保存できる。サンプルレート変更時は再生範囲とLoop範囲も同じ比率で変換する。元のSF2にあったプリセット構造、generator、modulator、フィルター、LFO、エフェクトなどはKTS2に含まれないため復元対象外とする。
 
 SF2の簡易設定には SoundFont、音色、使用するサウンド、試聴、音量、音色名、主操作「SDカードに保存」を常時表示する。音量はSF2のinitial attenuationから求めた値を初期値として0〜200%で調整し、試聴と `.ktsynth` の `defaultGainQ8`（0〜512）へ同じ値を反映する。100%を標準とし、100%超では音割れの可能性を案内する。
 

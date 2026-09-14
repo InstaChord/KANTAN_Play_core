@@ -51,7 +51,7 @@ input,select { min-width:0; border:1px solid var(--line); border-radius:4px; pad
 .sf2-open { width:100%; min-height:48px; margin:0 0 12px; font-size:15px; }
 .sf2-launcher,.sf2-save-row { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:0 0 12px; }
 .sf2-launcher h2 { margin:0; }
-.synth-methods { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:16px; }
+.synth-methods { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-top:16px; }
 .synth-methods button { min-height:86px; display:grid; align-content:center; gap:6px; text-align:left; }
 .synth-methods small { color:#d6edf5; font-weight:400; }
 .sf2-converter { border-color:#3d879f; box-shadow:0 0 0 1px rgba(77,201,240,.08); }

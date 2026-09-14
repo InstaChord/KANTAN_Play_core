@@ -37,6 +37,14 @@ test('two-layer KTS2 preserves independent rate, root, loop and gain',()=>{
   const parsed=parseKtSynth(bytes);assert.equal(parsed.metadata.layerCount,2);assert.equal(parsed.layers[0].sampleRate,24000);assert.equal(parsed.layers[1].sampleRate,18000);assert.equal(parsed.layers[1].rootNote,72);assert.equal(parsed.layers[1].tuneCents,-7);assert.equal(parsed.layers[1].loopEndFrameExclusive,320);assert.equal(parsed.layers[0].defaultGainQ8+parsed.layers[1].defaultGainQ8,512);assert.ok(chunkOffset(bytes,'KT2D')>0);
 });
 
+test('an existing KANTAN Synth can be loaded, edited and encoded again',()=>{
+  const first=Int16Array.from({length:480},(_,i)=>i*3),second=Int16Array.from({length:360},(_,i)=>-i*2);
+  const original=parseKtSynth(encodeKtSynth([ktsLayer(first,{rootNote:60,defaultGainQ8:256}),ktsLayer(second,{sampleRate:18000,rootNote:72,tuneCents:-7,attackMs:20,releaseMs:700,defaultGainQ8:200,loopStartFrame:40,loopEndFrameExclusive:320,loopCrossfadeFrames:20,sustainMode:1})],{name:'Editable'}));
+  const edited=original.layers.map((layer,index)=>({...layer,pcm:layer.pcm.slice(),rootNote:index?74:layer.rootNote,tuneCents:index?12:layer.tuneCents,attackMs:index?35:layer.attackMs,releaseMs:index?900:layer.releaseMs,defaultGainQ8:index?180:layer.defaultGainQ8}));
+  const reopened=parseKtSynth(encodeKtSynth(edited,{name:'Edited Tone'}));
+  assert.equal(reopened.name,'Edited Tone');assert.equal(reopened.layers.length,2);assert.deepEqual([...reopened.layers[0].pcm],[...first]);assert.deepEqual([...reopened.layers[1].pcm],[...second]);assert.equal(reopened.layers[1].rootNote,74);assert.equal(reopened.layers[1].tuneCents,12);assert.equal(reopened.layers[1].attackMs,35);assert.equal(reopened.layers[1].releaseMs,900);assert.equal(reopened.layers[1].loopStartFrame,40);assert.equal(reopened.layers[1].loopEndFrameExclusive,320);
+});
+
 test('CRC implementation uses the ISO-HDLC check vector',()=>assert.equal(crc32IsoHdlc(new TextEncoder().encode('123456789')),0xcbf43926));
 
 test('SF2 volume maps consistently between percent, attenuation and KTSYNTH gain',()=>{
@@ -89,6 +97,9 @@ test('the simple UI keeps layered selection and primary save in the visible flow
   assert.doesNotMatch(source,/Add Layer 2|second audio file/);assert.match(source,/Remove Layer 2/);
   assert.match(source,/audio:newAudioLayer\(\)/);assert.match(source,/Combined Layer 1 and Layer 2 volume/);
   assert.match(source,/Create from one audio file/);assert.match(source,/KTS2 · 1 layer/);
+  assert.match(source,/Edit a KANTAN Synth File/);assert.match(source,/Open and edit an existing \.ktsynth file/);
+  assert.match(source,/parseKtSynth\(new Uint8Array\(await file\.arrayBuffer\(\)\)\)/);
+  assert.match(source,/ktsLayers:\[\]/);
   assert.match(source,/Overwrite and Save to SD Card/);assert.match(source,/Melody, Chord, or Bass/);
   assert.match(source,/\.sf3\$\/i/);assert.match(source,/application\/vnd\.instachord\.ktsynth/);
   assert.match(source,/Create from WAV \/ MP3/);assert.match(source,/Detected:/);
