@@ -150,6 +150,7 @@ test('the simple UI keeps layered selection and primary save in the visible flow
   assert.match(source,/unsupported features are ignored/i);assert.match(source,/Play on KANTAN Sampler/);
   assert.match(source,/function synthFilePicker/);assert.match(source,/addEventListener\('drop'/);assert.match(source,/WAV or MP3 · max 20 sec/);
   assert.match(source,/hold:true/);assert.match(source,/stopSynthPreview/);assert.match(source,/'Off'/);
+  assert.match(source,/if\(sf2Editor\.devicePlaying\)await stopSynthOnDevice\(\)/);
   assert.match(firmware,/doc\["hold"\]/);assert.match(firmware,/playSynth\(menu_preview_voice/);assert.match(firmware,/strcmp\(action, "stopSynthPreview"\)/);
   assert.match(source,/\/api\/sampler\/preview-ktsynth/);assert.match(source,/\.web-preview\.ktsynth/);
   assert.match(api,/response_ktsynth_preview/);assert.match(api,/Synth\/\.web-preview\.ktsynth/);

@@ -703,7 +703,7 @@ static esp_err_t response_main_handler(httpd_req_t *req)
     "<script>window.KANPLAY={api:location.origin};</script>"
     "<script type=\"module\" src=\"");
   httpd_resp_sendstr_chunk(req, base);
-  httpd_resp_sendstr_chunk(req, "/app.js?v=098-sf2-gain\"></script></body></html>");
+  httpd_resp_sendstr_chunk(req, "/app.js?v=099-synth-auto-off\"></script></body></html>");
   httpd_resp_sendstr_chunk(req, nullptr);
   return ESP_OK;
 }
