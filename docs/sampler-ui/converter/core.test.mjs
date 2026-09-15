@@ -129,6 +129,7 @@ test('the simple UI keeps layered selection and primary save in the visible flow
   const parser=await readFile(new URL('../../../main/sampler/sampler_ktsynth.hpp',import.meta.url),'utf8');
   assert.match(source,/Sounds/);assert.match(source,/Choose up to 2/);
   assert.match(source,/sf2Layers:\[newSf2Layer\(\)\]/);assert.match(source,/type:'checkbox'/);
+  assert.match(source,/newSf2Layer = \(\) => \(\{[^}]*crossfadeMs:0/);
   assert.match(source,/regions\.slice\(0,2\)\.map/);
   assert.doesNotMatch(source,/Add Layer 2|second audio file/);assert.match(source,/Remove Layer 2/);
   assert.match(source,/audio:newAudioLayer\(\)/);assert.match(source,/Combined Layer 1 and Layer 2 volume/);

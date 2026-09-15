@@ -26,7 +26,7 @@ import { decodeAudioFile, midiNoteName } from './converter/audio-input.js';
   let browseFolders = { samples:DEVICE_PRESET, loops:'', kits:'', projects:'', music:'' };
   let loopEventsDraft = null;
   const sf2Player = new PreviewPlayer();
-  const newSf2Layer = () => ({regionId:null,pcmMode:'own',sampleRate:32000,crossfadeMs:10,delayMs:null,attackMs:null,holdMs:null,decayMs:null,sustainPercent:null,releaseMs:null,tuneOffset:0,volumePercent:100,volumeCustomized:false});
+  const newSf2Layer = () => ({regionId:null,pcmMode:'own',sampleRate:32000,crossfadeMs:0,delayMs:null,attackMs:null,holdMs:null,decayMs:null,sustainPercent:null,releaseMs:null,tuneOffset:0,volumePercent:100,volumeCustomized:false});
   const newAudioLayer = () => ({file:null,audio:null,pitchSuggestion:null,pitchNote:60,pitchConfirmed:false,sampleRate:32000,tuneOffset:0,volumePercent:100,delayMs:0,attackMs:0,holdMs:0,decayMs:0,sustainPercent:100,releaseMs:120});
   const newSf2Editor = () => ({open:false,method:null,file:null,sf2:null,programs:[],programIndex:null,
     regions:[],sf2Layers:[newSf2Layer()],audio:newAudioLayer(),ktsLayers:[],includeSmpl:true,key:60,velocity:110,
