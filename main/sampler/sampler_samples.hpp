@@ -135,7 +135,6 @@ SAMPLER_IMPORT_WAV("KANTAN_Synth/Synth_Bass_2_Synth_Bass_2-B1.ktsynth",         
 SAMPLER_IMPORT_WAV("KANTAN_Synth/Synth_Strings_2_Synth_Strings_2-C3.ktsynth",      ktsynth_synth_strings);
 SAMPLER_IMPORT_WAV("KANTAN_Synth/Vibraphone_Vibraphone-D4.ktsynth",               ktsynth_vibraphone);
 SAMPLER_IMPORT_WAV("KANTAN_Synth/Voice_Oohs_Voice_Oohs-B2.ktsynth",               ktsynth_voice_ooh);
-SAMPLER_IMPORT_WAV("KANTAN_Synth/Xylophone_Xylophone-E4.ktsynth",                 ktsynth_xylophone);
 
 #undef SAMPLER_IMPORT_WAV
 
@@ -292,7 +291,6 @@ static const ktsynth_source_t builtin_ktsynths[] = {
   { "Synth Strings", ktsynth_synth_strings, sizeof_ktsynth_synth_strings },
   { "Vibraphone",    ktsynth_vibraphone,    sizeof_ktsynth_vibraphone    },
   { "Voice Ooh",     ktsynth_voice_ooh,     sizeof_ktsynth_voice_ooh     },
-  { "Xylophone",     ktsynth_xylophone,     sizeof_ktsynth_xylophone     },
 };
 static constexpr size_t builtin_ktsynth_count =
   sizeof(builtin_ktsynths) / sizeof(builtin_ktsynths[0]);
