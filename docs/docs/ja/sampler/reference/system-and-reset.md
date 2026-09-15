@@ -46,7 +46,7 @@ SDカードをPCなどへ移すときは、電源を切る代わりに次の手�
 | `SAFE TO REMOVE` | 安全に取り外せます |
 | `ERROR` | 読み書きに失敗しました。カードを確認して`Load SD Card`を実行します |
 
-Eject後も、すでに読み込んだSample、Beat、KANTAN Synth、Recは演奏できます。
+Eject後も、すでに読み込んだサンプル、ビート、KANTAN Synth、Recは演奏できます。
 Music、保存、SDからの読込、File Editor、Performance Recordingは`Load SD Card`が成功するまで使えません。
 
 !!! danger

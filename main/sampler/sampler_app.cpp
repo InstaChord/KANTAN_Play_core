@@ -172,9 +172,9 @@ static constexpr const char* bass_tone_page_title = "Bass AMY Synth";
 static constexpr uint8_t factory_melody_program = 0;
 static constexpr uint8_t factory_chord_program = 0;
 static constexpr uint8_t factory_bass_program = 0;
-static constexpr uint8_t factory_melody_volume = 90;
+static constexpr uint8_t factory_melody_volume = 80;
 static constexpr uint8_t factory_chord_volume = 80;
-static constexpr uint8_t factory_bass_volume = 90;
+static constexpr uint8_t factory_bass_volume = 80;
 #else
 static constexpr const char* firmware_synth_backend_label = "SAM2695 + PCM";
 static constexpr const char* internal_synth_source_label = "General MIDI";
@@ -185,7 +185,7 @@ static constexpr uint8_t factory_melody_program = 81;
 static constexpr uint8_t factory_chord_program = 90;
 static constexpr uint8_t factory_bass_program = 38;
 static constexpr uint8_t factory_melody_volume = 80;
-static constexpr uint8_t factory_chord_volume = 60;
+static constexpr uint8_t factory_chord_volume = 80;
 static constexpr uint8_t factory_bass_volume = 80;
 #endif
 // GM programs are zero-based internally: displayed 82 / 91 are 81 / 90 here.
