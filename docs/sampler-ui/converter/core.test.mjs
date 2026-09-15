@@ -50,8 +50,9 @@ test('two descriptors can share Layer 1 PCM without KT2D or duplicate CRC input'
   const broken=bytes.slice();broken[broken.length-1]^=1;assert.throws(()=>parseKtSynth(broken),/CRC/);
 });
 
-test('Saw Lead fixture keeps shared PCM, layer settings, chunks, and CRC after re-save',async()=>{
-  const fixture=new Uint8Array(await readFile(new URL('../../Sample_Sound/KANTAN_Synth/Saw_Lead_Test-F_4.ktsynth',import.meta.url))),parsed=parseKtSynth(fixture);
+test('Saw Lead preset keeps shared PCM, layer settings, chunks, and CRC after re-save',async()=>{
+  const fixture=new Uint8Array(await readFile(new URL('../../Sample_Sound/KANTAN_Synth/Saw_Lead-F_4.ktsynth',import.meta.url))),parsed=parseKtSynth(fixture);
+  assert.equal(parsed.name,'Saw Lead');
   assert.equal(parsed.verified,true);assert.equal(parsed.hasSmpl,false);assert.equal(parsed.layers.length,2);assert.equal(chunkOffset(fixture,'KT2D'),-1);
   assert.equal(parsed.layers[0].pcmSourceLayer,0);assert.equal(parsed.layers[1].pcmSourceLayer,0);assert.equal(parsed.layers[0].pcm,parsed.layers[1].pcm);
   for(const layer of parsed.layers){assert.equal(layer.sampleRate,48000);assert.equal(layer.frameCount,256);assert.equal(layer.rootNote,66);assert.equal(layer.loopStartFrame,64);assert.equal(layer.loopEndFrameExclusive,192);assert.equal(layer.attackMs,1);assert.equal(layer.holdMs,1);assert.equal(layer.decayMs,1000);assert.equal(layer.sustainLevelQ15,32768);assert.equal(layer.releaseMs,500);assert.equal(layer.defaultGainQ8,128);}
