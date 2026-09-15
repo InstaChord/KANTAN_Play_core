@@ -418,7 +418,7 @@ import { decodeAudioFile, midiNoteName } from './converter/audio-input.js';
     const former=preserve?sf2Editor.sf2Layers.map(layer=>layer.regionId):[];
     sf2Editor.regions=sf2Editor.sf2&&sf2Editor.programIndex!==null?resolvePresetRegions(sf2Editor.sf2,Number(sf2Editor.programIndex),sf2Editor.key,sf2Editor.velocity):[];
     sf2Editor.sf2Layers=sf2Editor.sf2Layers.filter(layer=>sf2Editor.regions.some(region=>region.id===layer.regionId));
-    if(!preserve||!sf2Editor.sf2Layers.length){sf2Editor.sf2Layers=[newSf2Layer()];if(sf2Editor.regions.length===1)sf2Editor.sf2Layers[0].regionId=sf2Editor.regions[0].id;}
+    if(!preserve||!sf2Editor.sf2Layers.length){sf2Editor.sf2Layers=sf2Editor.regions.slice(0,2).map(region=>({...newSf2Layer(),regionId:region.id}));if(!sf2Editor.sf2Layers.length)sf2Editor.sf2Layers=[newSf2Layer()];}
     else sf2Editor.sf2Layers.sort((a,b)=>former.indexOf(a.regionId)-former.indexOf(b.regionId));
     for(const [index,layer] of sf2Editor.sf2Layers.entries()){const region=sf2Editor.regions.find(item=>item.id===layer.regionId);if(region&&!layer.volumeCustomized)layer.volumePercent=attenuationCbToGainPercent(region.initialAttenuationCb);applySf2RegionDefaults(layer,region);if(index===1&&sameSf2Waveform(sf2Editor.regions.find(item=>item.id===sf2Editor.sf2Layers[0].regionId),region))layer.pcmMode='same';}applySf2AutomaticVolumes();
     invalidateSynth();
