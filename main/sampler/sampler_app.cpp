@@ -10710,6 +10710,10 @@ static void update_menu_keypad_leds()
 
 static void draw_menu_keypad(bool force)
 {
+  // File Editor and setup QR screens own the whole LCD. Preview teardown can
+  // still request a forced keypad refresh while the menu remains logically
+  // open, but drawing it here would overwrite the QR surface.
+  if (ui_surface_exclusive) { return; }
   const uint8_t state = menu_keypad_state_for_current_menu();
   if (!force && state == menu_keypad_state) { return; }
   menu_keypad_state = state;
