@@ -1,6 +1,6 @@
 import { parseSf2, listSoundPrograms, initialSoundProgramIndex, resolvePresetRegions, extractRegionPcm } from './converter/sf2.js?v=096-kts2-fixture';
 import { resamplePcm, trimLoopTail, PreviewPlayer } from './converter/audio.js?v=096-kts2-fixture';
-import { encodeKtSynth, parseKtSynth, estimateKtSynthBytes, gainPercentToQ8, attenuationCbToGainPercent, KTSYNTH_MAX_BYTES } from './converter/ktsynth.js?v=096-kts2-fixture';
+import { encodeKtSynth, parseKtSynth, estimateKtSynthBytes, gainPercentToQ8, attenuationCbToGainPercent, normalizeLowGainPercents, KTSYNTH_MAX_BYTES } from './converter/ktsynth.js?v=098-sf2-gain';
 import { decodeAudioFile, midiNoteName } from './converter/audio-input.js';
 
 (() => {
@@ -404,6 +404,11 @@ import { decodeAudioFile, midiNoteName } from './converter/audio-input.js';
   function applySf2RegionDefaults(layer,region){
     if(!region)return;if(layer.delayMs===null)layer.delayMs=region.delayMs;if(layer.attackMs===null)layer.attackMs=region.attackMs;if(layer.holdMs===null)layer.holdMs=region.holdMs;if(layer.decayMs===null)layer.decayMs=region.decayMs;if(layer.sustainPercent===null)layer.sustainPercent=q15ToPercent(region.sustainLevelQ15);if(layer.releaseMs===null)layer.releaseMs=region.releaseMs;
   }
+  function applySf2AutomaticVolumes(){
+    const selected=selectedSf2Layers();if(!selected.length||selected.some(item=>item.settings.volumeCustomized))return;
+    const normalized=normalizeLowGainPercents(selected.map(item=>attenuationCbToGainPercent(item.region.initialAttenuationCb)));
+    selected.forEach((item,index)=>{item.settings.volumePercent=normalized[index];});
+  }
   const sameSf2Waveform = (a,b) => Boolean(a&&b&&a.sampleIndex===b.sampleIndex&&a.start===b.start&&a.end===b.end&&a.loopStart===b.loopStart&&a.loopEnd===b.loopEnd&&a.sustainMode===b.sustainMode&&a.sampleType===b.sampleType&&a.sampleLink===b.sampleLink);
   function updateSf2Regions(preserve=true){
     const former=preserve?sf2Editor.sf2Layers.map(layer=>layer.regionId):[];
@@ -411,7 +416,7 @@ import { decodeAudioFile, midiNoteName } from './converter/audio-input.js';
     sf2Editor.sf2Layers=sf2Editor.sf2Layers.filter(layer=>sf2Editor.regions.some(region=>region.id===layer.regionId));
     if(!preserve||!sf2Editor.sf2Layers.length){sf2Editor.sf2Layers=[newSf2Layer()];if(sf2Editor.regions.length===1)sf2Editor.sf2Layers[0].regionId=sf2Editor.regions[0].id;}
     else sf2Editor.sf2Layers.sort((a,b)=>former.indexOf(a.regionId)-former.indexOf(b.regionId));
-    for(const [index,layer] of sf2Editor.sf2Layers.entries()){const region=sf2Editor.regions.find(item=>item.id===layer.regionId);if(region&&!layer.volumeCustomized)layer.volumePercent=attenuationCbToGainPercent(region.initialAttenuationCb);applySf2RegionDefaults(layer,region);if(index===1&&sameSf2Waveform(sf2Editor.regions.find(item=>item.id===sf2Editor.sf2Layers[0].regionId),region))layer.pcmMode='same';}
+    for(const [index,layer] of sf2Editor.sf2Layers.entries()){const region=sf2Editor.regions.find(item=>item.id===layer.regionId);if(region&&!layer.volumeCustomized)layer.volumePercent=attenuationCbToGainPercent(region.initialAttenuationCb);applySf2RegionDefaults(layer,region);if(index===1&&sameSf2Waveform(sf2Editor.regions.find(item=>item.id===sf2Editor.sf2Layers[0].regionId),region))layer.pcmMode='same';}applySf2AutomaticVolumes();
     invalidateSynth();
   }
   async function loadSoundFont(file){
@@ -423,7 +428,7 @@ import { decodeAudioFile, midiNoteName } from './converter/audio-input.js';
     const at=sf2Editor.sf2Layers.findIndex(layer=>layer.regionId===region.id);
     if(at>=0){sf2Editor.sf2Layers.splice(at,1);if(!sf2Editor.sf2Layers.length)sf2Editor.sf2Layers.push(newSf2Layer());}
     else{const empty=sf2Editor.sf2Layers.find(layer=>!layer.regionId);if(empty)empty.regionId=region.id;else if(sf2Editor.sf2Layers.length<2)sf2Editor.sf2Layers.push({...newSf2Layer(),regionId:region.id});const layer=sf2Editor.sf2Layers.find(item=>item.regionId===region.id);if(layer){layer.volumePercent=attenuationCbToGainPercent(region.initialAttenuationCb);layer.volumeCustomized=false;applySf2RegionDefaults(layer,region);const index=sf2Editor.sf2Layers.indexOf(layer),first=sf2Editor.regions.find(item=>item.id===sf2Editor.sf2Layers[0].regionId);if(index===1&&sameSf2Waveform(first,region))layer.pcmMode='same';}}
-    invalidateSynth();renderSamples();
+    applySf2AutomaticVolumes();invalidateSynth();renderSamples();
   }
   async function previewSf2Layer(waveRegion,settings,parameterRegion=waveRegion){
     try{const source=extractRegionPcm(sf2Editor.sf2,waveRegion);await sf2Player.play(source.pcm,{sampleRate:waveRegion.sampleRate,previewNote:sf2Editor.key,rootNote:parameterRegion.rootNote,tuneCents:parameterRegion.tuneCents+(settings.tuneOffset||0),sustainMode:waveRegion.sustainMode,loopStart:source.loopStart,loopEnd:source.loopEnd,delayMs:settings.delayMs??parameterRegion.delayMs,attackMs:settings.attackMs??parameterRegion.attackMs,holdMs:settings.holdMs??parameterRegion.holdMs,decayMs:settings.decayMs??parameterRegion.decayMs,sustainLevelQ15:settings.sustainPercent===null?parameterRegion.sustainLevelQ15:percentToQ15(settings.sustainPercent),releaseMs:settings.releaseMs??parameterRegion.releaseMs,gainQ8:gainPercentToQ8(settings.volumePercent)});sf2Editor.error='';}
@@ -439,7 +444,7 @@ import { decodeAudioFile, midiNoteName } from './converter/audio-input.js';
   function buildSf2Output(){const selected=selectedSf2Layers(),name=safeSynthName(sf2Editor.name);if(!selected.length)throw new Error('Choose at least one source sound.');if(!name)throw new Error('Enter a sound name.');const layers=[buildSf2Layer(selected[0].region,selected[0].settings,selected[0].region,0)];if(selected[1]){const shared=selected[1].settings.pcmMode==='same';layers.push(buildSf2Layer(shared?selected[0].region:selected[1].region,selected[1].settings,selected[1].region,shared?0:1,shared?layers[0].sampleRate:null));}const bytes=encodeKtSynth(layers,{name});parseKtSynth(bytes);sf2Editor.output=bytes;return bytes;}
   function sf2LayerCard(item,index){
     const {region,settings}=item,selected=selectedSf2Layers(),waveRegion=index===1&&settings.pcmMode==='same'?selected[0].region:region,source=index===1?el('select',{},el('option',{value:'same',selected:settings.pcmMode==='same'?'':null},'Same as Layer 1'),el('option',{value:'own',selected:settings.pcmMode!=='same'?'':null},'Different sound')):null;if(source)source.addEventListener('change',()=>{settings.pcmMode=source.value;invalidateSynth();renderSamples();});const card=el('section',{class:'synth-layer'},el('div',{class:'sf2-launcher'},el('h3',{},`Layer ${index+1}: ${region.sampleName||'Sound'}`),index===1?el('button',{onclick:()=>toggleSf2Region(region)},'Remove Layer 2'):null),index===1?sf2Field('Layer 2 Source',source):null,el('div',{class:'actions'},el('button',{onclick:()=>previewSf2Layer(waveRegion,settings,region)},`Preview Layer ${index+1}`),el('button',{onclick:()=>sf2Player.stop(true)},'Stop')));
-    card.append(volumeControl(settings,()=>{settings.volumePercent=attenuationCbToGainPercent(region.initialAttenuationCb);settings.volumeCustomized=false;}));
+    card.append(volumeControl(settings,()=>{settings.volumePercent=attenuationCbToGainPercent(region.initialAttenuationCb);settings.volumeCustomized=false;applySf2AutomaticVolumes();}));
     const controls=[index===1&&settings.pcmMode==='same'?sf2Field('Sample Rate',el('output',{},`${selected[0].settings.sampleRate/1000} kHz`),'Shared with Layer 1'):rateControl(settings),numberControl(settings,'crossfadeMs',0,1000,'Loop Crossfade (ms)'),numberControl(settings,'tuneOffset',-100,100,'Pitch Correction (cents)'),...envelopeControls(settings)];card.append(el('details',{class:'sf2-advanced'},el('summary',{},`Layer ${index+1} Settings`),el('div',{class:'sf2-grid'},controls)));return card;
   }
   function sf2Panel(){

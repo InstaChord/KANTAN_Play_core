@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {resolvePresetRegions,extractRegionPcm,initialSoundProgramIndex,sustainCentibelsToQ15} from './sf2.js';
 import {resamplePcm,applyLoopCrossfade,PreviewPlayer} from './audio.js';
-import {crc32IsoHdlc,encodeKtSynth,parseKtSynth,validateKtSynthMetadata,gainPercentToQ8,attenuationCbToGainPercent,KTSYNTH_MAX_BYTES} from './ktsynth.js';
+import {crc32IsoHdlc,encodeKtSynth,parseKtSynth,validateKtSynthMetadata,gainPercentToQ8,attenuationCbToGainPercent,normalizeLowGainPercents,KTSYNTH_MAX_BYTES} from './ktsynth.js';
 import {detectStablePitch,midiNoteName,noteFromFilename,parseWavUnityNote} from './audio-input.js';
 
 const gen=(op,raw)=>({op,raw,signed:raw>32767?raw-65536:raw,lo:raw&255,hi:raw>>>8});
@@ -74,6 +74,7 @@ test('CRC implementation uses the ISO-HDLC check vector',()=>assert.equal(crc32I
 test('SF2 volume maps consistently between percent, attenuation and KTSYNTH gain',()=>{
   assert.equal(gainPercentToQ8(0),0);assert.equal(gainPercentToQ8(100),256);assert.equal(gainPercentToQ8(200),512);
   assert.equal(gainPercentToQ8(250),512);assert.equal(attenuationCbToGainPercent(0),100);assert.equal(attenuationCbToGainPercent(60),50);
+  assert.deepEqual(normalizeLowGainPercents([4,1]),[80,20]);assert.deepEqual(normalizeLowGainPercents([80,40]),[80,40]);assert.deepEqual(normalizeLowGainPercents([0,0]),[50,50]);
 });
 
 test('duration and 2 MiB limits fail instead of truncating',()=>{
