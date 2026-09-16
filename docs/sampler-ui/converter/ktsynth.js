@@ -4,15 +4,6 @@ export const KTSYNTH_MAX_LAYERS=2;
 const HEADER_BYTES=128,DESCRIPTOR_BYTES=48,DESCRIPTOR_OFFSET=24;
 export function gainPercentToQ8(percent){return Math.max(0,Math.min(512,Math.round((Number(percent)||0)*256/100)));}
 export function attenuationCbToGainPercent(centibels){return Math.max(0,Math.min(200,Math.round(Math.pow(10,-Math.max(0,Number(centibels)||0)/200)*100)));}
-export function normalizeLowGainPercents(values,target=100){
-  const gains=Array.from(values||[],value=>Math.max(0,Math.min(200,Math.round(Number(value)||0)))),goal=Math.max(0,Math.round(Number(target)||0)),total=gains.reduce((sum,value)=>sum+value,0);
-  if(!gains.length||total>=goal)return gains;
-  if(total===0){const base=Math.floor(goal/gains.length),out=gains.map(()=>base);for(let i=0;i<goal-base*gains.length;i++)out[i]++;return out;}
-  const scaled=gains.map(value=>value*goal/total),out=scaled.map(Math.floor);let remaining=goal-out.reduce((sum,value)=>sum+value,0);
-  const order=scaled.map((value,index)=>({index,fraction:value-out[index]})).sort((a,b)=>b.fraction-a.fraction||a.index-b.index);
-  for(let i=0;i<remaining;i++)out[order[i%order.length].index]++;
-  return out;
-}
 const ascii=(dv,p,s)=>{for(let i=0;i<s.length;i++)dv.setUint8(p+i,s.charCodeAt(i));};
 const fourCC=(dv,p)=>String.fromCharCode(dv.getUint8(p),dv.getUint8(p+1),dv.getUint8(p+2),dv.getUint8(p+3));
 const check=(ok,message)=>{if(!ok)throw new Error(`KTSYNTH validation error: ${message}`);};

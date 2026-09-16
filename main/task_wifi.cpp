@@ -678,7 +678,7 @@ static esp_err_t response_main_handler(httpd_req_t *req)
     "<link rel=\"stylesheet\" href=\"");
   httpd_resp_sendstr_chunk(req, base);
   httpd_resp_sendstr_chunk(req,
-    "/app.css?v=098-sf2-gain\"></head><body>"
+    "/app.css?v=104-kts2-layer2\"></head><body>"
     // sampler-ui/index.htmlと同じ最小シェルを本体側で返す。CSS/JSはGitHub
     // Pagesから読み、APIだけを本体のlocation.originへ向ける。
 #if defined(KANPLAY_SAMPLER)
@@ -703,7 +703,7 @@ static esp_err_t response_main_handler(httpd_req_t *req)
     "<script>window.KANPLAY={api:location.origin};</script>"
     "<script type=\"module\" src=\"");
   httpd_resp_sendstr_chunk(req, base);
-  httpd_resp_sendstr_chunk(req, "/app.js?v=103-beat-presets\"></script></body></html>");
+  httpd_resp_sendstr_chunk(req, "/app.js?v=104-kts2-layer2\"></script></body></html>");
   httpd_resp_sendstr_chunk(req, nullptr);
   return ESP_OK;
 }

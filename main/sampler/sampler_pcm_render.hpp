@@ -8,6 +8,128 @@
 
 namespace sampler_ns::pcm_render {
 
+enum : uint8_t {
+  envelope_delay = 0,
+  envelope_attack = 1,
+  envelope_hold = 2,
+  envelope_decay = 3,
+  envelope_sustain = 4,
+  envelope_release = 5,
+};
+
+static constexpr uint32_t envelope_peak_q16 = 32768u << 16;
+
+template <class Voice>
+inline void set_envelope_level_q16(Voice& v, uint32_t level)
+{
+  v.envelope_level_q16 = std::min<uint32_t>(envelope_peak_q16, level);
+  v.envelope_q15 = (uint16_t)(v.envelope_level_q16 >> 16);
+}
+
+template <class Voice>
+inline void enter_post_peak_phase(Voice& v)
+{
+  if (v.hold_frames_total) {
+    v.envelope_phase = envelope_hold;
+    v.envelope_phase_frames = v.hold_frames_total;
+  } else if (v.decay_step_q16) {
+    v.envelope_phase = envelope_decay;
+    v.envelope_phase_frames = v.decay_frames_total;
+  } else {
+    v.envelope_phase = envelope_sustain;
+    set_envelope_level_q16(v, (uint32_t)v.sustain_level_q15 << 16);
+  }
+}
+
+template <class Voice>
+inline void begin_release(Voice& v)
+{
+  v.envelope_phase = envelope_release;
+  if (v.envelope_level_q16 == 0) {
+    v.active = false;
+    return;
+  }
+  const uint32_t frames = std::max<uint32_t>(1, v.release_frames_total);
+  v.release_step_q16 = std::max<uint32_t>(1, v.envelope_level_q16 / frames);
+  v.envelope_phase_frames = frames;
+}
+
+// Advances the low-cost volume envelope by one output frame. False means the
+// PCM cursor must stay parked: Delay is silence before the waveform starts.
+template <class Voice>
+inline bool advance_envelope(Voice& v)
+{
+  if (!v.release_requested && v.auto_release_frames
+   && --v.auto_release_frames == 0) { v.release_requested = true; }
+  if (v.release_requested && v.envelope_phase != envelope_release) {
+    begin_release(v);
+  }
+  if (!v.active) { return false; }
+  switch (v.envelope_phase) {
+    case envelope_delay:
+      if (v.envelope_phase_frames && --v.envelope_phase_frames == 0) {
+        if (v.attack_step_q16) {
+          v.envelope_phase = envelope_attack;
+          v.envelope_phase_frames = v.attack_frames_total;
+        } else {
+          set_envelope_level_q16(v, envelope_peak_q16);
+          enter_post_peak_phase(v);
+        }
+      }
+      return false;
+    case envelope_attack:
+      if (v.envelope_phase_frames <= 1) {
+        v.envelope_phase_frames = 0;
+        set_envelope_level_q16(v, envelope_peak_q16);
+        // Hold frames were prepared at Note On and are consumed only here.
+        enter_post_peak_phase(v);
+      } else {
+        --v.envelope_phase_frames;
+        set_envelope_level_q16(v, v.envelope_level_q16 + v.attack_step_q16);
+      }
+      break;
+    case envelope_hold:
+      if (v.envelope_phase_frames && --v.envelope_phase_frames == 0) {
+        if (v.decay_step_q16) {
+          v.envelope_phase = envelope_decay;
+          v.envelope_phase_frames = v.decay_frames_total;
+        } else {
+          v.envelope_phase = envelope_sustain;
+          set_envelope_level_q16(v, (uint32_t)v.sustain_level_q15 << 16);
+        }
+      }
+      break;
+    case envelope_decay: {
+      const uint32_t target = (uint32_t)v.sustain_level_q15 << 16;
+      if (v.envelope_phase_frames <= 1) {
+        v.envelope_phase_frames = 0;
+        set_envelope_level_q16(v, target);
+        v.envelope_phase = envelope_sustain;
+      } else {
+        --v.envelope_phase_frames;
+        set_envelope_level_q16(v, v.envelope_level_q16 -
+          std::min<uint32_t>(v.envelope_level_q16 - target, v.decay_step_q16));
+      }
+      break;
+    }
+    case envelope_sustain:
+      if (v.envelope_q15 == 0) { v.active = false; return false; }
+      break;
+    case envelope_release:
+      if (v.envelope_phase_frames <= 1) {
+        v.envelope_phase_frames = 0;
+        set_envelope_level_q16(v, 0);
+        v.active = false;
+        return false;
+      }
+      --v.envelope_phase_frames;
+      set_envelope_level_q16(v, v.envelope_level_q16 -
+        std::min<uint32_t>(v.envelope_level_q16, v.release_step_q16));
+      break;
+  }
+  return true;
+}
+
 // Ordinary forward PCM playback. Scratch, seeking, filters and chopped-edge
 // fades keep the general renderer. Check once per voice/block, not per sample.
 template <class Voice>
@@ -56,13 +178,16 @@ inline void render(Voice& v, Bus* output, size_t count, bool beat)
   const uint32_t fractional_step = advance & 65535u;
   const uint16_t target_volume = v.target_volume_q8;
   uint16_t volume = v.volume_q8;
-  uint16_t envelope = v.envelope_q15;
   uint8_t phase = v.render_phase;
   bool valid = v.render_sample_valid;
   int32_t held = v.render_sample;
   uint32_t ui_frame = v.frame_for_ui;
 
   for (size_t i = 0; i < count; ++i) {
+    if (!advance_envelope(v)) {
+      if (!v.active) { break; }
+      continue;
+    }
     const bool render_now = !valid || divider == 1 || phase == 0;
     int32_t sample = held;
     if (render_now) {
@@ -96,21 +221,9 @@ inline void render(Voice& v, Bus* output, size_t count, bool beat)
     if (volume < target_volume) { ++volume; }
     else if (volume > target_volume) { --volume; }
     if (volume != 256) { sample = (sample * volume) >> 8; }
-    if (!v.release_requested && v.auto_release_frames
-     && --v.auto_release_frames == 0) { v.release_requested = true; }
-    if (v.release_requested) {
-      if (envelope <= v.release_step_q15) {
-        envelope = 0;
-        v.active = false;
-        break;
-      }
-      envelope -= v.release_step_q15;
-    } else if (envelope < 32768) {
-      envelope = (uint16_t)std::min<uint32_t>(32768u, envelope + v.attack_step_q15);
-    }
     // At <= 200% gain the product still fits int32_t, including full-scale
     // negative PCM. Preserve the original per-frame envelope and smoothing.
-    if (envelope != 32768) { sample = (sample * envelope) >> 15; }
+    if (v.envelope_q15 != 32768) { sample = (sample * v.envelope_q15) >> 15; }
     if (beat) { output[i].beat += (int64_t)sample * 65536; }
     else { output[i].parts += (int64_t)sample * 65536; }
     if (++phase >= divider) { phase = 0; }
@@ -126,7 +239,6 @@ inline void render(Voice& v, Bus* output, size_t count, bool beat)
   v.render_sample = held;
   v.render_sample_valid = valid;
   v.volume_q8 = volume;
-  v.envelope_q15 = envelope;
 }
 
 } // namespace sampler_ns::pcm_render

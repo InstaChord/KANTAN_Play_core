@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {resolvePresetRegions,extractRegionPcm,initialSoundProgramIndex,sustainCentibelsToQ15} from './sf2.js';
 import {resamplePcm,applyLoopCrossfade,PreviewPlayer} from './audio.js';
-import {crc32IsoHdlc,encodeKtSynth,parseKtSynth,validateKtSynthMetadata,gainPercentToQ8,attenuationCbToGainPercent,normalizeLowGainPercents,KTSYNTH_MAX_BYTES} from './ktsynth.js';
+import {crc32IsoHdlc,encodeKtSynth,parseKtSynth,validateKtSynthMetadata,gainPercentToQ8,attenuationCbToGainPercent,KTSYNTH_MAX_BYTES} from './ktsynth.js';
 import {detectStablePitch,midiNoteName,noteFromFilename,parseWavUnityNote} from './audio-input.js';
 
 const gen=(op,raw)=>({op,raw,signed:raw>32767?raw-65536:raw,lo:raw&255,hi:raw>>>8});
@@ -74,7 +74,6 @@ test('CRC implementation uses the ISO-HDLC check vector',()=>assert.equal(crc32I
 test('SF2 volume maps consistently between percent, attenuation and KTSYNTH gain',()=>{
   assert.equal(gainPercentToQ8(0),0);assert.equal(gainPercentToQ8(100),256);assert.equal(gainPercentToQ8(200),512);
   assert.equal(gainPercentToQ8(250),512);assert.equal(attenuationCbToGainPercent(0),100);assert.equal(attenuationCbToGainPercent(60),50);
-  assert.deepEqual(normalizeLowGainPercents([4,1]),[80,20]);assert.deepEqual(normalizeLowGainPercents([80,40]),[80,40]);assert.deepEqual(normalizeLowGainPercents([0,0]),[50,50]);
 });
 
 test('duration and 2 MiB limits fail instead of truncating',()=>{
@@ -129,8 +128,6 @@ test('the simple UI keeps layered selection and primary save in the visible flow
   const parser=await readFile(new URL('../../../main/sampler/sampler_ktsynth.hpp',import.meta.url),'utf8');
   assert.match(source,/Sounds/);assert.match(source,/Choose up to 2/);
   assert.match(source,/sf2Layers:\[newSf2Layer\(\)\]/);assert.match(source,/type:'checkbox'/);
-  assert.match(source,/newSf2Layer = \(\) => \(\{[^}]*crossfadeMs:0/);
-  assert.match(source,/regions\.slice\(0,2\)\.map/);
   assert.doesNotMatch(source,/Add Layer 2|second audio file/);assert.match(source,/Remove Layer 2/);
   assert.match(source,/audio:newAudioLayer\(\)/);assert.match(source,/Combined Layer 1 and Layer 2 volume/);
   assert.match(source,/1 audio file/);assert.match(source,/KTS2 · 1 layer/);
@@ -149,13 +146,10 @@ test('the simple UI keeps layered selection and primary save in the visible flow
   assert.match(html,/data-view="synth-view">Synth/);assert.doesNotMatch(source,/if\(region\.unsupported\.length\)throw/);
   assert.match(source,/Synth Sound/);assert.match(source,/Bass, Melody, and Chord/);
   assert.doesNotMatch(source,/external server|within this browser/i);
-  assert.match(source,/unsupported features are ignored/i);assert.match(source,/Play on Device/);assert.doesNotMatch(source,/Play on KANTAN Sampler/);
+  assert.match(source,/unsupported features are ignored/i);assert.match(source,/Play on KANTAN Sampler/);
   assert.match(source,/function synthFilePicker/);assert.match(source,/addEventListener\('drop'/);assert.match(source,/WAV or MP3 · max 20 sec/);
   assert.match(source,/hold:true/);assert.match(source,/stopSynthPreview/);assert.match(source,/'Off'/);
-  assert.match(source,/if\(sf2Editor\.devicePlaying\)await stopSynthOnDevice\(\)/);
-  assert.match(source,/previewNote:parameterRegion\.rootNote,rootNote:parameterRegion\.rootNote/);
-  assert.match(source,/rootNote:parameterRegion\.rootNote/);assert.match(source,/rootNote:Math\.round\(settings\.rootNote\)/);assert.match(source,/rootNote:layer\.pitchNote/);
-  assert.match(firmware,/doc\["hold"\]/);assert.match(firmware,/playSynth\(menu_preview_voice/);assert.match(firmware,/strcmp\(action, "stopSynthPreview"\)/);
+  assert.match(firmware,/doc\["hold"\]/);assert.match(firmware,/(?:playSynth|play_layer)\(menu_preview_voice/);assert.match(firmware,/strcmp\(action, "stopSynthPreview"\)/);
   assert.match(source,/\/api\/sampler\/preview-ktsynth/);assert.match(source,/\.web-preview\.ktsynth/);
   assert.match(api,/response_ktsynth_preview/);assert.match(api,/Synth\/\.web-preview\.ktsynth/);
   assert.match(parser,/memcmp\(metadata, "KTS2", 4\)/);assert.match(parser,/"KT2D"/);
