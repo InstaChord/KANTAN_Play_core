@@ -29,6 +29,8 @@ void sampler_pool_t::setProgressCallback(progress_callback_t callback)
 
 sample_slot_t sampler_pool_t::slot[def::pad::pad_count];
 sample_slot_t sampler_pool_t::synth_source[sampler_pool_t::synth_source_count];
+synth_layer_slot_t sampler_pool_t::synth_layer2[sampler_pool_t::synth_source_count];
+uint8_t sampler_pool_t::synth_layer_count[sampler_pool_t::synth_source_count] = { 1, 1, 1 };
 sample_slot_t beat_pool_t::slot[def::pad::pad_count];
 static sample_asset_t sampler_assets[sampler_pool_t::asset_capacity];
 
@@ -664,10 +666,11 @@ bool sampler_pool_t::loadKtSynth(uint8_t index, const char* display_name,
   if (index >= def::pad::pad_count) { return false; }
   ktsynth_info_t info;
   if (!parse_ktsynth(file_data, file_size, &info)) { return false; }
+  const auto& layer = info.layer[0];
 
-  const uint32_t target_rate = info.wav.sample_rate == 44100 ? 48000 : info.wav.sample_rate;
-  const uint32_t target_frames = resampled_frame_count(info.wav.frames,
-                                                        info.wav.sample_rate, target_rate);
+  const uint32_t target_rate = layer.sample_rate == 44100 ? 48000 : layer.sample_rate;
+  const uint32_t target_frames = resampled_frame_count(layer.frame_count,
+                                                        layer.sample_rate, target_rate);
   if (target_frames < 16 || target_frames > target_rate * max_sample_sec) { return false; }
   const size_t new_bytes = (size_t)target_frames * sizeof(int16_t);
   const size_t replacing_bytes = slot[index].asset && slot[index].asset->references == 1
@@ -688,28 +691,28 @@ bool sampler_pool_t::loadKtSynth(uint8_t index, const char* display_name,
   auto& sample = slot[index];
   initialize_asset_sample_slot(sample, asset, 0, target_frames, target_rate,
                                authored_name[0] ? authored_name : display_name);
-  sample.start_frame = remap_ktsynth_frame(info.start_frame, info.wav.sample_rate,
+  sample.start_frame = remap_ktsynth_frame(layer.start_frame, layer.sample_rate,
                                             target_rate, target_frames);
-  sample.end_frame = remap_ktsynth_frame(info.end_frame, info.wav.sample_rate,
+  sample.end_frame = remap_ktsynth_frame(layer.end_frame, layer.sample_rate,
                                           target_rate, target_frames);
-  sample.base_note = info.root_note;
+  sample.base_note = layer.root_note;
   sample.base_note_auto = false;
-  sample.synth_attack_ms = info.attack_ms;
-  sample.synth_release_ms = info.release_ms;
-  sample.synth_tune_cents = info.tune_cents;
+  sample.synth_attack_ms = layer.attack_ms;
+  sample.synth_release_ms = layer.release_ms;
+  sample.synth_tune_cents = layer.tune_cents;
   sample.synth_tune_scale_q12 = (uint16_t)std::clamp<int>(
-    (int)lroundf(powf(2.0f, (float)info.tune_cents / 1200.0f) * 4096.0f), 2048, 8192);
-  sample.volume_q8 = info.default_gain_q8;
-  if (info.sustain_mode == ktsynth_sustain_mode_t::loop) {
+    (int)lroundf(powf(2.0f, (float)layer.tune_cents / 1200.0f) * 4096.0f), 2048, 8192);
+  sample.volume_q8 = layer.default_gain_q8;
+  if (layer.sustain_mode == ktsynth_sustain_mode_t::loop) {
     sample.synth_sustain_mode = sample_sustain_mode_t::manual;
-    sample.synth_loop_start = remap_ktsynth_frame(info.loop_start_frame,
-                                                   info.wav.sample_rate,
+    sample.synth_loop_start = remap_ktsynth_frame(layer.loop_start_frame,
+                                                   layer.sample_rate,
                                                    target_rate, target_frames);
-    sample.synth_loop_end = remap_ktsynth_frame(info.loop_end_frame,
-                                                 info.wav.sample_rate,
+    sample.synth_loop_end = remap_ktsynth_frame(layer.loop_end_frame,
+                                                 layer.sample_rate,
                                                  target_rate, target_frames);
-    const uint32_t crossfade = remap_ktsynth_frame(info.loop_crossfade_frames,
-                                                    info.wav.sample_rate,
+    const uint32_t crossfade = remap_ktsynth_frame(layer.loop_crossfade_frames,
+                                                    layer.sample_rate,
                                                     target_rate, target_frames);
     sample.synth_loop_crossfade = (uint16_t)std::min<uint32_t>(crossfade, UINT16_MAX);
   } else {
@@ -770,82 +773,246 @@ static bool load_synth_wav_slot(sample_slot_t& destination, const char* display_
   return destination.isValid();
 }
 
-static bool load_synth_ktsynth_slot(sample_slot_t& destination, const char* display_name,
+static size_t replaceable_synth_bytes(const sample_slot_t& primary,
+                                      const synth_layer_slot_t& layer2)
+{
+  size_t bytes = 0;
+  if (primary.asset) {
+    const uint16_t local_references = 1u + (layer2.asset == primary.asset ? 1u : 0u);
+    if (primary.asset->references == local_references) { bytes += primary.asset->bytes(); }
+  }
+  if (layer2.asset && layer2.asset != primary.asset && layer2.asset->references == 1) {
+    bytes += layer2.asset->bytes();
+  }
+  return bytes;
+}
+
+static void erase_synth_layer_slot(synth_layer_slot_t& layer)
+{
+  if (layer.asset) { pool_release_asset(layer.asset); }
+  else if (layer.pcm) { pool_free(layer.pcm); }
+  layer = {};
+}
+
+static int16_t resampled_ktsynth_frame(const ktsynth_layer_info_t& source,
+                                       uint32_t frame, uint32_t target_rate)
+{
+  if (source.sample_rate == target_rate) { return source.pcm[frame]; }
+  const uint64_t source_fp = ((uint64_t)frame * source.sample_rate << 16) / target_rate;
+  const uint32_t index = std::min<uint32_t>((uint32_t)(source_fp >> 16),
+                                             source.frame_count - 1u);
+  const uint32_t next = std::min<uint32_t>(index + 1u, source.frame_count - 1u);
+  const uint32_t fraction = (uint32_t)source_fp & 0xFFFFu;
+  return (int16_t)((((int64_t)source.pcm[index] * (65536u - fraction))
+                  + (int64_t)source.pcm[next] * fraction) >> 16);
+}
+
+static uint16_t ktsynth_tune_scale_q12(int16_t cents)
+{
+  return (uint16_t)std::clamp<int>(
+    (int)lroundf(powf(2.0f, (float)cents / 1200.0f) * 4096.0f), 2048, 8192);
+}
+
+static void apply_ktsynth_layer(sample_slot_t& destination, sample_asset_t* asset,
+                                const ktsynth_layer_info_t& source, uint32_t target_rate,
+                                const char* name, bool retain)
+{
+  const uint32_t frames = asset->frames;
+  initialize_asset_sample_slot(destination, asset, 0, frames, target_rate, name, retain);
+  destination.start_frame = remap_ktsynth_frame(source.start_frame, source.sample_rate,
+                                                 target_rate, frames);
+  destination.end_frame = remap_ktsynth_frame(source.end_frame, source.sample_rate,
+                                               target_rate, frames);
+  destination.base_note = source.root_note;
+  destination.base_note_auto = false;
+  destination.synth_attack_ms = source.attack_ms;
+  destination.synth_release_ms = source.release_ms;
+  destination.synth_delay_100us = source.delay_100us;
+  destination.synth_hold_ms = source.hold_ms;
+  destination.synth_decay_ms = source.decay_ms;
+  destination.synth_sustain_level_q15 = source.sustain_level_q15;
+  destination.synth_tune_cents = source.tune_cents;
+  destination.synth_tune_scale_q12 = ktsynth_tune_scale_q12(source.tune_cents);
+  destination.volume_q8 = source.default_gain_q8;
+  destination.synth_sustain_mode = source.sustain_mode == ktsynth_sustain_mode_t::loop
+    ? sample_sustain_mode_t::manual : sample_sustain_mode_t::off;
+  if (destination.synth_sustain_mode == sample_sustain_mode_t::manual) {
+    destination.synth_loop_start = remap_ktsynth_frame(source.loop_start_frame,
+      source.sample_rate, target_rate, frames);
+    destination.synth_loop_end = remap_ktsynth_frame(source.loop_end_frame,
+      source.sample_rate, target_rate, frames);
+    destination.synth_loop_crossfade = (uint16_t)std::min<uint32_t>(
+      remap_ktsynth_frame(source.loop_crossfade_frames, source.sample_rate,
+                           target_rate, frames), UINT16_MAX);
+  }
+  build_waveform_cache(destination);
+}
+
+static void apply_ktsynth_layer(synth_layer_slot_t& destination, sample_asset_t* asset,
+                                const ktsynth_layer_info_t& source, uint32_t target_rate,
+                                bool retain)
+{
+  destination = {};
+  if (retain) { pool_retain_asset(asset); }
+  destination.asset = asset;
+  destination.pcm = asset->pcm;
+  destination.frames = asset->frames;
+  destination.sample_rate = target_rate;
+  destination.start_frame = remap_ktsynth_frame(source.start_frame, source.sample_rate,
+                                                 target_rate, asset->frames);
+  destination.end_frame = remap_ktsynth_frame(source.end_frame, source.sample_rate,
+                                               target_rate, asset->frames);
+  destination.base_note = source.root_note;
+  destination.synth_attack_ms = source.attack_ms;
+  destination.synth_release_ms = source.release_ms;
+  destination.synth_delay_100us = source.delay_100us;
+  destination.synth_hold_ms = source.hold_ms;
+  destination.synth_decay_ms = source.decay_ms;
+  destination.synth_sustain_level_q15 = source.sustain_level_q15;
+  destination.synth_tune_cents = source.tune_cents;
+  destination.synth_tune_scale_q12 = ktsynth_tune_scale_q12(source.tune_cents);
+  destination.volume_q8 = source.default_gain_q8;
+  destination.synth_sustain_mode = source.sustain_mode == ktsynth_sustain_mode_t::loop
+    ? sample_sustain_mode_t::manual : sample_sustain_mode_t::off;
+  if (destination.synth_sustain_mode == sample_sustain_mode_t::manual) {
+    destination.synth_loop_start = remap_ktsynth_frame(source.loop_start_frame,
+      source.sample_rate, target_rate, asset->frames);
+    destination.synth_loop_end = remap_ktsynth_frame(source.loop_end_frame,
+      source.sample_rate, target_rate, asset->frames);
+    destination.synth_loop_crossfade = (uint16_t)std::min<uint32_t>(
+      remap_ktsynth_frame(source.loop_crossfade_frames, source.sample_rate,
+                           target_rate, asset->frames), UINT16_MAX);
+  }
+}
+
+static bool load_synth_ktsynth_slot(uint8_t destination_index, const char* display_name,
                                     const uint8_t* file_data, size_t file_size,
-                                    const sample_slot_t* shared_source = nullptr)
+                                    int8_t shared_source_index = -1)
 {
   ktsynth_info_t info;
   if (!parse_ktsynth(file_data, file_size, &info)) { return false; }
-  const uint32_t target_rate = info.wav.sample_rate == 44100 ? 48000 : info.wav.sample_rate;
-  const uint32_t frames = resampled_frame_count(info.wav.frames, info.wav.sample_rate, target_rate);
-  sample_asset_t* asset = shared_source && shared_source->sample_rate == target_rate
-    && shared_source->asset && shared_source->asset->frames == frames
-    && shared_source->pcm == shared_source->asset->pcm
-      ? shared_source->asset : nullptr;
-  if (frames < 16 || frames > target_rate * sampler_pool_t::max_sample_sec
-   || (!asset && (size_t)frames * sizeof(int16_t)
-       > sampler_pool_t::freeBytes() + replaceable_slot_bytes(destination))) {
-    return false;
+  auto& destination = sampler_pool_t::synth_source[destination_index];
+  auto& destination_layer2 = sampler_pool_t::synth_layer2[destination_index];
+  sample_asset_t* assets[2] = {};
+  bool retained_assets[2] = {};
+  uint32_t rates[2] = {};
+  uint32_t frames[2] = {};
+  size_t required_bytes = 0;
+  for (uint8_t layer = 0; layer < info.layer_count; ++layer) {
+    rates[layer] = info.layer[layer].sample_rate == 44100 ? 48000 : info.layer[layer].sample_rate;
+    frames[layer] = resampled_frame_count(info.layer[layer].frame_count,
+                                           info.layer[layer].sample_rate, rates[layer]);
+    if (frames[layer] < 16 || frames[layer] > rates[layer] * sampler_pool_t::max_sample_sec) {
+      return false;
+    }
+    const uint8_t pcm_source = info.layer[layer].pcm_source_layer;
+    if (pcm_source < layer) {
+      if (rates[layer] != rates[pcm_source] || frames[layer] != frames[pcm_source]) {
+        return false;
+      }
+      assets[layer] = assets[pcm_source];
+      continue;
+    }
+    if (shared_source_index >= 0) {
+      const auto* shared_asset = pcm_source == 0
+        ? sampler_pool_t::synth_source[(uint8_t)shared_source_index].asset
+        : sampler_pool_t::synth_layer2[(uint8_t)shared_source_index].asset;
+      const auto shared_rate = pcm_source == 0
+        ? sampler_pool_t::synth_source[(uint8_t)shared_source_index].sample_rate
+        : sampler_pool_t::synth_layer2[(uint8_t)shared_source_index].sample_rate;
+      if (shared_asset && shared_asset->frames == frames[layer] && shared_rate == rates[layer]) {
+        assets[layer] = const_cast<sample_asset_t*>(shared_asset);
+      }
+    }
+    if (!assets[layer]) { required_bytes += (size_t)frames[layer] * sizeof(int16_t); }
   }
-  const bool shared = asset != nullptr;
-  // Retain before erasing: destination may already refer to this asset.
-  if (shared) { pool_retain_asset(asset); }
+  const size_t replaceable = replaceable_synth_bytes(destination, destination_layer2);
+  if (required_bytes > sampler_pool_t::freeBytes() + replaceable) { return false; }
+
+  for (uint8_t layer = 0; layer < info.layer_count; ++layer) {
+    if (info.layer[layer].pcm_source_layer < layer) {
+      assets[layer] = assets[info.layer[layer].pcm_source_layer];
+    }
+    if (assets[layer]) {
+      pool_retain_asset(assets[layer]);
+      retained_assets[layer] = true;
+    }
+  }
   erase_synth_source_slot(destination);
-  if (!shared) {
-    asset = pool_create_asset(frames);
-    if (!asset) { return false; }
-    for (uint32_t i = 0; i < frames; ++i) {
-      asset->pcm[i] = wav_resampled_mono_frame(info.wav, i, target_rate);
-      report_import_progress(i);
+  erase_synth_layer_slot(destination_layer2);
+  for (uint8_t layer = 0; layer < info.layer_count; ++layer) {
+    if (info.layer[layer].pcm_source_layer < layer) {
+      assets[layer] = assets[info.layer[layer].pcm_source_layer];
+      continue;
+    }
+    if (!assets[layer]) {
+      assets[layer] = pool_create_asset(frames[layer]);
+      if (!assets[layer]) {
+        for (uint8_t cleanup = 0; cleanup < info.layer_count; ++cleanup) {
+          if (!assets[cleanup]) { continue; }
+          if (retained_assets[cleanup]) {
+            pool_release_asset(assets[cleanup]);
+          } else if (info.layer[cleanup].pcm_source_layer == cleanup
+                  && assets[cleanup]->references == 0) {
+            pool_free(assets[cleanup]->pcm);
+            *assets[cleanup] = {};
+          }
+        }
+        sampler_pool_t::synth_layer_count[destination_index] = 1;
+        return false;
+      }
+      for (uint32_t frame = 0; frame < frames[layer]; ++frame) {
+        assets[layer]->pcm[frame] = resampled_ktsynth_frame(info.layer[layer], frame,
+                                                            rates[layer]);
+        report_import_progress(frame);
+      }
     }
   }
   char authored_name[64] = {};
   const size_t copy_name_bytes = std::min<size_t>(info.name_bytes, sizeof(authored_name) - 1);
   if (copy_name_bytes) { memcpy(authored_name, info.name, copy_name_bytes); }
-  initialize_asset_sample_slot(destination, asset, 0, frames, target_rate,
-                               authored_name[0] ? authored_name : display_name, !shared);
-  destination.start_frame = remap_ktsynth_frame(info.start_frame, info.wav.sample_rate,
-                                                 target_rate, frames);
-  destination.end_frame = remap_ktsynth_frame(info.end_frame, info.wav.sample_rate,
-                                               target_rate, frames);
-  destination.base_note = info.root_note;
-  destination.base_note_auto = false;
-  destination.synth_attack_ms = info.attack_ms;
-  destination.synth_release_ms = info.release_ms;
-  destination.synth_tune_cents = info.tune_cents;
-  destination.synth_tune_scale_q12 = (uint16_t)std::clamp<int>(
-    (int)lroundf(powf(2.0f, (float)info.tune_cents / 1200.0f) * 4096.0f), 2048, 8192);
-  destination.volume_q8 = info.default_gain_q8;
-  if (info.sustain_mode == ktsynth_sustain_mode_t::loop) {
-    destination.synth_sustain_mode = sample_sustain_mode_t::manual;
-    destination.synth_loop_start = remap_ktsynth_frame(info.loop_start_frame,
-                                                        info.wav.sample_rate,
-                                                        target_rate, frames);
-    destination.synth_loop_end = remap_ktsynth_frame(info.loop_end_frame,
-                                                      info.wav.sample_rate,
-                                                      target_rate, frames);
-    destination.synth_loop_crossfade = (uint16_t)std::min<uint32_t>(
-      remap_ktsynth_frame(info.loop_crossfade_frames, info.wav.sample_rate,
-                           target_rate, frames), UINT16_MAX);
-  } else {
-    destination.synth_sustain_mode = sample_sustain_mode_t::off;
+  const char* name = authored_name[0] ? authored_name : display_name;
+  apply_ktsynth_layer(destination, assets[0], info.layer[0], rates[0], name,
+                      !retained_assets[0]);
+  if (info.layer_count == 2) {
+    apply_ktsynth_layer(destination_layer2, assets[1], info.layer[1], rates[1],
+                        !retained_assets[1]);
   }
-  build_waveform_cache(destination);
-  return destination.isValid();
+  sampler_pool_t::synth_layer_count[destination_index] = info.layer_count;
+  return destination.isValid()
+      && (info.layer_count == 1 || destination_layer2.isValid());
 }
 
 bool sampler_pool_t::loadSynthWav(uint8_t synth_index, const char* display_name,
                                   const uint8_t* wav_data, size_t wav_size)
 {
-  return synth_index < synth_source_count
-      && load_synth_wav_slot(synth_source[synth_index], display_name, wav_data, wav_size);
+  if (synth_index >= synth_source_count) { return false; }
+  wav_info_t info;
+  if (!parse_wav(wav_data, wav_size, &info)) { return false; }
+  const uint32_t rate = info.sample_rate == 44100 ? 48000 : info.sample_rate;
+  const uint32_t source_frames = std::min<uint32_t>(info.frames, info.sample_rate * max_sample_sec);
+  const size_t required = (size_t)resampled_frame_count(source_frames, info.sample_rate, rate) * 2u;
+  if (required > freeBytes() + replaceable_synth_bytes(synth_source[synth_index],
+                                                       synth_layer2[synth_index])) { return false; }
+  erase_synth_layer_slot(synth_layer2[synth_index]);
+  synth_layer_count[synth_index] = 1;
+  return load_synth_wav_slot(synth_source[synth_index], display_name, wav_data, wav_size);
 }
 
 bool sampler_pool_t::loadSynthWavPreserved(uint8_t synth_index, const char* display_name,
                                            const uint8_t* wav_data, size_t wav_size)
 {
-  return synth_index < synth_source_count
-      && load_synth_wav_slot(synth_source[synth_index], display_name,
+  if (synth_index >= synth_source_count) { return false; }
+  wav_info_t info;
+  if (!parse_wav(wav_data, wav_size, &info)) { return false; }
+  const uint32_t rate = info.sample_rate == 44100 ? 48000 : info.sample_rate;
+  const uint32_t source_frames = std::min<uint32_t>(info.frames, info.sample_rate * max_sample_sec);
+  const size_t required = (size_t)resampled_frame_count(source_frames, info.sample_rate, rate) * 2u;
+  if (required > freeBytes() + replaceable_synth_bytes(synth_source[synth_index],
+                                                       synth_layer2[synth_index])) { return false; }
+  erase_synth_layer_slot(synth_layer2[synth_index]);
+  synth_layer_count[synth_index] = 1;
+  return load_synth_wav_slot(synth_source[synth_index], display_name,
                               wav_data, wav_size, true);
 }
 
@@ -860,7 +1027,10 @@ bool sampler_pool_t::loadSynthPcmOwned(uint8_t synth_index, const char* display_
   }
   auto& destination = synth_source[synth_index];
   const size_t new_bytes = (size_t)frames * sizeof(int16_t);
-  if (new_bytes > freeBytes() + replaceable_slot_bytes(destination)) { return false; }
+  if (new_bytes > freeBytes() + replaceable_synth_bytes(destination,
+                                                        synth_layer2[synth_index])) { return false; }
+  erase_synth_layer_slot(synth_layer2[synth_index]);
+  synth_layer_count[synth_index] = 1;
   erase_synth_source_slot(destination);
   normalize_pcm_for_pad(pcm_data, frames);
   sample_asset_t* asset = pool_adopt_asset(pcm_data, frames);
@@ -878,8 +1048,7 @@ bool sampler_pool_t::loadSynthKtSynth(uint8_t synth_index, const char* display_n
                                       const uint8_t* file_data, size_t file_size)
 {
   return synth_index < synth_source_count
-      && load_synth_ktsynth_slot(synth_source[synth_index], display_name,
-                                  file_data, file_size);
+      && load_synth_ktsynth_slot(synth_index, display_name, file_data, file_size);
 }
 
 bool sampler_pool_t::shareSynth(uint8_t destination, uint8_t source,
@@ -893,13 +1062,17 @@ bool sampler_pool_t::shareSynth(uint8_t destination, uint8_t source,
   }
   // Share only immutable PCM. Reload authored metadata so another part's
   // Trim/Envelope/Gain edits never become this part's new tone defaults.
-  return load_synth_ktsynth_slot(synth_source[destination], display_name,
-                                file_data, file_size, &synth_source[source]);
+  return load_synth_ktsynth_slot(destination, display_name, file_data, file_size,
+                                 (int8_t)source);
 }
 
 void sampler_pool_t::eraseSynth(uint8_t synth_index)
 {
-  if (synth_index < synth_source_count) { erase_synth_source_slot(synth_source[synth_index]); }
+  if (synth_index < synth_source_count) {
+    erase_synth_source_slot(synth_source[synth_index]);
+    erase_synth_layer_slot(synth_layer2[synth_index]);
+    synth_layer_count[synth_index] = 1;
+  }
 }
 
 static bool load_pcm_for_pad(uint8_t index, const char* display_name, const int16_t* pcm_data,

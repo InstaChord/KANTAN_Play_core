@@ -119,23 +119,19 @@ SAMPLER_IMPORT_WAV("Generated_Presets/FX_Fall.wav",           wav_preset_fx_fall
 // Keep complete .ktsynth containers so built-in and SD tones share one parser.
 SAMPLER_IMPORT_WAV("KANTAN_Synth/Alto_Sax_Alto_Sax-D4.ktsynth",                   ktsynth_alto_sax);
 SAMPLER_IMPORT_WAV("KANTAN_Synth/Celeste_Celeste-A4.ktsynth",                     ktsynth_celeste);
-SAMPLER_IMPORT_WAV("KANTAN_Synth/Charang_Clavinet-E4.ktsynth",                    ktsynth_charang);
 SAMPLER_IMPORT_WAV("KANTAN_Synth/Distortion_Guitar_Distortion_Guitar-B3.ktsynth", ktsynth_dist_guitar);
 SAMPLER_IMPORT_WAV("KANTAN_Synth/Dulcimer_Dulcimer-C_4.ktsynth",                  ktsynth_dulcimer);
-SAMPLER_IMPORT_WAV("KANTAN_Synth/Flute_Flute-A_4.ktsynth",                        ktsynth_flute);
 SAMPLER_IMPORT_WAV("KANTAN_Synth/Marimba_Marimba-C4.ktsynth",                     ktsynth_marimba);
 SAMPLER_IMPORT_WAV("KANTAN_Synth/Percussive_Organ_Organ_Slow-D_3.ktsynth",         ktsynth_perc_organ);
 SAMPLER_IMPORT_WAV("KANTAN_Synth/Pick_Bass_Pick_Bass-D1.ktsynth",                 ktsynth_pick_bass);
+SAMPLER_IMPORT_WAV("KANTAN_Synth/Saw_Lead-F_4.ktsynth",                          ktsynth_saw_lead);
 SAMPLER_IMPORT_WAV("KANTAN_Synth/Polysynth_Synth_Strings_1-C42.ktsynth",           ktsynth_polysynth);
 SAMPLER_IMPORT_WAV("KANTAN_Synth/Slap_Bass_1_Slap_Bass_1-E3.ktsynth",             ktsynth_slap_bass);
-SAMPLER_IMPORT_WAV("KANTAN_Synth/Solo_Vox_Solo_Vox-G4.ktsynth",                   ktsynth_solo_vox);
-SAMPLER_IMPORT_WAV("KANTAN_Synth/Space_Voice_Solo_Vox-G4.ktsynth",                ktsynth_space_voice);
 SAMPLER_IMPORT_WAV("KANTAN_Synth/Steel_Guitar_Steel_Guitar-B4.ktsynth",           ktsynth_steel_guitar);
 SAMPLER_IMPORT_WAV("KANTAN_Synth/Synth_Bass_2_Synth_Bass_2-B1.ktsynth",           ktsynth_synth_bass);
 SAMPLER_IMPORT_WAV("KANTAN_Synth/Synth_Strings_2_Synth_Strings_2-C3.ktsynth",      ktsynth_synth_strings);
 SAMPLER_IMPORT_WAV("KANTAN_Synth/Vibraphone_Vibraphone-D4.ktsynth",               ktsynth_vibraphone);
 SAMPLER_IMPORT_WAV("KANTAN_Synth/Voice_Oohs_Voice_Oohs-B2.ktsynth",               ktsynth_voice_ooh);
-SAMPLER_IMPORT_WAV("KANTAN_Synth/Xylophone_Xylophone-E4.ktsynth",                 ktsynth_xylophone);
 
 #undef SAMPLER_IMPORT_WAV
 
@@ -270,29 +266,32 @@ struct ktsynth_source_t {
   const char* name;
   const uint8_t* data;
   const uint8_t* size_sym;
+  const char* genre;
   size_t size(void) const { return (size_t)size_sym; }
 };
 
 static const ktsynth_source_t builtin_ktsynths[] = {
-  { "Alto Sax",      ktsynth_alto_sax,      sizeof_ktsynth_alto_sax      },
-  { "Celeste",       ktsynth_celeste,       sizeof_ktsynth_celeste       },
-  { "Charang",       ktsynth_charang,       sizeof_ktsynth_charang       },
-  { "Dist Guitar",   ktsynth_dist_guitar,   sizeof_ktsynth_dist_guitar   },
-  { "Dulcimer",      ktsynth_dulcimer,      sizeof_ktsynth_dulcimer      },
-  { "Flute",         ktsynth_flute,         sizeof_ktsynth_flute         },
-  { "Marimba",       ktsynth_marimba,       sizeof_ktsynth_marimba       },
-  { "Perc Organ",    ktsynth_perc_organ,    sizeof_ktsynth_perc_organ    },
-  { "Pick Bass",     ktsynth_pick_bass,     sizeof_ktsynth_pick_bass     },
-  { "Polysynth",     ktsynth_polysynth,     sizeof_ktsynth_polysynth     },
-  { "Slap Bass",     ktsynth_slap_bass,     sizeof_ktsynth_slap_bass     },
-  { "Solo Vox",      ktsynth_solo_vox,      sizeof_ktsynth_solo_vox      },
-  { "Space Voice",   ktsynth_space_voice,   sizeof_ktsynth_space_voice   },
-  { "Steel Guitar",  ktsynth_steel_guitar,  sizeof_ktsynth_steel_guitar  },
-  { "Synth Bass",    ktsynth_synth_bass,    sizeof_ktsynth_synth_bass    },
-  { "Synth Strings", ktsynth_synth_strings, sizeof_ktsynth_synth_strings },
-  { "Vibraphone",    ktsynth_vibraphone,    sizeof_ktsynth_vibraphone    },
-  { "Voice Ooh",     ktsynth_voice_ooh,     sizeof_ktsynth_voice_ooh     },
-  { "Xylophone",     ktsynth_xylophone,     sizeof_ktsynth_xylophone     },
+  // Synthesizers first for immediate access during sound selection
+  { "Saw Lead",      ktsynth_saw_lead,      sizeof_ktsynth_saw_lead,      "SYNTH"   },
+  { "Polysynth",     ktsynth_polysynth,     sizeof_ktsynth_polysynth,     "SYNTH"   },
+  { "Synth Strings", ktsynth_synth_strings, sizeof_ktsynth_synth_strings, "SYNTH"   },
+  { "Voice Ooh",     ktsynth_voice_ooh,     sizeof_ktsynth_voice_ooh,     "SYNTH"   },
+  // Keys
+  { "Celeste",       ktsynth_celeste,       sizeof_ktsynth_celeste,       "KEYS"    },
+  { "Perc Organ",    ktsynth_perc_organ,    sizeof_ktsynth_perc_organ,    "KEYS"    },
+  // Mallets / plucked percussion
+  { "Vibraphone",    ktsynth_vibraphone,    sizeof_ktsynth_vibraphone,    "MALLET"  },
+  { "Marimba",       ktsynth_marimba,       sizeof_ktsynth_marimba,       "MALLET"  },
+  { "Dulcimer",      ktsynth_dulcimer,      sizeof_ktsynth_dulcimer,      "MALLET"  },
+  // Guitars
+  { "Steel Guitar",  ktsynth_steel_guitar,  sizeof_ktsynth_steel_guitar,  "GUITAR"  },
+  { "Dist Guitar",   ktsynth_dist_guitar,   sizeof_ktsynth_dist_guitar,   "GUITAR"  },
+  // Basses
+  { "Pick Bass",     ktsynth_pick_bass,     sizeof_ktsynth_pick_bass,     "BASS"    },
+  { "Slap Bass",     ktsynth_slap_bass,     sizeof_ktsynth_slap_bass,     "BASS"    },
+  { "Synth Bass",    ktsynth_synth_bass,    sizeof_ktsynth_synth_bass,    "BASS"    },
+  // Winds
+  { "Alto Sax",      ktsynth_alto_sax,      sizeof_ktsynth_alto_sax,      "WIND"    },
 };
 static constexpr size_t builtin_ktsynth_count =
   sizeof(builtin_ktsynths) / sizeof(builtin_ktsynths[0]);

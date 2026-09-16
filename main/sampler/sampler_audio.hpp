@@ -23,11 +23,11 @@ public:
     fx_target_live = fx_target_beat | fx_target_parts,
     fx_target_all = fx_target_live | fx_target_music,
   };
-  // 12 Pad + background loop + menu preview + pitched Pad synth (8 voices)
-  // 0-21 retain their established Sample/Audio Beat/preview/pitched roles. Beat
-  // adds an eight-voice one-shot pool at 22-29; the active-mask mixer means
-  // dormant capacity has no per-frame cost.
-  static constexpr const size_t max_voice = 30;
+  // Existing roles remain at 0-29. Voices 30-37 are a dedicated second-PCM
+  // bank paired with the eight pitched voices; they do not reduce logical
+  // Melody/Chord/Bass/BLE polyphony. Voice 38 is the isolated Layer 2 menu
+  // audition voice, paired with the existing Layer 1 audition voice.
+  static constexpr const size_t max_voice = 39;
   static constexpr const uint32_t sample_rate = 48000;
 
   bool start(void);
@@ -40,16 +40,19 @@ public:
                    uint32_t edge_fade_in_end = 0,
                    uint32_t edge_fade_out_start = UINT32_MAX,
                    uint32_t probe_edge_usec = 0, uint8_t probe_kind = 0);
-  // Melody/Chord用。保持音は短いAttack/Releaseを通し、必要なら
-  // 検出済みの安定区間をsustain loopする。通常Pad経路とは分離する。
+  // Melody/Chord用。保持音は軽量DAHDSR Envelopeを通し、必要なら
+  // 検出済みの安定区間をsustain loopする。pitch_q16の高精度指定により、
+  // 高いRoot NoteのPCMでもMIDI全域を折り返さず再生する。
   static bool playSynth(uint8_t voice, const int16_t* pcm, uint32_t frames, uint32_t sample_rate,
                         bool sustain_loop, bool reverse, uint16_t volume_q8,
-                        uint16_t pitch_q8, uint16_t attack_ms = 5, uint16_t release_ms = 12,
+                        uint32_t pitch_q16, uint16_t attack_ms = 5, uint16_t release_ms = 12,
                         uint32_t sustain_start = 0, uint32_t sustain_end = 0,
                         uint16_t sustain_crossfade = 0, uint16_t auto_release_ms = 0,
                         bool linear_interpolation = true, uint8_t render_divider = 1,
                         uint8_t sustain_cache_slot = 0xFF,
-                        uint32_t probe_edge_usec = 0, uint8_t probe_kind = 0);
+                        uint32_t probe_edge_usec = 0, uint8_t probe_kind = 0,
+                        uint16_t delay_100us = 0, uint16_t hold_ms = 0,
+                        uint16_t decay_ms = 0, uint16_t sustain_level_q15 = 32768);
   // Called when a Pad synth sound or its loop range changes. The I2S task
   // only reads this prepared internal-RAM cache; it never allocates/copies.
   static void primeSynthSustainCache(uint8_t cache_slot, const int16_t* pcm,

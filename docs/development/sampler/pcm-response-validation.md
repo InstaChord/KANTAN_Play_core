@@ -71,7 +71,7 @@ These compile isolated harnesses from the actual production functions and
 the baseline at `2418bc88`. They do not use a second reimplementation of the
 optimized audio or storage algorithms.
 
-- PCM: 720,000 output frames, 1–30 voices, separate source arrays, cache
+- PCM: 720,384 output frames, 1–30 primary voices plus the 30–37 Layer-2 bank, separate source arrays, cache
   present/absent, On/Off, retrigger, pitch, envelope, loop wrap/crossfade,
   reverse, seek, chopped fades and filters; both output buses match.
 - Rec: quantize enabled/disabled, all parts, collapsed gates, loop wrap,

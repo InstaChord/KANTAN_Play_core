@@ -29,9 +29,23 @@ def function(source, signature):
 
 def renderer(source, name, optimized):
     voice = source[source.index("struct voice_t {"):source.index("static voice_t voices")]
+    if not optimized:
+        voice = voice.replace(
+            "  uint16_t attack_step_q15 = 0;\n  uint16_t release_step_q15 = 0;\n",
+            "  uint16_t attack_step_q15 = 0;\n  uint16_t release_step_q15 = 0;\n"
+            "  uint16_t sustain_level_q15 = 32768;\n"
+            "  uint32_t envelope_level_q16 = 32768u << 16;\n"
+            "  uint32_t attack_step_q16 = 0;\n  uint32_t decay_step_q16 = 0;\n"
+            "  uint32_t release_step_q16 = 0;\n  uint32_t envelope_phase_frames = 0;\n"
+            "  uint32_t attack_frames_total = 1;\n  uint32_t hold_frames_total = 0;\n"
+            "  uint32_t decay_frames_total = 1;\n  uint32_t release_frames_total = 1;\n"
+            "  uint8_t envelope_phase = 4;\n")
     bus = source[source.index("struct mixed_buses_t {"):source.index("static inline", source.index("struct mixed_buses_t {"))]
+    voice_storage = ("static voice_t voices[39]; static volatile uint32_t active_voice_mask[2];"
+                     if optimized else
+                     "static voice_t voices[30]; static volatile uint32_t active_voice_mask;")
     code = [f"namespace {name} {{", "namespace pcm_render = sampler_ns::pcm_render;", voice,
-            "static voice_t voices[30]; static volatile uint32_t active_voice_mask;",
+            voice_storage,
             function(source, "static inline void activate_voice("),
             function(source, "static inline void deactivate_voice("),
             function(source, "static inline int16_t voice_pcm_at("), bus]
@@ -68,10 +82,19 @@ template <class Voice> void configure(Voice& v, uint32_t config, unsigned index)
   v.volume_q8 = config % 513; v.target_volume_q8 = (config >> 5) % 513;
   v.render_divider = config & 2 ? 2 : 1;
   v.linear_interpolation = config & 4;
-  v.envelope_q15 = config & 8 ? 0 : 32768;
-  v.attack_step_q15 = 7 + config % 300;
-  v.release_step_q15 = 11 + config % 500;
-  v.auto_release_frames = config & 16 ? 100 + config % 1000 : 0;
+  // The historical oracle has no DAHDSR state. Keep regression/benchmark
+  // voices at full sustain; the new envelope phases are tested separately.
+  v.envelope_q15 = 32768;
+  v.envelope_level_q16 = 32768u << 16;
+  v.attack_step_q16 = (7 + config % 300) << 16;
+  v.release_step_q16 = 0;
+  v.decay_step_q16 = 0; v.sustain_level_q15 = 32768;
+  v.envelope_phase_frames = 100000; v.attack_frames_total = 100000;
+  v.hold_frames_total = 0; v.decay_frames_total = 1;
+  v.release_frames_total = 100 + config % 500;
+  v.envelope_phase = v.envelope_q15 < 32768 ? sampler_ns::pcm_render::envelope_attack
+                                             : sampler_ns::pcm_render::envelope_sustain;
+  v.auto_release_frames = 0;
   v.fx_target = index % 3 == 0 ? 1 : 2;
   v.active = true;
   if (config & 32) {
@@ -91,7 +114,8 @@ int main() {
     pcm[bank][i] = (int16_t)((int)((i * (97 + bank * 200)) % 65536) - 32768);
   }
   for (unsigned trial = 0; trial < 150; ++trial) {
-    reference::active_voice_mask = current::active_voice_mask = 0;
+    reference::active_voice_mask = 0;
+    current::active_voice_mask[0] = current::active_voice_mask[1] = 0;
     const unsigned count = 1 + trial % 30;
     for (unsigned v = 0; v < count; ++v) {
       uint32_t config = random32();
@@ -101,9 +125,6 @@ int main() {
       reference::activate_voice(v); current::activate_voice(v);
     }
     for (unsigned block = 0; block < 100; ++block) {
-      if (block == 30) for (unsigned v = 0; v < count; v += 2) {
-        reference::voices[v].release_requested = current::voices[v].release_requested = true;
-      }
       if (block == 50) for (unsigned v = 0; v < count; ++v) {
         uint32_t config = random32() & ~(64u | 128u | 256u | 512u | 1024u);
         configure(reference::voices[v], config, v); configure(current::voices[v], config, v);
@@ -121,12 +142,99 @@ int main() {
       }
     }
   }
-  puts("PASS: 720,000 stereo frames, 1-30 voices, cached/uncached, loops, On/Off, envelopes, pitch, reverse, seek, fades and filters");
+  for (unsigned voice = 30; voice < 39; ++voice) {
+    reference::active_voice_mask = 0;
+    current::active_voice_mask[0] = current::active_voice_mask[1] = 0;
+    const uint32_t config = random32() & ~(64u | 128u | 256u | 512u | 1024u);
+    configure(reference::voices[0], config, 0);
+    configure(current::voices[voice], config, 0);
+    reference::activate_voice(0); current::activate_voice(voice);
+    reference::mix_voice_block(); current::mix_voice_block();
+    for (unsigned f = 0; f < 48; ++f) {
+      assert(reference::mixed_block[f].beat == current::mixed_block[f].beat);
+      assert(reference::mixed_block[f].parts == current::mixed_block[f].parts);
+    }
+  }
+  {
+    current::voice_t v{};
+    v.active = true; v.envelope_q15 = 0; v.envelope_level_q16 = 0;
+    v.envelope_phase = sampler_ns::pcm_render::envelope_delay;
+    v.envelope_phase_frames = 3; v.attack_frames_total = 1;
+    v.attack_step_q16 = 32768u << 16;
+    v.hold_frames_total = 2; v.decay_frames_total = 3;
+    v.decay_step_q16 = 8192u << 16;
+    v.sustain_level_q15 = 8192; v.release_frames_total = 4;
+    assert(!sampler_ns::pcm_render::advance_envelope(v) && v.envelope_phase_frames == 2);
+    assert(!sampler_ns::pcm_render::advance_envelope(v));
+    assert(!sampler_ns::pcm_render::advance_envelope(v)
+        && v.envelope_phase == sampler_ns::pcm_render::envelope_attack);
+    assert(sampler_ns::pcm_render::advance_envelope(v) && v.envelope_q15 == 32768
+        && v.envelope_phase == sampler_ns::pcm_render::envelope_hold);
+    assert(sampler_ns::pcm_render::advance_envelope(v));
+    assert(sampler_ns::pcm_render::advance_envelope(v)
+        && v.envelope_phase == sampler_ns::pcm_render::envelope_decay);
+    assert(sampler_ns::pcm_render::advance_envelope(v) && v.envelope_q15 == 24576);
+    assert(sampler_ns::pcm_render::advance_envelope(v) && v.envelope_q15 == 16384);
+    assert(sampler_ns::pcm_render::advance_envelope(v) && v.envelope_q15 == 8192
+        && v.envelope_phase == sampler_ns::pcm_render::envelope_sustain);
+    v.release_requested = true;
+    assert(sampler_ns::pcm_render::advance_envelope(v) && v.envelope_q15 == 6144);
+    assert(sampler_ns::pcm_render::advance_envelope(v) && v.envelope_q15 == 4096);
+    assert(sampler_ns::pcm_render::advance_envelope(v) && v.envelope_q15 == 2048);
+    assert(!sampler_ns::pcm_render::advance_envelope(v) && !v.active);
+  }
+  {
+    // Maximum authored Attack/Decay durations must consume their exact output
+    // frame counts instead of collapsing to the old ~0.68 second Q15 limit.
+    constexpr uint32_t attack_frames = 5u * 48000u;
+    constexpr uint32_t decay_frames = 60u * 48000u;
+    current::voice_t v{};
+    v.active = true; v.envelope_q15 = 0; v.envelope_level_q16 = 0;
+    v.envelope_phase = sampler_ns::pcm_render::envelope_attack;
+    v.envelope_phase_frames = v.attack_frames_total = attack_frames;
+    v.attack_step_q16 = sampler_ns::pcm_render::envelope_peak_q16 / attack_frames;
+    v.decay_frames_total = decay_frames;
+    v.decay_step_q16 = sampler_ns::pcm_render::envelope_peak_q16 / decay_frames;
+    v.sustain_level_q15 = 0;
+    for (uint32_t i = 1; i < attack_frames; ++i) {
+      assert(sampler_ns::pcm_render::advance_envelope(v));
+      assert(v.envelope_phase == sampler_ns::pcm_render::envelope_attack);
+    }
+    assert(sampler_ns::pcm_render::advance_envelope(v));
+    assert(v.envelope_phase == sampler_ns::pcm_render::envelope_decay);
+    for (uint32_t i = 1; i < decay_frames; ++i) {
+      assert(sampler_ns::pcm_render::advance_envelope(v));
+      assert(v.envelope_phase == sampler_ns::pcm_render::envelope_decay);
+    }
+    assert(sampler_ns::pcm_render::advance_envelope(v));
+    assert(v.envelope_phase == sampler_ns::pcm_render::envelope_sustain
+        && v.envelope_q15 == 0);
+    assert(!sampler_ns::pcm_render::advance_envelope(v) && !v.active);
+  }
+  {
+    // Note Off during another phase releases from the instantaneous level and
+    // still lasts exactly the authored 10 seconds.
+    constexpr uint32_t release_frames = 10u * 48000u;
+    current::voice_t v{};
+    v.active = true; v.envelope_q15 = 12345;
+    v.envelope_level_q16 = 12345u << 16;
+    v.envelope_phase = sampler_ns::pcm_render::envelope_decay;
+    v.envelope_phase_frames = v.decay_frames_total = 1000000;
+    v.decay_step_q16 = 1000; v.sustain_level_q15 = 0;
+    v.release_frames_total = release_frames; v.release_requested = true;
+    for (uint32_t i = 1; i < release_frames; ++i) {
+      assert(sampler_ns::pcm_render::advance_envelope(v));
+      assert(v.envelope_phase == sampler_ns::pcm_render::envelope_release);
+    }
+    assert(!sampler_ns::pcm_render::advance_envelope(v) && !v.active);
+  }
+  puts("PASS: PCM renderer, two-layer banks, exact 5s/60s/10s envelopes, Note Off, loops, pitch, seek, fades and filters");
 #if defined(SAMPLER_TEST_SANITIZED)
   return 0;
 #endif
   for (unsigned count : {1u, 4u, 7u, 12u}) {
-    reference::active_voice_mask = current::active_voice_mask = 0;
+    reference::active_voice_mask = 0;
+    current::active_voice_mask[0] = current::active_voice_mask[1] = 0;
     for (unsigned v = 0; v < count; ++v) {
       configure(reference::voices[v], 3u, v); configure(current::voices[v], 3u, v);
       reference::voices[v].volume_q8 = reference::voices[v].target_volume_q8 = 256;
@@ -156,11 +264,12 @@ def main():
     source = (ROOT / "main/sampler/sampler_audio.cpp").read_text()
     baseline = subprocess.check_output(["git", "show", "2418bc88:main/sampler/sampler_audio.cpp"], cwd=ROOT, text=True)
     preamble = '''#include <algorithm>
+#include <cassert>
 #include <stdint.h>
 #include <stdio.h>
 #include <chrono>
 #include "main/sampler/sampler_pcm_render.hpp"
-struct sampler_audio_t { static constexpr unsigned max_voice = 30, fx_target_beat = 1, fx_target_parts = 2; };
+struct sampler_audio_t { static constexpr unsigned max_voice = 39, fx_target_beat = 1, fx_target_parts = 2; };
 static constexpr unsigned i2s_dma_frame_num = 96;
 '''
     with tempfile.TemporaryDirectory(prefix="sampler-pcm-test-") as directory:

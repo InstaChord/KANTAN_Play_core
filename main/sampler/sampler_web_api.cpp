@@ -16,6 +16,7 @@
 #include "../file_manage.hpp"
 #include "sampler_web.hpp"
 #include "sampler_web_api.hpp"
+#include "sampler_ktsynth.hpp"
 
 namespace sampler_ns {
 namespace {
@@ -245,6 +246,17 @@ static bool query_path(httpd_req_t* req, std::string& out)
   return valid_relative_path(out, nullptr, true);
 }
 
+static bool query_is_one(httpd_req_t* req, const char* key)
+{
+  size_t length = httpd_req_get_url_query_len(req);
+  if (!length || length > 256) { return false; }
+  std::vector<char> query(length + 1, 0);
+  char value[8] = {};
+  return httpd_req_get_url_query_str(req, query.data(), query.size()) == ESP_OK
+      && httpd_query_key_value(query.data(), key, value, sizeof(value)) == ESP_OK
+      && strcmp(value, "1") == 0;
+}
+
 static esp_err_t list_files(httpd_req_t* req, const web_dir_t& dir)
 {
   if (!ensure_dirs()) { return send_error(req, "503 Service Unavailable", "SD card unavailable"); }
@@ -377,6 +389,10 @@ static esp_err_t put_file(httpd_req_t* req, const web_dir_t& dir, const std::str
   }
   if (req->content_len == 0 || (size_t)req->content_len > dir.max_bytes) { return send_error(req, "413 Payload Too Large", "file too large"); }
   std::string path = full_path(dir, name);
+  if (is_ktsynth_name(name) && !query_is_one(req, "overwrite")
+   && kanplay_ns::storage_sd.getFileSize(path.c_str()) >= 0) {
+    return send_error(req, "409 Conflict", "a KANTAN Synth tone with the same name already exists");
+  }
   std::string temporary = path + ".upload";
   std::string backup = path + ".backup";
   kanplay_ns::storage_sd.removeFile(temporary.c_str());
@@ -453,12 +469,29 @@ static esp_err_t put_file(httpd_req_t* req, const web_dir_t& dir, const std::str
     if (written != (int)chunk_size) {
       free(data);
       kanplay_ns::storage_sd.removeFile(temporary.c_str());
-      return send_error(req, "500 Internal Server Error", "save failed");
+      return send_error(req, "507 Insufficient Storage", "SD card is full or write failed");
     }
     first_chunk = false;
     received += chunk_size;
   }
   free(data);
+
+  if (is_ktsynth_name(name)) {
+    const int stored_size = kanplay_ns::storage_sd.getFileSize(temporary.c_str());
+    auto* complete = stored_size > 0
+      ? (uint8_t*)heap_caps_malloc((size_t)stored_size, MALLOC_CAP_SPIRAM) : nullptr;
+    ktsynth_info_t verified;
+    const bool valid = complete
+      && stored_size == req->content_len
+      && kanplay_ns::storage_sd.loadFromFileToMemory(
+           temporary.c_str(), complete, (size_t)stored_size) == stored_size
+      && parse_ktsynth(complete, (size_t)stored_size, &verified);
+    free(complete);
+    if (!valid) {
+      kanplay_ns::storage_sd.removeFile(temporary.c_str());
+      return send_error(req, "422 Unprocessable Entity", "invalid KANTAN Synth metadata, CRC, loop, or range");
+    }
+  }
 
   const bool replacing = kanplay_ns::storage_sd.getFileSize(path.c_str()) >= 0;
   if (replacing && !kanplay_ns::storage_sd.renameFile(path.c_str(), backup.c_str())) {
@@ -536,6 +569,22 @@ static esp_err_t response_files(httpd_req_t* req)
   return send_error(req, "405 Method Not Allowed", "method not allowed");
 }
 
+static esp_err_t response_ktsynth_preview(httpd_req_t* req)
+{
+  sampler_web_note_client_access();
+  if (!sampler_web_prepare_storage_operation()) {
+    return send_error(req, "503 Service Unavailable", "audio stop timeout");
+  }
+  if (!ensure_dirs()) { return send_error(req, "503 Service Unavailable", "SD card unavailable"); }
+  static constexpr const char preview_name[] = "Synth/.web-preview.ktsynth";
+  kanplay_ns::storage_sd.makeDirectory("/sampler/samples/Synth");
+  // This fixed hidden file is a scratch preview, never a user tone. Removing
+  // the previous preview also prevents ordinary same-name protection from
+  // blocking repeated auditions.
+  kanplay_ns::storage_sd.removeFile(full_path(web_dirs[0], preview_name).c_str());
+  return put_file(req, web_dirs[0], preview_name);
+}
+
 static esp_err_t response_state(httpd_req_t* req)
 {
   sampler_web_note_client_access();
@@ -594,6 +643,7 @@ static esp_err_t response_command(httpd_req_t* req)
 }
 
 static constexpr const httpd_uri uri_table[] = {
+  { "/api/sampler/preview-ktsynth", HTTP_PUT, response_ktsynth_preview, nullptr, false, false, nullptr },
   { "/api/sampler/files/*", HTTP_GET,    response_files,   nullptr, false, false, nullptr },
   { "/api/sampler/files/*", HTTP_PUT,    response_files,   nullptr, false, false, nullptr },
   { "/api/sampler/files/*", HTTP_DELETE, response_files,   nullptr, false, false, nullptr },
