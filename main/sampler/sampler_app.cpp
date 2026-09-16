@@ -296,18 +296,33 @@ struct builtin_beat_pattern_t {
   const char* display_name;
   uint16_t bpm;
 };
+enum builtin_beat_preset_t : uint8_t {
+  beat_preset_disco,
+  beat_preset_pop,
+  beat_preset_rock,
+  beat_preset_house,
+  beat_preset_hiphop,
+  beat_preset_break,
+  beat_preset_funk,
+  beat_preset_reggae,
+  beat_preset_count,
+};
 // BPM is deliberately preset metadata rather than a user-facing transport
 // setting. Source hits describe one 64-tick 4/4 bar; built-in Patterns expose
 // two bars as their minimum cycle so recording and live arrangement have
 // enough room even when Beat Repeat is 1.
 static constexpr builtin_beat_pattern_t builtin_beat_patterns[] = {
+  { "DISCO",   "DISCO PATTERN",   116 },
   { "POP",     "POP PATTERN",     100 },
   { "ROCK",    "ROCK PATTERN",    120 },
   { "HOUSE",   "HOUSE PATTERN",   124 },
   { "HIP HOP", "HIP HOP PATTERN",  88 },
-  { "DISCO",   "DISCO PATTERN",   116 },
   { "BREAK",   "BREAK PATTERN",   110 },
+  { "FUNK",    "FUNK PATTERN",    104 },
+  { "REGGAE",  "REGGAE PATTERN",   82 },
 };
+static_assert(std::size(builtin_beat_patterns) == beat_preset_count,
+              "Beat preset enum and metadata must stay aligned");
 
 static constexpr uint8_t beat_velocity_default = 110;
 static constexpr uint8_t beat_velocity_max = 127;
@@ -365,7 +380,7 @@ static constexpr beat_pattern_hit_t builtin_pattern_rock[] = {
   {0,0,127},{0,24,108},{0,32,120},{0,44,106}, {1,16,124},{1,48,126},
   {7,0,98},{7,8,78},{7,16,92},{7,24,76},
   {7,32,98},{7,40,80},{7,48,92},{7,56,78},
-  {9,0,127},{4,56,90},{5,60,104},{6,60,116},
+  {9,0,127},
 };
 static constexpr beat_pattern_hit_t builtin_pattern_house[] = {
   {0,0,127},{0,16,122},{0,32,127},{0,48,122}, {1,16,116},{1,48,120},
@@ -392,6 +407,19 @@ static constexpr beat_pattern_hit_t builtin_pattern_break[] = {
   {7,4,92},{7,12,68},{7,20,86},{7,28,66},
   {7,36,90},{7,44,70},{7,52,84},{7,60,64}, {3,48,96},
 };
+static constexpr beat_pattern_hit_t builtin_pattern_funk[] = {
+  {0,0,127},{0,12,92},{0,28,110},{0,40,118},{0,56,98},
+  {1,16,124},{1,48,126},{2,44,58},
+  {7,0,100},{7,4,62},{7,8,82},{7,12,68},
+  {7,16,96},{7,20,60},{7,24,80},{7,28,66},
+  {7,32,102},{7,36,64},{7,40,84},{7,44,70},
+  {7,48,96},{7,52,62},{7,56,82},{7,60,68},
+};
+static constexpr beat_pattern_hit_t builtin_pattern_reggae[] = {
+  {0,32,120},{1,32,118},{2,16,78},{2,48,82},
+  {7,8,94},{7,24,88},{7,40,96},{7,56,90},
+  {8,12,66},{8,28,62},{8,44,68},{8,60,64},
+};
 
 // The second bar keeps each preset immediately recognisable, then adds only
 // a small turnaround in its final beat. Orders 4/5/6 are low/mid/high toms;
@@ -400,9 +428,7 @@ static constexpr beat_pattern_hit_t builtin_fill_pop[] = {
   {6,52,88},{5,56,104},{4,60,120},
 };
 static constexpr beat_pattern_hit_t builtin_fill_rock[] = {
-  // ROCK already ends with a short tom run; one snare pickup distinguishes
-  // only the second bar without stacking another full fill on top of it.
-  {1,52,94},
+  {6,52,90},{5,56,104},{4,60,120},
 };
 static constexpr beat_pattern_hit_t builtin_fill_house[] = {
   {7,52,82},{1,56,108},{6,60,122},
@@ -416,20 +442,28 @@ static constexpr beat_pattern_hit_t builtin_fill_disco[] = {
 static constexpr beat_pattern_hit_t builtin_fill_break[] = {
   {1,52,92},{6,56,106},{5,60,122},
 };
+static constexpr beat_pattern_hit_t builtin_fill_funk[] = {
+  {1,52,82},{6,56,96},{5,60,114},
+};
+static constexpr beat_pattern_hit_t builtin_fill_reggae[] = {
+  {1,48,88},{6,56,96},{5,60,112},
+};
 
 static void builtin_beat_pattern_hits(uint8_t preset,
                                       const beat_pattern_hit_t** hits,
                                       size_t* hit_count)
 {
   if (!hits || !hit_count) { return; }
-  *hits = builtin_pattern_pop;
-  *hit_count = std::size(builtin_pattern_pop);
+  *hits = builtin_pattern_disco;
+  *hit_count = std::size(builtin_pattern_disco);
   switch (preset) {
-  case 1: *hits = builtin_pattern_rock;   *hit_count = std::size(builtin_pattern_rock); break;
-  case 2: *hits = builtin_pattern_house;  *hit_count = std::size(builtin_pattern_house); break;
-  case 3: *hits = builtin_pattern_hiphop; *hit_count = std::size(builtin_pattern_hiphop); break;
-  case 4: *hits = builtin_pattern_disco;  *hit_count = std::size(builtin_pattern_disco); break;
-  case 5: *hits = builtin_pattern_break;  *hit_count = std::size(builtin_pattern_break); break;
+  case beat_preset_pop:    *hits = builtin_pattern_pop;    *hit_count = std::size(builtin_pattern_pop); break;
+  case beat_preset_rock:   *hits = builtin_pattern_rock;   *hit_count = std::size(builtin_pattern_rock); break;
+  case beat_preset_house:  *hits = builtin_pattern_house;  *hit_count = std::size(builtin_pattern_house); break;
+  case beat_preset_hiphop: *hits = builtin_pattern_hiphop; *hit_count = std::size(builtin_pattern_hiphop); break;
+  case beat_preset_break:  *hits = builtin_pattern_break;  *hit_count = std::size(builtin_pattern_break); break;
+  case beat_preset_funk:   *hits = builtin_pattern_funk;   *hit_count = std::size(builtin_pattern_funk); break;
+  case beat_preset_reggae: *hits = builtin_pattern_reggae; *hit_count = std::size(builtin_pattern_reggae); break;
   default: break;
   }
 }
@@ -439,14 +473,16 @@ static void builtin_beat_pattern_fill_hits(uint8_t preset,
                                            size_t* hit_count)
 {
   if (!hits || !hit_count) { return; }
-  *hits = builtin_fill_pop;
-  *hit_count = std::size(builtin_fill_pop);
+  *hits = builtin_fill_disco;
+  *hit_count = std::size(builtin_fill_disco);
   switch (preset) {
-  case 1: *hits = builtin_fill_rock;   *hit_count = std::size(builtin_fill_rock); break;
-  case 2: *hits = builtin_fill_house;  *hit_count = std::size(builtin_fill_house); break;
-  case 3: *hits = builtin_fill_hiphop; *hit_count = std::size(builtin_fill_hiphop); break;
-  case 4: *hits = builtin_fill_disco;  *hit_count = std::size(builtin_fill_disco); break;
-  case 5: *hits = builtin_fill_break;  *hit_count = std::size(builtin_fill_break); break;
+  case beat_preset_pop:    *hits = builtin_fill_pop;    *hit_count = std::size(builtin_fill_pop); break;
+  case beat_preset_rock:   *hits = builtin_fill_rock;   *hit_count = std::size(builtin_fill_rock); break;
+  case beat_preset_house:  *hits = builtin_fill_house;  *hit_count = std::size(builtin_fill_house); break;
+  case beat_preset_hiphop: *hits = builtin_fill_hiphop; *hit_count = std::size(builtin_fill_hiphop); break;
+  case beat_preset_break:  *hits = builtin_fill_break;  *hit_count = std::size(builtin_fill_break); break;
+  case beat_preset_funk:   *hits = builtin_fill_funk;   *hit_count = std::size(builtin_fill_funk); break;
+  case beat_preset_reggae: *hits = builtin_fill_reggae; *hit_count = std::size(builtin_fill_reggae); break;
   default: break;
   }
 }
@@ -498,7 +534,7 @@ static uint8_t builtin_beat_pattern_index(const char* token)
       if (strcmp(token, builtin_beat_patterns[i].token) == 0) { return i; }
     }
   }
-  return 0;
+  return beat_preset_disco;
 }
 // One beginner-facing exclusive group per part. `true` means this Pad may
 // overlap; `false` means it cuts other non-overlapping BEAT Pads.
@@ -510,12 +546,12 @@ static bool beat_pad_overlap[def::pad::pad_count] = {
 static constexpr uint8_t beat_midi_note_map[def::pad::pad_count] = {
   36, 40, 37, 39,  // Kick, Snare, Side Stick, Clap
   41, 43, 45, 42,  // Low/Mid/High Tom, Closed Hi-Hat
-  70, 56, 49, 46,  // Shaker (Maracas), Cowbell, Crash, Open Hi-Hat
+  70, 49, 51, 46,  // Shaker (Maracas), Crash, Ride, Open Hi-Hat
 };
 static constexpr const char* beat_pad_labels[def::pad::pad_count] = {
   "KICK", "SNARE", "SIDE", "CLAP",
   "TOM-L", "TOM-M", "TOM-H", "HH-C",
-  "SHAKER", "COWBELL", "CRASH", "HH-O",
+  "SHAKER", "CRASH", "RIDE", "HH-O",
 };
 struct beat_sound_t {
   const char* source;
@@ -526,41 +562,41 @@ struct beat_sound_t {
 // AMY's tiny ROM bank supplies eleven short TR-808 one-shots. The acoustic
 // Kit keeps compact, sampled WAV one-shots; the electronic Kits select
 // kick/snare tunings from that single ~100 KiB AMY bank already linked by the
-// synth engine. Pad 9-12 stay Shaker/Cowbell/Crash/Open Hat across all Kits.
+// synth engine. Pad 9-12 stay Shaker/Crash/Ride/Open Hat across all Kits.
 static constexpr beat_sound_t acoustic_beat_sounds[def::pad::pad_count] = {
   { "KICK", 256 }, { "SNARE", 256 }, { "RIM", 256 }, { "CLAP", 256 },
   { "TOM LOW", 256 }, { "TOM MID", 256 }, { "TOM HIGH", 256 }, { "HAT CLOSE", 256 },
-  { "SHAKER", 256 }, { "COWBELL", 256 }, { "CRASH", 256 }, { "HAT", 256 },
+  { "SHAKER", 256 }, { "CRASH", 256 }, { "SYNTH RIDE", 256 }, { "HAT", 256 },
 };
 static constexpr beat_sound_t chiptune_beat_sounds[def::pad::pad_count] = {
   { "AMY KICK TIGHT", 330, 1 }, { "AMY SNARE SNAP", 320, 4 },
   { "AMY SIDE", 330, 3 }, { "AMY CLAP", 320, 9 },
   { "AMY TOM LOW", 286, 8 }, { "AMY TOM MID", 360, 8 }, { "AMY TOM HIGH", 440, 8 },
   { "AMY HAT CLOSED", 360, 6 }, { "AMY SHAKER", 384, 0 },
-  { "AMY COWBELL", 384, 10 }, { "AMY COWBELL LOW", 360, 10 }, { "AMY HAT OPEN", 384, 7 },
+  { "SYNTH CRASH", 256 }, { "SYNTH RIDE", 256 }, { "AMY HAT OPEN", 384, 7 },
 };
 static constexpr beat_sound_t dance_beat_sounds[def::pad::pad_count] = {
   { "AMY KICK PUNCH", 256, 1 }, { "AMY SNARE BRIGHT", 256, 5 },
   { "AMY SIDE", 288, 3 }, { "AMY CLAP", 256, 9 },
   { "AMY TOM LOW", 226, 8 }, { "AMY TOM MID", 270, 8 }, { "AMY TOM HIGH", 322, 8 },
   { "AMY HAT CLOSED", 288, 6 }, { "AMY SHAKER", 288, 0 },
-  { "AMY COWBELL", 288, 10 }, { "AMY HAT ACCENT", 256, 7 }, { "AMY HAT OPEN", 288, 7 },
+  { "SYNTH CRASH", 256 }, { "SYNTH RIDE", 256 }, { "AMY HAT OPEN", 288, 7 },
 };
 #else
 static constexpr beat_sound_t acoustic_beat_sounds[def::pad::pad_count] = {
   { "KICK", 256 }, { "SNARE", 256 }, { "RIM", 256 }, { "CLAP", 256 },
   { "TOM LOW", 256 }, { "TOM MID", 256 }, { "TOM HIGH", 256 }, { "HAT CLOSE", 256 },
-  { "SHAKER", 256 }, { "COWBELL", 256 }, { "CRASH", 256 }, { "HAT", 256 },
+  { "SHAKER", 256 }, { "CRASH", 256 }, { "RIDE", 256 }, { "HAT", 256 },
 };
 static constexpr beat_sound_t chiptune_beat_sounds[def::pad::pad_count] = {
   { "CHIP KICK", 256 }, { "CHIP SNARE", 256 }, { "CHIP RIM", 256 }, { "CHIP CLAP", 256 },
   { "CHIP TOM", 220 }, { "CHIP TOM", 256 }, { "CHIP TOM", 304 }, { "CHIP HAT C", 256 },
-  { "SHAKER", 256 }, { "CHIP COWBELL", 256 }, { "CRASH", 256 }, { "CHIP HAT O", 256 },
+  { "SHAKER", 256 }, { "SYNTH CRASH", 256 }, { "SYNTH RIDE", 256 }, { "CHIP HAT O", 256 },
 };
 static constexpr beat_sound_t dance_beat_sounds[def::pad::pad_count] = {
   { "DANCE KICK", 256 }, { "DANCE SNARE", 256 }, { "DANCE RIM", 256 }, { "DANCE CLAP", 256 },
   { "DANCE TOM L", 256 }, { "DANCE TOM M", 256 }, { "DANCE TOM H", 256 }, { "DANCE HAT C", 256 },
-  { "DANCE SHAKER", 256 }, { "COWBELL", 256 }, { "DANCE CRASH", 256 }, { "DANCE HAT O", 256 },
+  { "DANCE SHAKER", 256 }, { "DANCE CRASH", 256 }, { "DANCE RIDE", 256 }, { "DANCE HAT O", 256 },
 };
 #endif
 
@@ -8059,7 +8095,7 @@ enum class pending_beat_source_t : uint8_t {
 static pending_beat_source_t pending_beat_source = pending_beat_source_t::none;
 static char pending_beat_path[96] = {};
 static char pending_beat_name[40] = {};
-static uint8_t pending_beat_pattern = 0;
+static uint8_t pending_beat_pattern = beat_preset_disco;
 static beat_rec_load_mode_t pending_beat_recommended_mode =
   beat_rec_load_mode_t::follow_new_beat;
 struct beat_rec_snapshot_t {
@@ -28468,6 +28504,19 @@ static const beat_sound_t* find_builtin_beat_sound(const char* name,
                                                    uint8_t order_hint = 0xFF)
 {
   if (!name) { return nullptr; }
+  // v0.8.4-v0.8.7 accidentally stored Cowbell/Crash in the two slots whose
+  // fixed roles are Crash/Ride. Repair Resume and Beat Kit references by
+  // their physical role before matching source names across other Kits.
+  if (order_hint == 9
+   && (!strcmp(name, "COWBELL") || !strcmp(name, "CHIP COWBELL")
+    || !strcmp(name, "AMY COWBELL"))) {
+    return &selected_beat_sounds()[order_hint];
+  }
+  if (order_hint == 10
+   && (!strcmp(name, "CRASH") || !strcmp(name, "DANCE CRASH")
+    || !strcmp(name, "AMY COWBELL LOW") || !strcmp(name, "AMY HAT ACCENT"))) {
+    return &selected_beat_sounds()[order_hint];
+  }
   const beat_sound_t* kits[] = {
     acoustic_beat_sounds, dance_beat_sounds, chiptune_beat_sounds
   };
@@ -29735,9 +29784,9 @@ static void load_builtin_samples(void)
                "builtin:%s", builtin_samples[i].name);
     }
   }
-  // Factory state starts with the approachable Pop Pattern. Resume and saved
+  // Factory state starts with DISCO. Resume and saved
   // Projects still restore their own Beat without being overwritten here.
-  load_builtin_beat_pattern(0);
+  load_builtin_beat_pattern(beat_preset_disco);
 }
 
 static bool load_builtin_sample_to_pad(uint8_t pad, const char* builtin_id,
@@ -29816,7 +29865,7 @@ static void load_factory_start_project(void)
 
   beat_drum_kit = beat_drum_kit_t::dance;
   audio_beat.loop_repeats = 2;
-  load_builtin_beat_pattern(4); // DISCO, 116 BPM, two 2-bar repeats.
+  load_builtin_beat_pattern(beat_preset_disco); // 116 BPM, two 2-bar repeats.
   beat_volume = 100;
   sampler_volume = 100;
   loop_quantize_enabled = true;

@@ -63,14 +63,14 @@
 - `Audio Beat`: WAV/MP3を専用PCMへ読み込み、その長さをLoop基準にする
 - `Pattern Beat`: 12個の短いBeat音源と、どのPadをいつ鳴らすかを示すBeat Patternを組み合わせる
 - Audio BeatとPattern Beatは排他的。新しいBeatを選ぶと、以前の形式の音源とBeatイベントを停止・解放する
-- 組み込みPatternは `POP / ROCK / HOUSE / HIP HOP / DISCO / BREAK`。同じ内蔵Beatサンプルを共有し、イベントとLoop長だけを切り替える
+- 組み込みPatternは `DISCO / POP / ROCK / HOUSE / HIP HOP / BREAK / FUNK / REGGAE`。同じ内蔵Beatサンプルを共有し、イベントとLoop長だけを切り替える
 - Pattern Beatの `Select Kit` は `Acoustic` / `Dance` / `Chiptune` を選べる。Pattern、テンポ、Loop長は維持したままBeat専用の12 Pad音色だけを切り替える
 - Acoustic Kitは、Kick / Snare / Rim / Clap / Low-Mid-High Tom / Closed Hat / Shaker / Crash / Ride / Open Hatを用いる。Crash/Rideは内蔵用に短尺mono化し、Pattern Beatの2秒上限内で扱う
 - Dance Kitは同じ12 Pad配列の48kHz / 16bit / monoワンショットを用い、選択中のKitだけをBeat Poolへ展開する
 - 内蔵Audio Beatは持たず、WAV/MP3はFile EditorでSDへ保存し、本体のBeatメニューから読み込む。内蔵Flashは演奏できる短尺Kit音源を優先する
 - Resumeが存在しない初回起動と`Reset All`は、内蔵音源のSampler 8音、Dance Kit、DISCO Pattern、二周分のRec、C Major / Pentatonicと指定のSynth / FX設定を持つ内蔵Project `DISCO Beat` を構成する。SD assetには依存しない。`Clear Project`は空Projectを作る
 - Projectメニューは `Load` / `Save` / `File Editor` / `Clear Project` の順とする。`Load`の先頭に内蔵Project `DISCO Beat` を常設し、SDがなくても呼び出せる。読込後は`NEW PROJECT`扱いとし、内蔵Projectを上書きしない
-- 各Patternは64 tickで1小節。内部テンポは順に100 / 120 / 124 / 88 / 116 / 110 BPM相当で、通常演奏では固有Loop長として扱う
+- 各Patternは64 tickで1小節。内部テンポは順に116 / 100 / 120 / 124 / 88 / 110 / 104 / 82 BPM相当で、通常演奏では固有Loop長として扱う
 - Pattern Beatの `Tempo`はTap Tempo専用画面で調整する。ユーザーがBPMを知りたい場合に限り、推定値を `~***.* BPM`で表示する
 - `New Pattern` は組み込みBeat音源だけを読み込み、最初の演奏からLoop長を決める
 - SDの `.mid/.midi` は軽量なStandard MIDI File読込でPatternへ変換する。CH10を優先し、CH10がなければ全チャンネルのNote OnをGM Drum配列へ割り当てる

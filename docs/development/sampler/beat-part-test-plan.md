@@ -24,7 +24,7 @@ Beat統合後の実機確認を、原因を切り分けやすい順番で行う�
 
 ## 4. Beat選択
 
-- 組み込み `POP / ROCK / HOUSE / HIP HOP / DISCO / BREAK` を選べる
+- 組み込み `DISCO / POP / ROCK / HOUSE / HIP HOP / BREAK / FUNK / REGGAE` を選べる
 - 各Patternの速度とリズムが明確に異なり、1周の先頭で不自然な間や二重発音がない
 - `New Pattern` はイベントなしで始まり、最初の演奏からLoop長を決められる
 - WAV/MP3を選ぶとAudio Beatになり、Pattern音源が解放される

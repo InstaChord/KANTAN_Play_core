@@ -59,11 +59,13 @@ import { decodeAudioFile, midiNoteName } from './converter/audio-input.js';
       })),
       builtinBackgrounds:[],
       builtinBeatPatterns:[
+        {name:'DISCO',file:'pattern:DISCO'},
         {name:'POP',file:'pattern:POP'},{name:'ROCK',file:'pattern:ROCK'},
         {name:'HOUSE',file:'pattern:HOUSE'},{name:'HIP HOP',file:'pattern:HIP HOP'},
-        {name:'DISCO',file:'pattern:DISCO'},{name:'BREAK',file:'pattern:BREAK'}
+        {name:'BREAK',file:'pattern:BREAK'},{name:'FUNK',file:'pattern:FUNK'},
+        {name:'REGGAE',file:'pattern:REGGAE'}
       ],
-      beat:{format:'pattern',name:'HOUSE PATTERN',volume:100,drumKit:'dance'},
+      beat:{format:'pattern',name:'DISCO PATTERN',volume:100,drumKit:'dance'},
       loop:{ lengthMs:4000, lengthFixed:true, quantize:true, noteGridIndex:4, noteOffGridIndex:4,
         background:{ file:'', name:'', frames:0, sampleRate:48000, volume:208 },
         events:[

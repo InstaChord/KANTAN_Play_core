@@ -1,7 +1,7 @@
 # KANTAN Sampler Product Specification
 
-- 最終同期日: 2026-09-07
-- 同期確認バージョン: 0.8.3
+- 最終同期日: 2026-09-16
+- 同期確認バージョン: 0.8.8
 
 この文書は、KANTAN Samplerのマニュアル、広告、Webサイト、製品紹介で使用する
 **製品仕様の正本**です。ユーザーが触れる名称、操作、対応形式、制限はこの文書を優先します。
@@ -123,7 +123,7 @@ Audio BeatとPattern Beatは排他的で、同時に2レイヤーとして扱い
 
 #### Pattern Beat
 
-- 内蔵パターン: Pop / Rock / House / Hip Hop / Disco / Break
+- 内蔵パターン: Disco / Pop / Rock / House / Hip Hop / Break / Funk / Reggae
 - 内蔵Kit: Acoustic / Dance / Chiptune
 - SDからStandard MIDI File（`.mid` / `.midi`）を読み込み可能
 - Pad演奏で新しいPatternを作成可能

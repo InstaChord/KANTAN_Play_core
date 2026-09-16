@@ -703,7 +703,7 @@ static esp_err_t response_main_handler(httpd_req_t *req)
     "<script>window.KANPLAY={api:location.origin};</script>"
     "<script type=\"module\" src=\"");
   httpd_resp_sendstr_chunk(req, base);
-  httpd_resp_sendstr_chunk(req, "/app.js?v=102-sf2-loop-pitch\"></script></body></html>");
+  httpd_resp_sendstr_chunk(req, "/app.js?v=103-beat-presets\"></script></body></html>");
   httpd_resp_sendstr_chunk(req, nullptr);
   return ESP_OK;
 }
