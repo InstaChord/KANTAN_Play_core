@@ -1,7 +1,7 @@
 # KANTAN Sampler Product Specification
 
 - 最終同期日: 2026-09-16
-- 同期確認バージョン: 0.8.9
+- 同期確認バージョン: 0.8.10
 
 この文書は、KANTAN Samplerのマニュアル、広告、Webサイト、製品紹介で使用する
 **製品仕様の正本**です。ユーザーが触れる名称、操作、対応形式、制限はこの文書を優先します。
@@ -153,6 +153,7 @@ Beat選択画面では候補を試聴できます。Patternは元のTempoで1周
 12個のPadへ音声を割り当て、演奏する中心パートです。
 
 - 内蔵Sample、SD上のWAV / MP3、マイク録音に対応
+- 内蔵SampleのVoiceカテゴリに、Voice 1〜4 / Go / Ha / Hey / Yeah / Haiの9つの短いボイス・ワンショットを収録
 - 最大20秒のLong Sampleに対応
 - 12 Pad全体で約5MBのPCMメモリ予算を共有
 - 長いChop元素材と短い効果音を、固定スロット長ではなく共有メモリで管理
@@ -674,7 +675,7 @@ PC接続と充電を優先し、メニュー変更による再起動時だけ選
 
 ## 初期状態
 
-- Beat: 内蔵Pop Pattern
+- Beat: 内蔵Disco Pattern
 - Beat Kit: Acoustic
 - Beat Volume: 100%
 - Beat Repeat: 2

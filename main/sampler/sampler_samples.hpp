@@ -115,6 +115,17 @@ SAMPLER_IMPORT_WAV("Generated_Presets/Perc_Shaker.wav",       wav_preset_perc_sh
 SAMPLER_IMPORT_WAV("Generated_Presets/Perc_Wood.wav",         wav_preset_perc_wood);
 SAMPLER_IMPORT_WAV("Generated_Presets/FX_Riser.wav",          wav_preset_fx_riser);
 SAMPLER_IMPORT_WAV("Generated_Presets/FX_Fall.wav",           wav_preset_fx_fall);
+// Short voice one-shots. These are intentionally regular sample presets,
+// rather than pitched KANTAN Synth tones.
+SAMPLER_IMPORT_WAV("Voice/v_1.wav",                            wav_voice_1);
+SAMPLER_IMPORT_WAV("Voice/v_2.wav",                            wav_voice_2);
+SAMPLER_IMPORT_WAV("Voice/v_3.wav",                            wav_voice_3);
+SAMPLER_IMPORT_WAV("Voice/v_4.wav",                            wav_voice_4);
+SAMPLER_IMPORT_WAV("Voice/v_Go.wav",                           wav_voice_go);
+SAMPLER_IMPORT_WAV("Voice/v_Ha.wav",                           wav_voice_ha);
+SAMPLER_IMPORT_WAV("Voice/v_Hey.wav",                          wav_voice_hey);
+SAMPLER_IMPORT_WAV("Voice/v_Yeah.wav",                         wav_voice_yeah);
+SAMPLER_IMPORT_WAV("Voice/v_jp_Hai.wav",                       wav_voice_hai);
 
 // Keep complete .ktsynth containers so built-in and SD tones share one parser.
 SAMPLER_IMPORT_WAV("KANTAN_Synth/Alto_Sax_Alto_Sax-D4.ktsynth",                   ktsynth_alto_sax);
@@ -256,6 +267,15 @@ static const sample_source_t builtin_samples[] = {
   { "WOOD",         wav_preset_perc_wood,      sizeof_wav_preset_perc_wood,      sample_category_t::percussion },
   { "RISER",        wav_preset_fx_riser,       sizeof_wav_preset_fx_riser,       sample_category_t::fx         },
   { "FALL",         wav_preset_fx_fall,        sizeof_wav_preset_fx_fall,        sample_category_t::fx         },
+  { "VOICE 1",      wav_voice_1,               sizeof_wav_voice_1,               sample_category_t::voice      },
+  { "VOICE 2",      wav_voice_2,               sizeof_wav_voice_2,               sample_category_t::voice      },
+  { "VOICE 3",      wav_voice_3,               sizeof_wav_voice_3,               sample_category_t::voice      },
+  { "VOICE 4",      wav_voice_4,               sizeof_wav_voice_4,               sample_category_t::voice      },
+  { "GO",           wav_voice_go,              sizeof_wav_voice_go,              sample_category_t::voice      },
+  { "HA",           wav_voice_ha,              sizeof_wav_voice_ha,              sample_category_t::voice      },
+  { "HEY",          wav_voice_hey,             sizeof_wav_voice_hey,             sample_category_t::voice      },
+  { "YEAH",         wav_voice_yeah,            sizeof_wav_voice_yeah,            sample_category_t::voice      },
+  { "HAI",          wav_voice_hai,             sizeof_wav_voice_hai,             sample_category_t::voice      },
 };
 static constexpr const size_t builtin_sample_count = sizeof(builtin_samples) / sizeof(builtin_samples[0]);
 // The factory kit intentionally leaves the top row empty. Additional built-in
