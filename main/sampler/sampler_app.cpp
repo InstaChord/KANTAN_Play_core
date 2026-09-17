@@ -51,7 +51,9 @@
 #include "sampler_mp3.hpp"
 #include "sampler_music_player.hpp"
 #include "sampler_ktkit.hpp"
+#include "sampler_ktsynth.hpp"
 #include "sampler_performance_probe.hpp"
+#include "sampler_pitch.hpp"
 
 #if defined(KANPLAY_RELEASE_SYNTH_SAM_PCM) && defined(KANPLAY_AMY_INTEGRATION)
 #error "The public SAM2695 + PCM backend and AMY integration are mutually exclusive"
@@ -876,7 +878,7 @@ static constexpr uint32_t edit_confirm_duration_msec = 3200;
 static bool synth_sustain_analysis_pending[def::pad::pad_count] = {};
 // Three small caches cover the Sample-page sustain loops most likely to be
 // used together. They are prepared only while performance input is idle.
-static constexpr uint8_t sampler_sustain_cache_slot_base = 3;
+static constexpr uint8_t sampler_sustain_cache_slot_base = 6;
 static constexpr uint8_t sampler_sustain_cache_slot_count = 3;
 static int8_t sampler_sustain_cache_owner[sampler_sustain_cache_slot_count] = { -1, -1, -1 };
 static bool sampler_sustain_cache_pending[def::pad::pad_count] = {};
@@ -1472,6 +1474,30 @@ static constexpr const uint8_t external_midi_voice_base = def::pad::pad_count + 
 static constexpr const uint8_t external_midi_voice_count = 8;
 static constexpr const uint8_t beat_voice_base = external_midi_voice_base + external_midi_voice_count;
 static constexpr const uint8_t beat_voice_count = 8;
+static constexpr const uint8_t synth_layer2_voice_base = beat_voice_base + beat_voice_count;
+static constexpr const uint8_t menu_preview_layer2_voice =
+  synth_layer2_voice_base + external_midi_voice_count;
+static_assert(menu_preview_layer2_voice + 1 <= sampler_audio_t::max_voice,
+              "second PCM bank exceeds audio voice capacity");
+static void release_pitched_audio_voice(uint8_t index, uint32_t edge_usec = 0,
+                                        uint8_t probe_kind = 0)
+{
+  if (index >= external_midi_voice_count) { return; }
+  sampler_audio_t::release(external_midi_voice_base + index, edge_usec, probe_kind);
+  sampler_audio_t::release(synth_layer2_voice_base + index);
+}
+static void stop_pitched_audio_voice(uint8_t index)
+{
+  if (index >= external_midi_voice_count) { return; }
+  sampler_audio_t::stop(external_midi_voice_base + index);
+  sampler_audio_t::stop(synth_layer2_voice_base + index);
+}
+static void set_pitched_audio_filter(uint8_t index, uint8_t cutoff, uint8_t resonance)
+{
+  if (index >= external_midi_voice_count) { return; }
+  sampler_audio_t::setVoiceToneFilter(external_midi_voice_base + index, cutoff, resonance);
+  sampler_audio_t::setVoiceToneFilter(synth_layer2_voice_base + index, cutoff, resonance);
+}
 static int8_t beat_voice_pad[beat_voice_count] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 static bool beat_voice_live[beat_voice_count] = {};
 static uint32_t beat_voice_age[beat_voice_count] = {};
@@ -1489,6 +1515,28 @@ struct pitched_voice_state_t {
 static pitched_voice_state_t pitched_voice_state[external_midi_voice_count];
 static uint32_t pitched_voice_age = 1;
 static uint32_t pitched_voice_generation = 1;
+static constexpr uint8_t synth_layer2_simultaneous_limit = 6;
+static bool admit_synth_layer2_voice(uint8_t index, bool internal_part)
+{
+  if (index >= external_midi_voice_count) { return false; }
+  if (sampler_audio_t::isPlaying(synth_layer2_voice_base + index)) { return true; }
+  uint8_t active = 0;
+  for (uint8_t voice = 0; voice < external_midi_voice_count; ++voice) {
+    active += sampler_audio_t::isPlaying(synth_layer2_voice_base + voice) ? 1 : 0;
+  }
+  if (active < synth_layer2_simultaneous_limit) { return true; }
+  // A local/recorded part has priority over optional BLE-MIDI layer doubling.
+  // The primary BLE voice remains audible; only its colour layer is reclaimed.
+  if (internal_part) {
+    for (uint8_t voice = 0; voice < external_midi_voice_count; ++voice) {
+      if (pitched_voice_state[voice].owner == pitched_voice_owner_t::external) {
+        sampler_audio_t::stop(synth_layer2_voice_base + voice);
+        return true;
+      }
+    }
+  }
+  return false;
+}
 struct synth_trigger_state_t {
   bool midi = false;
   bool live = false;
@@ -1651,12 +1699,16 @@ static uint32_t audio_beat_tempo_q16(void)
 }
 static char audio_beat_error[40] = { 0 };
 static int16_t* menu_preview_pcm = nullptr;
+static int16_t* menu_preview_pcm_layer2 = nullptr;
+static uint8_t* menu_preview_ktsynth_blob = nullptr;
 static uint32_t menu_preview_frames = 0;
 static uint32_t menu_preview_sample_rate = 44100;
 // File-list previews share the existing short audition voice. Keep ownership
 // separate from synth-tone previews so only file browsers redraw Fn1 when a
 // preview ends.
 static bool menu_file_preview_owned = false;
+static bool menu_ktsynth_preview_held = false;
+static bool menu_ktsynth_preview_releasing = false;
 static constexpr uint8_t synth_menu_preview_channel = kp::def::midi::channel_15;
 static uint8_t synth_menu_preview_note = 60;
 static bool synth_menu_preview_note_active = false;
@@ -1853,10 +1905,14 @@ static bool load_audio_beat_memory(const uint8_t* data, size_t len, const char* 
                                         bool auto_detect_key);
 static uint8_t* temp_alloc(size_t bytes);
 static void clear_menu_preview(void);
+static void release_menu_ktsynth_preview(void);
 static bool play_sound_page_preview(void);
 static bool play_menu_audio_preview(const char* path, uint32_t max_ms);
 static bool play_menu_builtin_preview(const char* builtin_id, uint32_t max_ms);
 static bool play_menu_builtin_background_preview(const char* builtin_id, uint32_t max_ms);
+static bool decode_menu_ktsynth_preview(const uint8_t* data, size_t size,
+                                        uint8_t* owned_blob = nullptr);
+static bool play_menu_ktsynth_preview(const char* path);
 static const background_source_t* find_builtin_audio_beat(const char* builtin_id);
 static bool has_lower_suffix(const std::string& n, const char* suffix);
 static bool is_audio_file_name(const std::string& name);
@@ -1909,6 +1965,7 @@ static pitched_page_settings_t& page_settings(performance_page_t page);
 static uint8_t resolved_pad_sound(const pitched_page_settings_t& settings);
 static sample_slot_t* synth_sample_slot(performance_page_t page);
 static const sample_slot_t* synth_sample_slot_const(performance_page_t page);
+static const synth_layer_slot_t* synth_second_layer_const(performance_page_t page);
 static std::string sampler_file_display_name(const std::string& source_name, const char* source_dir);
 static const char* sampler_beat_file_kind_badge(const std::string& source_name);
 static uint8_t chord_degree_for_order(uint8_t order);
@@ -1916,12 +1973,18 @@ static int8_t chord_modifier_for_order(uint8_t order);
 static void request_chord_label_draw(void);
 static uint8_t allocate_pitched_voice(pitched_voice_owner_t owner, uint8_t trigger, uint8_t note,
                                       bool live_performance = false);
-static uint16_t sample_pitch_for_note(const sample_slot_t& slot, uint8_t note);
+static uint32_t sample_pitch_for_note(const sample_slot_t& slot, uint8_t note);
+static uint32_t sample_pitch_for_note(const synth_layer_slot_t& slot, uint8_t note);
 static uint16_t sample_synth_pitch_scale_q12(const sample_slot_t& slot);
+static uint16_t page_pitch_scale_q12(performance_page_t page);
 static void set_sample_synth_tune(sample_slot_t& slot, int16_t cents);
 static uint16_t sample_page_pitch_scale_q12(performance_page_t page,
                                              const sample_slot_t& slot);
+static uint16_t sample_page_pitch_scale_q12(performance_page_t page,
+                                             const synth_layer_slot_t& slot);
 static bool synth_sustain_parameters(const sample_slot_t& slot, uint32_t source_start,
+                                     uint32_t* start, uint32_t* end, uint16_t* crossfade);
+static bool synth_sustain_parameters(const synth_layer_slot_t& slot, uint32_t source_start,
                                      uint32_t* start, uint32_t* end, uint16_t* crossfade);
 static uint16_t sample_sustain_auto_release_ms(const sample_slot_t& slot,
                                                uint32_t sustain_start,
@@ -3496,9 +3559,11 @@ static bool play_sample_sustain_voice(int pad, bool auto_release)
   const bool started = sampler_audio_t::playSynth((uint8_t)pad, slot.pcm + source_start,
     slot.playEnd() - source_start, slot.sample_rate, true, false,
     mixer_scaled_volume_q8(mixer_part_t::sampler, slot.volume_q8),
-    slot.samplerPlaybackPitchQ8(), slot.synth_attack_ms, slot.synth_release_ms,
+    (uint32_t)slot.samplerPlaybackPitchQ8() << 8,
+    slot.synth_attack_ms, slot.synth_release_ms,
     sustain_start, sustain_end, sustain_crossfade, auto_release_ms,
-    true, 1, cache_slot);
+    true, 1, cache_slot, 0, 0, slot.synth_delay_100us, slot.synth_hold_ms,
+    slot.synth_decay_ms, slot.synth_sustain_level_q15);
   if (started) {
     sampler_audio_t::setVoicePitchScaleQ12((uint8_t)pad,
                                             sample_synth_pitch_scale_q12(slot));
@@ -8439,6 +8504,18 @@ static const sample_slot_t* synth_sample_slot_const(performance_page_t page)
   return synth_sample_slot(page);
 }
 
+static const synth_layer_slot_t* synth_second_layer_const(performance_page_t page)
+{
+  const auto& settings = page_settings(page);
+  if (settings.source != synth_tone_source_t::file
+   && settings.source != synth_tone_source_t::kantan_synth) { return nullptr; }
+  const uint8_t index = synth_source_slot_index(page);
+  return index < sampler_pool_t::synth_source_count
+      && sampler_pool_t::synth_layer_count[index] == 2
+      && sampler_pool_t::synth_layer2[index].isValid()
+    ? &sampler_pool_t::synth_layer2[index] : nullptr;
+}
+
 static void select_synth_source_branch(menu_page_t page)
 {
   performance_page_t target;
@@ -9989,7 +10066,7 @@ static void menu_value_set(menu_value_t value, int index)
     // Controlへ切り替えた瞬間に、前モードで鳴らした外部MIDI音だけを解放する。
     if (midi_note_action == midi_note_action_t::control) {
       for (uint8_t i = 0; i < external_midi_voice_count; ++i) {
-        sampler_audio_t::release(external_midi_voice_base + i);
+        release_pitched_audio_voice(i);
         external_midi_voice_note[i] = -1;
         pitched_voice_state[i] = {};
       }
@@ -10135,7 +10212,15 @@ static bool menu_file_preview_available(void)
 
 static bool menu_file_preview_playing(void)
 {
-  return menu_file_preview_owned && synth_menu_preview_sample_active;
+  return menu_file_preview_owned && synth_menu_preview_sample_active
+      && !menu_ktsynth_preview_releasing;
+}
+
+static bool selected_menu_file_is_ktsynth(void)
+{
+  return kit_edit_state == kit_edit_state_t::select_synth_file
+      && synth_file_kind == synth_file_kind_t::kantan_synth
+      && menu_cursor < kit_wav_list.size();
 }
 
 static bool play_selected_menu_file_preview(void)
@@ -10163,6 +10248,14 @@ static bool play_selected_menu_file_preview(void)
   }
 
   const std::string& source = kit_wav_list[menu_cursor].filename;
+  if (selected_menu_file_is_ktsynth()) {
+    if (source.rfind("builtin:", 0) == 0) {
+      const auto* builtin = find_builtin_ktsynth_source(source.c_str() + 8);
+      return builtin && decode_menu_ktsynth_preview(builtin->data, builtin->size());
+    }
+    const std::string path = std::string(kit_wav_dir) + "/" + source;
+    return play_menu_ktsynth_preview(path.c_str());
+  }
   if (source.rfind("pattern:", 0) == 0) {
     return play_menu_pattern_preview(source.c_str());
   }
@@ -10181,7 +10274,8 @@ static bool play_selected_menu_file_preview(void)
 static bool toggle_menu_file_preview(void)
 {
   if (!menu_file_preview_available()) { return false; }
-  if (menu_file_preview_playing()) {
+  const bool ktsynth_preview = selected_menu_file_is_ktsynth();
+  if (!ktsynth_preview && menu_file_preview_playing()) {
     clear_menu_preview();
     draw_menu_keypad(true);
     return true;
@@ -10602,6 +10696,10 @@ static void update_menu_keypad_leds()
 
 static void draw_menu_keypad(bool force)
 {
+  // File Editor and setup QR screens own the whole LCD. Preview teardown can
+  // still request a forced keypad refresh while the menu remains logically
+  // open, but drawing it here would overwrite the QR surface.
+  if (ui_surface_exclusive) { return; }
   const uint8_t state = menu_keypad_state_for_current_menu();
   if (!force && state == menu_keypad_state) { return; }
   menu_keypad_state = state;
@@ -11548,11 +11646,13 @@ static void render_menu_item_row(M5Canvas& d, int index, int y, size_t count,
             && index < (int)kit_wav_list.size()) {
       d.setTextDatum(m5gfx::textdatum_t::middle_right);
       set_row_color(0x80D0FFu);
-      d.drawString(kit_wav_list[index].filename.rfind("builtin:", 0) == 0
-                     ? "BUILT-IN"
-                     : has_lower_suffix(kit_wav_list[index].filename, ".ktsynth")
-                       ? "KTS" : "SD",
-                   230, y + menu_row_h / 2);
+      const auto& filename = kit_wav_list[index].filename;
+      const char* badge = has_lower_suffix(filename, ".ktsynth") ? "KTS" : "SD";
+      if (filename.rfind("builtin:", 0) == 0) {
+        const auto* source = find_builtin_ktsynth_source(filename.c_str() + 8);
+        badge = source ? source->genre : "BUILT-IN";
+      }
+      d.drawString(badge, 230, y + menu_row_h / 2);
     } else if (kit_edit_state == kit_edit_state_t::select_wav
             || kit_edit_state == kit_edit_state_t::select_kit_file) {
       if (index < (int)kit_wav_list.size()
@@ -14955,6 +15055,23 @@ static bool synth_sustain_parameters(const sample_slot_t& slot, uint32_t source_
   return use_loop;
 }
 
+static bool synth_sustain_parameters(const synth_layer_slot_t& slot, uint32_t source_start,
+                                     uint32_t* start, uint32_t* end, uint16_t* crossfade)
+{
+  if (start) { *start = 0; }
+  if (end) { *end = 0; }
+  if (crossfade) { *crossfade = 0; }
+  if (!slot.isValid() || slot.synth_sustain_mode != sample_sustain_mode_t::manual) {
+    return false;
+  }
+  if (slot.synth_loop_start < source_start || slot.synth_loop_end > slot.playEnd()
+   || slot.synth_loop_end <= slot.synth_loop_start + 31) { return false; }
+  if (start) { *start = slot.synth_loop_start - source_start; }
+  if (end) { *end = slot.synth_loop_end - source_start; }
+  if (crossfade) { *crossfade = slot.synth_loop_crossfade; }
+  return true;
+}
+
 static uint16_t sample_sustain_auto_release_ms(const sample_slot_t& slot,
                                                uint32_t sustain_start,
                                                uint32_t sustain_end)
@@ -15042,7 +15159,7 @@ static void process_external_midi_note(uint8_t status, uint8_t note, uint8_t vel
     if (!note_on) {
       for (uint8_t i = 0; i < external_midi_voice_count; ++i) {
         if (external_midi_voice_note[i] == (int8_t)note) {
-          sampler_audio_t::release(external_midi_voice_base + i);
+          release_pitched_audio_voice(i);
           external_midi_voice_note[i] = -1;
           pitched_voice_state[i] = {};
         }
@@ -15052,7 +15169,7 @@ static void process_external_midi_note(uint8_t status, uint8_t note, uint8_t vel
     const auto* selected_slot = synth_sample_slot_const(performance_page_t::melody);
     if (!selected_slot || !selected_slot->isValid() || selected_slot->playFrames() == 0) { return; }
     const auto& slot = *selected_slot;
-    const uint16_t pitch = sample_pitch_for_note(slot, note);
+    const uint32_t pitch = sample_pitch_for_note(slot, note);
     uint32_t volume = ((uint32_t)slot.volume_q8 * velocity) / 127;
     volume = std::max<uint32_t>(1, volume);
 
@@ -15067,11 +15184,35 @@ static void process_external_midi_note(uint8_t status, uint8_t note, uint8_t vel
                                              &sustain_start, &sustain_end, &sustain_crossfade);
     sampler_audio_t::playSynth(external_midi_voice_base + voice,
                           slot.pcm + source_start, source_frames, slot.sample_rate,
-                          sustain, slot.reverse, (uint16_t)volume, (uint16_t)pitch,
+                          sustain, slot.reverse, (uint16_t)volume, pitch,
                           slot.synth_attack_ms, slot.synth_release_ms,
-                          sustain_start, sustain_end, sustain_crossfade);
+                          sustain_start, sustain_end, sustain_crossfade,
+                          0, true, 1, 0xFF, 0, 0, slot.synth_delay_100us,
+                          slot.synth_hold_ms, slot.synth_decay_ms,
+                          slot.synth_sustain_level_q15);
     sampler_audio_t::setVoicePitchScaleQ12(external_midi_voice_base + voice,
       sample_page_pitch_scale_q12(performance_page_t::melody, slot));
+    if (const auto* layer2 = synth_second_layer_const(performance_page_t::melody);
+        layer2 && admit_synth_layer2_voice(voice, false)) {
+      uint32_t loop_start = 0, loop_end = 0;
+      uint16_t crossfade = 0;
+      const uint32_t start = layer2->playStart();
+      const bool loop = synth_sustain_parameters(*layer2, start,
+                                                  &loop_start, &loop_end, &crossfade);
+      const uint32_t layer_volume = std::max<uint32_t>(1,
+        ((uint32_t)layer2->volume_q8 * velocity) / 127);
+      sampler_audio_t::playSynth(synth_layer2_voice_base + voice,
+        layer2->pcm + start, layer2->playFrames(), layer2->sample_rate,
+        loop, false, (uint16_t)layer_volume, sample_pitch_for_note(*layer2, note),
+        layer2->synth_attack_ms, layer2->synth_release_ms,
+        loop_start, loop_end, crossfade, 0, true, 1, 3, 0, 0,
+        layer2->synth_delay_100us, layer2->synth_hold_ms,
+        layer2->synth_decay_ms, layer2->synth_sustain_level_q15);
+      sampler_audio_t::setVoicePitchScaleQ12(synth_layer2_voice_base + voice,
+        sample_page_pitch_scale_q12(performance_page_t::melody, *layer2));
+    } else {
+      sampler_audio_t::stop(synth_layer2_voice_base + voice);
+    }
     external_midi_voice_note[voice] = (int8_t)note;
     return;
   }
@@ -20600,6 +20741,14 @@ static uint16_t sample_synth_pitch_scale_q12(const sample_slot_t& slot)
   return slot.synth_tune_scale_q12;
 }
 
+static uint16_t sample_page_pitch_scale_q12(performance_page_t page,
+                                             const synth_layer_slot_t& slot)
+{
+  const uint32_t combined = ((uint32_t)page_pitch_scale_q12(page)
+                           * slot.synth_tune_scale_q12 + 2048u) >> 12;
+  return (uint16_t)std::clamp<uint32_t>(combined, 2048, 8192);
+}
+
 static void set_sample_synth_tune(sample_slot_t& slot, int16_t cents)
 {
   slot.synth_tune_cents = std::clamp<int16_t>(cents, -100, 100);
@@ -20707,6 +20856,10 @@ static void apply_harmony_tuning(bool force)
       }
       sampler_audio_t::setVoicePitchScaleQ12(external_midi_voice_base + i,
                                               scale);
+      if (const auto* layer2 = synth_second_layer_const(page)) {
+        sampler_audio_t::setVoicePitchScaleQ12(synth_layer2_voice_base + i,
+          sample_page_pitch_scale_q12(page, *layer2));
+      }
     }
   }
 }
@@ -20790,6 +20943,10 @@ static void apply_page_pitch_bend(performance_page_t page)
     for (uint8_t i = 0; i < external_midi_voice_count; ++i) {
       if (pitched_voice_state[i].owner == owner) {
         sampler_audio_t::setVoicePitchScaleQ12(external_midi_voice_base + i, scale);
+        if (const auto* layer2 = synth_second_layer_const(page)) {
+          sampler_audio_t::setVoicePitchScaleQ12(synth_layer2_voice_base + i,
+            sample_page_pitch_scale_q12(page, *layer2));
+        }
       }
     }
   }
@@ -21117,21 +21274,14 @@ static uint8_t allocate_pitched_voice(pitched_voice_owner_t owner, uint8_t trigg
   return selected;
 }
 
-static uint16_t sample_pitch_for_note(const sample_slot_t& slot, uint8_t note)
+static uint32_t sample_pitch_for_note(const sample_slot_t& slot, uint8_t note)
 {
-  static constexpr uint16_t ratio_q8[] = {
-     64,  68,  72,  76,  81,  85,  91,  96, 102, 108, 114, 121,
-    128, 136, 144, 152, 161, 171, 181, 192, 203, 215, 228, 242,
-    256, 271, 287, 304, 323, 342, 362, 384, 407, 431, 456, 483,
-    512, 542, 575, 609, 645, 684, 724, 767, 813, 861, 912, 967,
-   1024
-  };
-  // Do not fold notes back into one octave. Melody's 12 pads intentionally
-  // span roughly two octaves, so preserve their actual distance from the
-  // detected Pad Base Note. +/-24 semitones is a practical PCM range.
-  const int delta = std::clamp<int>((int)note - (int)slot.base_note, -24, 24);
-  uint32_t pitch = ((uint32_t)slot.pitch_q8 * ratio_q8[delta + 24]) >> 8;
-  return (uint16_t)std::clamp<uint32_t>(pitch, 32, 2048);
+  return sampler_pitch::note_pitch_q16(slot.pitch_q8, slot.base_note, note);
+}
+
+static uint32_t sample_pitch_for_note(const synth_layer_slot_t& slot, uint8_t note)
+{
+  return sampler_pitch::note_pitch_q16(slot.pitch_q8, slot.base_note, note);
 }
 
 static void release_synth_trigger(performance_page_t page, uint8_t pad,
@@ -21162,7 +21312,7 @@ static void release_synth_trigger(performance_page_t page, uint8_t pad,
       if (pitched_voice_state[voice].owner == owner
        && pitched_voice_state[voice].trigger == pad
        && pitched_voice_state[voice].generation == state.voice_generation[i]) {
-        sampler_audio_t::release(external_midi_voice_base + voice,
+        release_pitched_audio_voice(voice,
           i == 0 ? probe_edge_usec : 0,
           i == 0 ? probe_kind : 0);
         pitched_voice_state[voice] = {};
@@ -21189,7 +21339,7 @@ static void stop_synth_trigger(performance_page_t page, uint8_t pad)
   const uint8_t channel = page_midi_channel(page);
   for (uint8_t i = 0; i < state.note_count; ++i) {
     if (!state.midi && state.voices[i] != 0xFF) {
-      sampler_audio_t::stop(external_midi_voice_base + state.voices[i]);
+      stop_pitched_audio_voice(state.voices[i]);
       pitched_voice_state[state.voices[i]] = {};
     } else if (state.midi) {
       send_sam_midi(kp::def::midi::note_off | channel, state.notes[i], 0);
@@ -21237,7 +21387,7 @@ static void prepare_pad_for_new_sample(uint8_t pad)
   }
   if (external_midi_sound == external_midi_sound_t::pad && external_midi_pad == pad) {
     for (uint8_t voice = 0; voice < external_midi_voice_count; ++voice) {
-      sampler_audio_t::stop(external_midi_voice_base + voice);
+      stop_pitched_audio_voice(voice);
       external_midi_voice_note[voice] = -1;
       pitched_voice_state[voice] = {};
     }
@@ -21261,7 +21411,7 @@ static void stop_active_chord_voices()
     } else {
       for (uint8_t i = 0; i < state.note_count; ++i) {
         if (state.voices[i] != 0xFF) {
-          sampler_audio_t::stop(external_midi_voice_base + state.voices[i]);
+          stop_pitched_audio_voice(state.voices[i]);
           pitched_voice_state[state.voices[i]] = {};
         }
       }
@@ -21415,6 +21565,19 @@ static void trigger_synth_pad(performance_page_t page, uint8_t pad, int chord_fl
     live_performance ? performance_event_time() : M5.millis());
   const uint8_t sustain_cache_slot = synth_sustain_cache_slot(page);
   const uint16_t pitch_scale_q12 = sample_page_pitch_scale_q12(page, slot);
+  const auto* layer2 = synth_second_layer_const(page);
+  uint32_t layer2_start = 0, layer2_frames = 0;
+  uint32_t layer2_sustain_start = 0, layer2_sustain_end = 0;
+  uint16_t layer2_crossfade = 0, layer2_volume_q8 = 0;
+  bool layer2_sustain = false;
+  if (layer2) {
+    layer2_start = layer2->playStart();
+    layer2_frames = layer2->playFrames();
+    layer2_sustain = synth_sustain_parameters(*layer2, layer2_start,
+      &layer2_sustain_start, &layer2_sustain_end, &layer2_crossfade);
+    layer2_volume_q8 = mixer_scaled_volume_q8(mixer_part_for_page(page),
+      (uint16_t)std::min<uint32_t>(512, ((uint32_t)layer2->volume_q8 * settings.volume) / 100));
+  }
   for (uint8_t i = 0; i < note_count; ++i) {
     uint8_t voice = allocate_pitched_voice(owner, pad, notes[i], live_performance);
     state.notes[i] = notes[i];
@@ -21432,9 +21595,25 @@ static void trigger_synth_pad(performance_page_t page, uint8_t pad, int chord_fl
       render_divider,
       sustain_cache_slot,
       i == 0 ? probe_edge_usec : 0,
-      i == 0 ? (live_performance ? 1 : 3) : 0);
-    sampler_audio_t::setVoicePitchScaleQ12(external_midi_voice_base + voice,
-                                            pitch_scale_q12);
+      i == 0 ? (live_performance ? 1 : 3) : 0,
+      slot.synth_delay_100us, slot.synth_hold_ms, slot.synth_decay_ms,
+      slot.synth_sustain_level_q15);
+    sampler_audio_t::setVoicePitchScaleQ12(external_midi_voice_base + voice, pitch_scale_q12);
+    if (layer2 && layer2_frames && admit_synth_layer2_voice(voice, true)) {
+      sampler_audio_t::playSynth(synth_layer2_voice_base + voice,
+        layer2->pcm + layer2_start, layer2_frames, layer2->sample_rate,
+        layer2_sustain, false, layer2_volume_q8,
+        sample_pitch_for_note(*layer2, notes[i]), layer2->synth_attack_ms,
+        layer2->synth_release_ms, layer2_sustain_start, layer2_sustain_end,
+        layer2_crossfade, 0, render_divider == 1, render_divider,
+        3 + synth_source_slot_index(page), 0, 0, layer2->synth_delay_100us,
+        layer2->synth_hold_ms, layer2->synth_decay_ms,
+        layer2->synth_sustain_level_q15);
+      sampler_audio_t::setVoicePitchScaleQ12(synth_layer2_voice_base + voice,
+        sample_page_pitch_scale_q12(page, *layer2));
+    } else {
+      sampler_audio_t::stop(synth_layer2_voice_base + voice);
+    }
   }
 }
 
@@ -21766,8 +21945,7 @@ static void touch_play_apply_tone(uint8_t cutoff, uint8_t resonance, uint8_t exp
     const auto& state = synth_trigger_state[(uint8_t)current_page][touch_play_pad];
     for (uint8_t i = 0; i < state.note_count; ++i) {
       if (!state.midi && state.voices[i] != 0xFF) {
-        sampler_audio_t::setVoiceToneFilter(external_midi_voice_base + state.voices[i],
-                                            cutoff, resonance);
+        set_pitched_audio_filter(state.voices[i], cutoff, resonance);
       }
     }
   }
@@ -23715,6 +23893,10 @@ static bool sample_mix_to_pad(uint8_t from, uint8_t to)
   sample_sustain_mode_t dst_sustain_mode = dst.synth_sustain_mode;
   uint16_t dst_attack_ms = dst.synth_attack_ms;
   uint16_t dst_release_ms = dst.synth_release_ms;
+  uint16_t dst_delay_100us = dst.synth_delay_100us;
+  uint16_t dst_hold_ms = dst.synth_hold_ms;
+  uint16_t dst_decay_ms = dst.synth_decay_ms;
+  uint16_t dst_sustain_level_q15 = dst.synth_sustain_level_q15;
   int16_t dst_tune_cents = dst.synth_tune_cents;
   sampler_audio_t::stop(from);
   sampler_audio_t::stop(to);
@@ -23734,6 +23916,10 @@ static bool sample_mix_to_pad(uint8_t from, uint8_t to)
       ? sample_sustain_mode_t::automatic : dst_sustain_mode;
   sampler_pool_t::slot[to].synth_attack_ms = dst_attack_ms;
   sampler_pool_t::slot[to].synth_release_ms = dst_release_ms;
+  sampler_pool_t::slot[to].synth_delay_100us = dst_delay_100us;
+  sampler_pool_t::slot[to].synth_hold_ms = dst_hold_ms;
+  sampler_pool_t::slot[to].synth_decay_ms = dst_decay_ms;
+  sampler_pool_t::slot[to].synth_sustain_level_q15 = dst_sustain_level_q15;
   set_sample_synth_tune(sampler_pool_t::slot[to], dst_tune_cents);
   invalidate_sample_pad_grid_cache(from);
   invalidate_sample_pad_grid_cache(to);
@@ -25151,22 +25337,33 @@ static void prime_synth_sustain_cache(performance_page_t page)
   const uint8_t cache_slot = synth_sustain_cache_slot(page);
   if (cache_slot == 0xFF) { return; }
   const auto* selected_slot = synth_sample_slot_const(page);
-  if (!selected_slot || !selected_slot->isValid() || selected_slot->playFrames() == 0) {
-    sampler_audio_t::clearSynthSustainCache(cache_slot);
-    return;
-  }
-  const auto& slot = *selected_slot;
-  const uint32_t source_start = slot.playStart();
   uint32_t sustain_start = 0;
   uint32_t sustain_end = 0;
   uint16_t sustain_crossfade = 0;
-  if (!synth_sustain_parameters(slot, source_start,
-                                &sustain_start, &sustain_end, &sustain_crossfade)) {
+  if (!selected_slot || !selected_slot->isValid() || selected_slot->playFrames() == 0) {
     sampler_audio_t::clearSynthSustainCache(cache_slot);
+  } else if (!synth_sustain_parameters(*selected_slot, selected_slot->playStart(),
+                                       &sustain_start, &sustain_end, &sustain_crossfade)) {
+    sampler_audio_t::clearSynthSustainCache(cache_slot);
+  } else {
+    sampler_audio_t::primeSynthSustainCache(cache_slot,
+      selected_slot->pcm + selected_slot->playStart(), sustain_start, sustain_end);
+  }
+
+  const uint8_t layer2_cache_slot = 3 + synth_source_slot_index(page);
+  const auto* layer2 = synth_second_layer_const(page);
+  if (!layer2 || !layer2->isValid() || layer2->playFrames() == 0) {
+    sampler_audio_t::clearSynthSustainCache(layer2_cache_slot);
     return;
   }
-  sampler_audio_t::primeSynthSustainCache(cache_slot, slot.pcm + source_start,
-                                           sustain_start, sustain_end);
+  const uint32_t layer2_source_start = layer2->playStart();
+  if (!synth_sustain_parameters(*layer2, layer2_source_start,
+                                &sustain_start, &sustain_end, &sustain_crossfade)) {
+    sampler_audio_t::clearSynthSustainCache(layer2_cache_slot);
+    return;
+  }
+  sampler_audio_t::primeSynthSustainCache(layer2_cache_slot,
+    layer2->pcm + layer2_source_start, sustain_start, sustain_end);
 }
 
 static void apply_synth_tones(bool force)
@@ -25247,6 +25444,7 @@ static void apply_mixer_part(mixer_part_t part)
                                      : performance_page_t::chord;
     const auto& settings = page_settings(page);
     const auto* source = synth_sample_slot_const(page);
+    const auto* layer2 = synth_second_layer_const(page);
     uint16_t base_q8 = 0;
     if (source && source->isValid()) {
       base_q8 = (uint16_t)std::min<uint32_t>(512,
@@ -25256,6 +25454,13 @@ static void apply_mixer_part(mixer_part_t part)
       if (pitched_voice_state[i].owner == owner) {
         sampler_audio_t::setVoiceVolumeQ8(external_midi_voice_base + i,
           mixer_scaled_volume_q8(part, base_q8));
+        uint16_t layer2_q8 = 0;
+        if (layer2) {
+          layer2_q8 = (uint16_t)std::min<uint32_t>(512,
+            ((uint32_t)layer2->volume_q8 * settings.volume) / 100);
+        }
+        sampler_audio_t::setVoiceVolumeQ8(synth_layer2_voice_base + i,
+          mixer_scaled_volume_q8(part, layer2_q8));
       }
     }
     apply_synth_page_volume(part == mixer_part_t::bass ? performance_page_t::bass
@@ -27191,6 +27396,9 @@ static void process_bitmask(uint32_t bitmask, uint32_t event_msec) {
   }
   const uint32_t menu_consumed_releases = released_edge & menu_consumed_release_mask;
   menu_consumed_release_mask &= ~released_edge;
+  if ((menu_consumed_releases & (1u << 14)) && menu_ktsynth_preview_held) {
+    release_menu_ktsynth_preview();
+  }
   released_edge &= ~menu_consumed_releases;
 
   if (sd_safe_remove_overlay) {
@@ -27439,9 +27647,23 @@ static int16_t* audio_pcm_alloc(size_t bytes) {
 #endif
 }
 
+static void release_menu_ktsynth_preview(void)
+{
+  if (!menu_ktsynth_preview_held) { return; }
+  menu_ktsynth_preview_held = false;
+  menu_ktsynth_preview_releasing = true;
+  sampler_audio_t::release(menu_preview_voice);
+  sampler_audio_t::release(menu_preview_layer2_voice);
+  // The longest authored Release is 10 seconds. This deadline is only a
+  // fail-safe; normal cleanup happens as soon as both voices become idle.
+  synth_menu_preview_stop_msec = M5.millis() + 10100;
+  if (menu_visible) { draw_menu_keypad(true); }
+}
+
 static void clear_menu_preview(void)
 {
   sampler_audio_t::stop(menu_preview_voice);
+  sampler_audio_t::stop(menu_preview_layer2_voice);
   if (synth_menu_preview_note_active) {
 #if defined(KANPLAY_AMY_INTEGRATION) && !defined(M5UNIFIED_PC_BUILD)
     if (synth_menu_preview_uses_amy) { sampler_amy_engine::stopPreview(); }
@@ -27455,20 +27677,40 @@ static void clear_menu_preview(void)
   synth_menu_preview_stop_msec = 0;
   sound_page_preview_active = false;
   menu_file_preview_owned = false;
+  menu_ktsynth_preview_held = false;
+  menu_ktsynth_preview_releasing = false;
   menu_beat_preview_sampler_muted = false;
-  if (menu_preview_pcm) {
+  if (menu_preview_pcm || menu_preview_pcm_layer2 || menu_preview_ktsynth_blob) {
     // I2S側が停止フラグを確認してから解放する。DMA 1ブロックより短いと
     // 直前のPCMを参照したまま解放され、次回のプレビューが不安定になる。
     M5.delay(6);
+    if (menu_preview_pcm_layer2 && menu_preview_pcm_layer2 != menu_preview_pcm) {
+      free(menu_preview_pcm_layer2);
+    }
     free(menu_preview_pcm);
+    free(menu_preview_ktsynth_blob);
   }
   menu_preview_pcm = nullptr;
+  menu_preview_pcm_layer2 = nullptr;
+  menu_preview_ktsynth_blob = nullptr;
   menu_preview_frames = 0;
   menu_preview_sample_rate = 44100;
 }
 
 static void service_synth_menu_preview(uint32_t now)
 {
+  if (menu_ktsynth_preview_releasing) {
+    if (!sampler_audio_t::isPlaying(menu_preview_voice)
+     && !sampler_audio_t::isPlaying(menu_preview_layer2_voice)) {
+      clear_menu_preview();
+      if (menu_visible) { draw_menu_keypad(true); }
+      return;
+    }
+  } else if (menu_ktsynth_preview_held && synth_menu_preview_stop_msec != 0
+          && (int32_t)(now - synth_menu_preview_stop_msec) >= 0) {
+    release_menu_ktsynth_preview();
+    return;
+  }
   if (synth_menu_preview_stop_msec == 0
    || (int32_t)(now - synth_menu_preview_stop_msec) < 0) { return; }
   const bool redraw_file_button = menu_file_preview_owned;
@@ -27529,6 +27771,94 @@ static void preview_synth_menu_selection(void)
     synth_menu_preview_sample_active = true;
     synth_menu_preview_stop_msec = M5.millis() + preview_ms;
   }
+}
+
+static uint32_t menu_ktsynth_preview_pitch_q16(const ktsynth_layer_info_t& layer)
+{
+  // Device-side audition keeps the established C4/C2 reference pitch. Root
+  // Note audition belongs to the browser editor's local preview only.
+  const uint8_t preview_note = synth_menu_target == performance_page_t::bass ? 36 : 60;
+  const float semitones = (float)((int)preview_note - (int)layer.root_note)
+                        + (float)layer.tune_cents / 100.0f;
+  return (uint32_t)std::max<double>(1.0,
+    lround(65536.0 * pow(2.0, semitones / 12.0)));
+}
+
+static bool decode_menu_ktsynth_preview(const uint8_t* data, size_t size,
+                                        uint8_t* owned_blob)
+{
+  ktsynth_info_t info;
+  // SD files are already in PSRAM. Retain that allocation and point the two
+  // voices into it, avoiding a second full-size PCM allocation during preview.
+  menu_preview_ktsynth_blob = owned_blob;
+  if (!data || !parse_ktsynth(data, size, &info)) {
+    clear_menu_preview();
+    return false;
+  }
+  const int16_t* layer_pcm[2] = { info.layer[0].pcm, nullptr };
+  if (!owned_blob) {
+    menu_preview_pcm = audio_pcm_alloc(info.layer[0].pcm_bytes);
+    if (!menu_preview_pcm) { return false; }
+    memcpy(menu_preview_pcm, info.layer[0].pcm, info.layer[0].pcm_bytes);
+    layer_pcm[0] = menu_preview_pcm;
+    if (info.layer_count == 2) {
+      if (info.layer[1].pcm_source_layer == 0) {
+        menu_preview_pcm_layer2 = menu_preview_pcm;
+      } else {
+        menu_preview_pcm_layer2 = audio_pcm_alloc(info.layer[1].pcm_bytes);
+        if (!menu_preview_pcm_layer2) { clear_menu_preview(); return false; }
+        memcpy(menu_preview_pcm_layer2, info.layer[1].pcm, info.layer[1].pcm_bytes);
+      }
+      layer_pcm[1] = menu_preview_pcm_layer2;
+    }
+  } else if (info.layer_count == 2) {
+    layer_pcm[1] = info.layer[1].pcm;
+  }
+
+  auto play_layer = [&](uint8_t voice, uint8_t index, const int16_t* pcm) {
+    const auto& layer = info.layer[index];
+    const uint32_t frames = layer.end_frame - layer.start_frame;
+    const bool loop = layer.sustain_mode == ktsynth_sustain_mode_t::loop;
+    const uint32_t loop_start = loop ? layer.loop_start_frame - layer.start_frame : 0;
+    const uint32_t loop_end = loop ? layer.loop_end_frame - layer.start_frame : 0;
+    return sampler_audio_t::playSynth(voice, pcm + layer.start_frame, frames,
+      layer.sample_rate, loop, false, layer.default_gain_q8,
+      menu_ktsynth_preview_pitch_q16(layer), layer.attack_ms, layer.release_ms,
+      loop_start, loop_end, (uint16_t)layer.loop_crossfade_frames, 0,
+      true, 1, 0xFF, 0, 0, layer.delay_100us, layer.hold_ms,
+      layer.decay_ms, layer.sustain_level_q15);
+  };
+
+  if (!play_layer(menu_preview_voice, 0, layer_pcm[0])
+   || (info.layer_count == 2
+    && !play_layer(menu_preview_layer2_voice, 1, layer_pcm[1]))) {
+    clear_menu_preview();
+    return false;
+  }
+  synth_menu_preview_sample_active = true;
+  menu_ktsynth_preview_held = true;
+  menu_ktsynth_preview_releasing = false;
+  // A missed physical release must not leave a looped preview running forever.
+  synth_menu_preview_stop_msec = M5.millis() + 30000;
+  return true;
+}
+
+static bool play_menu_ktsynth_preview(const char* path)
+{
+  static constexpr size_t maximum_ktsynth_bytes = 2u * 1024u * 1024u;
+  if (!path || !path[0] || !kp::storage_sd.beginStorage()) { return false; }
+  const int size = kp::storage_sd.getFileSize(path);
+  if (size <= 4 || (size_t)size > maximum_ktsynth_bytes) { return false; }
+  uint8_t* source = temp_alloc((size_t)size);
+  if (!source) { return false; }
+  const int loaded = kp::storage_sd.loadFromFileToMemory(path, source, (size_t)size);
+  if (loaded != size) {
+    free(source);
+    return false;
+  }
+  // Ownership transfers even on a parse/play failure; the decoder performs
+  // the same delayed teardown used by every other preview path.
+  return decode_menu_ktsynth_preview(source, (size_t)loaded, source);
 }
 
 static bool decode_menu_wav_preview(const uint8_t* wav, size_t wav_size, uint32_t max_ms)
@@ -27723,7 +28053,8 @@ static void select_synth_file(void)
     loaded = source && load_builtin_ktsynth(synth_index, *source);
   } else if (kp::storage_sd.beginStorage()) {
     const int size = kp::storage_sd.getFileSize(path.c_str());
-    static constexpr int max_synth_file_bytes = 3200 * 1024;
+    const int max_synth_file_bytes = has_lower_suffix(path, ".ktsynth")
+      ? 2 * 1024 * 1024 : 3200 * 1024;
     if (size > 4 && size <= max_synth_file_bytes) {
       uint8_t* data = temp_alloc((size_t)size);
       if (data) {
@@ -30418,6 +30749,10 @@ static bool save_sample_kit_to_storage(kp::storage_base_t& storage, const char* 
     s["synthSustainMode"] = (uint8_t)slot.synth_sustain_mode;
     s["synthAttackMs"] = slot.synth_attack_ms;
     s["synthReleaseMs"] = slot.synth_release_ms;
+    s["synthDelay100us"] = slot.synth_delay_100us;
+    s["synthHoldMs"] = slot.synth_hold_ms;
+    s["synthDecayMs"] = slot.synth_decay_ms;
+    s["synthSustainLevelQ15"] = slot.synth_sustain_level_q15;
     s["synthTuneCents"] = slot.synth_tune_cents;
     s["reverse"] = slot.reverse;
     s["hold"] = slot.hold_enabled;
@@ -30531,6 +30866,10 @@ static bool save_kit_to_storage(kp::storage_base_t& storage, const char* path)
     s["synthSustainMode"] = (uint8_t)slot.synth_sustain_mode;
     s["synthAttackMs"] = slot.synth_attack_ms;
     s["synthReleaseMs"] = slot.synth_release_ms;
+    s["synthDelay100us"] = slot.synth_delay_100us;
+    s["synthHoldMs"] = slot.synth_hold_ms;
+    s["synthDecayMs"] = slot.synth_decay_ms;
+    s["synthSustainLevelQ15"] = slot.synth_sustain_level_q15;
     s["synthTuneCents"] = slot.synth_tune_cents;
     s["reverse"] = slot.reverse;
     s["hold"] = slot.hold_enabled;
@@ -30672,10 +31011,34 @@ static bool save_kit_to_storage(kp::storage_base_t& storage, const char* path)
     std::string file = slot.file_path;
     if (!is_resume) {
       char asset_path[128];
-      snprintf(asset_path, sizeof(asset_path), "%s/%s.wav",
-               asset_dir.c_str(), asset_name);
-      if (!save_pcm_as_wav(storage, asset_path, slot.pcm, slot.frames,
-                           slot.sample_rate)) {
+      const bool save_ktsynth = source == synth_tone_source_t::kantan_synth
+                             || sampler_pool_t::synth_layer_count[index] == 2;
+      snprintf(asset_path, sizeof(asset_path), "%s/%s.%s", asset_dir.c_str(),
+               asset_name, save_ktsynth ? "ktsynth" : "wav");
+      if (save_ktsynth) {
+        const uint8_t* bytes = nullptr;
+        size_t byte_count = 0;
+        uint8_t* temporary = nullptr;
+        if (!strncmp(slot.file_path, "builtin:", 8)) {
+          const auto* builtin = find_builtin_ktsynth_source(builtin_sample_name(slot.file_path));
+          if (builtin) { bytes = builtin->data; byte_count = builtin->size(); }
+        } else if (kp::storage_sd.beginStorage()) {
+          const int source_bytes = kp::storage_sd.getFileSize(slot.file_path);
+          if (source_bytes > 0 && source_bytes <= 2 * 1024 * 1024) {
+            temporary = temp_alloc((size_t)source_bytes);
+            if (temporary && kp::storage_sd.loadFromFileToMemory(
+                  slot.file_path, temporary, (size_t)source_bytes) == source_bytes) {
+              bytes = temporary;
+              byte_count = (size_t)source_bytes;
+            }
+          }
+        }
+        const bool saved = bytes && storage.saveFromMemoryToFile(
+          asset_path, bytes, byte_count) == (int)byte_count;
+        if (temporary) { free(temporary); }
+        if (!saved) { return false; }
+      } else if (!save_pcm_as_wav(storage, asset_path, slot.pcm, slot.frames,
+                                  slot.sample_rate)) {
         return false;
       }
       file = asset_path;
@@ -30694,6 +31057,10 @@ static bool save_kit_to_storage(kp::storage_base_t& storage, const char* path)
     part["synthSustainMode"] = (uint8_t)slot.synth_sustain_mode;
     part["synthAttackMs"] = slot.synth_attack_ms;
     part["synthReleaseMs"] = slot.synth_release_ms;
+    part["synthDelay100us"] = slot.synth_delay_100us;
+    part["synthHoldMs"] = slot.synth_hold_ms;
+    part["synthDecayMs"] = slot.synth_decay_ms;
+    part["synthSustainLevelQ15"] = slot.synth_sustain_level_q15;
     part["synthTuneCents"] = slot.synth_tune_cents;
     return true;
   };
@@ -30817,7 +31184,12 @@ static void restore_ktkit_slot_settings(JsonObjectConst s, sample_slot_t& slot)
     s["synthSustainMode"] | (uint8_t)sample_sustain_mode_t::automatic,
     (uint8_t)sample_sustain_mode_t::manual);
   slot.synth_attack_ms = std::clamp<uint16_t>(s["synthAttackMs"] | 0u, 0u, 5000u);
-  slot.synth_release_ms = std::clamp<uint16_t>(s["synthReleaseMs"] | 120u, 10u, 2000u);
+  slot.synth_release_ms = std::clamp<uint16_t>(s["synthReleaseMs"] | 120u, 10u, 10000u);
+  slot.synth_delay_100us = s["synthDelay100us"] | slot.synth_delay_100us;
+  slot.synth_hold_ms = std::clamp<uint16_t>(s["synthHoldMs"] | slot.synth_hold_ms, 0u, 5000u);
+  slot.synth_decay_ms = std::clamp<uint16_t>(s["synthDecayMs"] | slot.synth_decay_ms, 0u, 60000u);
+  slot.synth_sustain_level_q15 = std::clamp<uint16_t>(
+    s["synthSustainLevelQ15"] | slot.synth_sustain_level_q15, 0u, 32768u);
   set_sample_synth_tune(slot, std::clamp<int16_t>(s["synthTuneCents"] | 0, -100, 100));
   if (slot.synth_sustain_mode == sample_sustain_mode_t::manual) {
     const uint32_t begin = s["synthLoopStart"] | 0u;
@@ -31082,7 +31454,14 @@ static bool load_kit_from_storage(kp::storage_base_t& storage, const char* path,
     slot.synth_attack_ms = std::clamp<uint16_t>(
       s["synthAttackMs"] | slot.synth_attack_ms, 0, 5000);
     slot.synth_release_ms = std::clamp<uint16_t>(
-      s["synthReleaseMs"] | 120, 10, 2000);
+      s["synthReleaseMs"] | 120, 10, 10000);
+    slot.synth_delay_100us = s["synthDelay100us"] | slot.synth_delay_100us;
+    slot.synth_hold_ms = std::clamp<uint16_t>(
+      s["synthHoldMs"] | slot.synth_hold_ms, 0, 5000);
+    slot.synth_decay_ms = std::clamp<uint16_t>(
+      s["synthDecayMs"] | slot.synth_decay_ms, 0, 60000);
+    slot.synth_sustain_level_q15 = std::clamp<uint16_t>(
+      s["synthSustainLevelQ15"] | slot.synth_sustain_level_q15, 0, 32768);
     set_sample_synth_tune(slot, std::clamp<int16_t>(
       s["synthTuneCents"] | slot.synth_tune_cents, -100, 100));
     if (slot.synth_sustain_mode == sample_sustain_mode_t::manual) {
@@ -31485,7 +31864,9 @@ static bool load_kit_from_storage(kp::storage_base_t& storage, const char* path,
       skipped_sd_assets = true;
     } else if (kp::storage_sd.beginStorage()) {
       const int audio_size = kp::storage_sd.getFileSize(file);
-      if (audio_size > 4 && audio_size <= 3200 * 1024) {
+      const int max_audio_size = has_lower_suffix(file, ".ktsynth")
+        ? 2 * 1024 * 1024 : 3200 * 1024;
+      if (audio_size > 4 && audio_size <= max_audio_size) {
         uint8_t* audio_data = temp_alloc((size_t)audio_size);
         if (audio_data) {
           const int audio_len = kp::storage_sd.loadFromFileToMemory(
@@ -31534,7 +31915,14 @@ static bool load_kit_from_storage(kp::storage_base_t& storage, const char* path,
     slot.synth_attack_ms = std::clamp<uint16_t>(
       part["synthAttackMs"] | slot.synth_attack_ms, 0u, 5000u);
     slot.synth_release_ms = std::clamp<uint16_t>(
-      part["synthReleaseMs"] | slot.synth_release_ms, 10u, 2000u);
+      part["synthReleaseMs"] | slot.synth_release_ms, 10u, 10000u);
+    slot.synth_delay_100us = part["synthDelay100us"] | slot.synth_delay_100us;
+    slot.synth_hold_ms = std::clamp<uint16_t>(
+      part["synthHoldMs"] | slot.synth_hold_ms, 0u, 5000u);
+    slot.synth_decay_ms = std::clamp<uint16_t>(
+      part["synthDecayMs"] | slot.synth_decay_ms, 0u, 60000u);
+    slot.synth_sustain_level_q15 = std::clamp<uint16_t>(
+      part["synthSustainLevelQ15"] | slot.synth_sustain_level_q15, 0u, 32768u);
     set_sample_synth_tune(slot, std::clamp<int16_t>(
       part["synthTuneCents"] | slot.synth_tune_cents, -100, 100));
     slot.synth_sustain_mode = (sample_sustain_mode_t)std::min<uint8_t>(
@@ -31874,6 +32262,10 @@ bool sampler_web_export_state(std::string& out)
     item["synthSustainMode"] = (uint8_t)slot.synth_sustain_mode;
     item["synthAttackMs"] = slot.synth_attack_ms;
     item["synthReleaseMs"] = slot.synth_release_ms;
+    item["synthDelay100us"] = slot.synth_delay_100us;
+    item["synthHoldMs"] = slot.synth_hold_ms;
+    item["synthDecayMs"] = slot.synth_decay_ms;
+    item["synthSustainLevelQ15"] = slot.synth_sustain_level_q15;
     item["synthTuneCents"] = slot.synth_tune_cents;
     item["synthLoopStart"] = slot.synth_loop_start;
     item["synthLoopEnd"] = slot.synth_loop_end;
@@ -31982,6 +32374,14 @@ static void service_sampler_web_command(void)
     stop_all_audio();
     return;
   }
+  if (strcmp(action, "stopSynthPreview") == 0) {
+    // Treat the Web editor's Off button as Note Off so the authored Release
+    // remains audible. The retained KTS/PCM allocation is freed when both
+    // preview layers have completed their envelopes.
+    if (menu_ktsynth_preview_held) { release_menu_ktsynth_preview(); }
+    else { clear_menu_preview(); }
+    return;
+  }
   if (strcmp(action, "previewWav") == 0) {
     const char* path = doc["file"] | "";
     if (strncmp(path, "builtin:", 8) == 0) {
@@ -31997,7 +32397,18 @@ static void service_sampler_web_command(void)
       // アサイン前のSD上音源を専用プレビューVoiceへ短時間だけ展開する。
       // Padプールと設定は変更しない。
       uint32_t max_ms = std::clamp<uint32_t>(doc["maxMs"] | 2000, 250, 2000);
-      play_menu_audio_preview(path, max_ms);
+      const bool held_ktsynth = (doc["hold"] | false)
+                             && has_lower_suffix(std::string(path), ".ktsynth");
+      if (held_ktsynth) {
+        clear_menu_preview();
+        if (play_menu_ktsynth_preview(path)) {
+          // The Web editor owns the Note Off button, so there is no fixed
+          // duration. File Editor teardown still performs an immediate stop.
+          synth_menu_preview_stop_msec = 0;
+        }
+      } else {
+        play_menu_audio_preview(path, max_ms);
+      }
     }
     return;
   }
@@ -32181,11 +32592,24 @@ static void service_sampler_web_command(void)
     }
     if (!doc["synthReleaseMs"].isNull()) {
       slot.synth_release_ms = std::clamp<uint16_t>(
-        doc["synthReleaseMs"].as<uint16_t>(), 10, 2000);
+        doc["synthReleaseMs"].as<uint16_t>(), 10, 10000);
     }
     if (!doc["synthAttackMs"].isNull()) {
       slot.synth_attack_ms = std::clamp<uint16_t>(
         doc["synthAttackMs"].as<uint16_t>(), 0, 5000);
+    }
+    if (!doc["synthDelay100us"].isNull()) {
+      slot.synth_delay_100us = doc["synthDelay100us"].as<uint16_t>();
+    }
+    if (!doc["synthHoldMs"].isNull()) {
+      slot.synth_hold_ms = std::clamp<uint16_t>(doc["synthHoldMs"].as<uint16_t>(), 0, 5000);
+    }
+    if (!doc["synthDecayMs"].isNull()) {
+      slot.synth_decay_ms = std::clamp<uint16_t>(doc["synthDecayMs"].as<uint16_t>(), 0, 60000);
+    }
+    if (!doc["synthSustainLevelQ15"].isNull()) {
+      slot.synth_sustain_level_q15 = std::clamp<uint16_t>(
+        doc["synthSustainLevelQ15"].as<uint16_t>(), 0, 32768);
     }
     if (!doc["synthTuneCents"].isNull()) {
       set_sample_synth_tune(slot, std::clamp<int16_t>(

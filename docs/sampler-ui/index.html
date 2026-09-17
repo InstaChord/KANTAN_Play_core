@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>KANTAN Sampler File Editor</title>
-  <link rel="stylesheet" href="app.css?v=085-beat-view-sync">
+  <link rel="stylesheet" href="app.css?v=097-synth-drop-hold">
 </head>
 <body>
   <main>
@@ -13,20 +13,22 @@
       <span id="status">Connecting…</span>
       <button id="refresh" title="Refresh">Refresh</button>
     </header>
-    <p class="notice scope-notice">Manage files on the SD card here. The Sample tab also assigns Device Presets or SD files to Pads. Edit samples and change performance settings on KANTAN Sampler.</p>
+    <p class="notice scope-notice">Manage SD card files and Pad sounds.</p>
     <nav class="tabs" aria-label="Editor views">
       <button class="tab active" data-view="sample-view">Sample</button>
       <button class="tab" data-view="beat-view">Beat</button>
       <button class="tab" data-view="kit-view">Kit</button>
       <button class="tab" data-view="project-view">Project</button>
       <button class="tab" data-view="music-view">Music</button>
+      <button class="tab" data-view="synth-view">Synth</button>
     </nav>
     <section id="sample-view" class="view active"></section>
     <section id="beat-view" class="view"></section>
     <section id="kit-view" class="view"></section>
     <section id="project-view" class="view"></section>
     <section id="music-view" class="view"></section>
+    <section id="synth-view" class="view"></section>
   </main>
-  <script src="app.js?v=085-beat-view-sync" defer></script>
+  <script type="module" src="app.js?v=097-synth-drop-hold"></script>
 </body>
 </html>

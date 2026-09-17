@@ -17,7 +17,7 @@
 | ファイル | 役割 |
 |---|---|
 | `main/sampler/sampler_app.cpp` | アプリ本体、入力処理、画面描画、5パートとSOUND/PLAY/REC/FX状態管理 |
-| `main/sampler/sampler_audio.hpp/cpp` | 48kHz I2S再生エンジン、30ボイスミキサー、外部入力録音 |
+| `main/sampler/sampler_audio.hpp/cpp` | 48kHz I2S再生エンジン、38物理ボイスミキサー、外部入力録音 |
 | `main/sampler/sampler_pool.hpp/cpp` | PSRAM上のSampler/Pattern Beat/専用Synthサンプル管理、WAV/PCMロード |
 | `main/sampler/sampler_ktsynth.hpp` | KANTAN Synth tone (`.ktsynth`) の検証とメタデータ解析 |
 | `main/sampler/sampler_wav.hpp` | WAVヘッダ解析 |
@@ -156,7 +156,7 @@ SOUNDモードはSamplerパートへの強制移動ではなく、現在のパ�
 `sampler_audio_t` がサンプル再生と外部入力録音を担当します。
 
 - 出力サンプルレート: 48kHz
-- 最大ボイス数: 30（12 Sampler + Audio Beat + Preview + Pad Synth 8 + Pattern Beat 8）
+- 最大物理ボイス数: 39（12 Sampler + Audio Beat + Preview + Pad Synth 8 + Pattern Beat 8 + KANTAN Synth第2 PCM 8 + KANTAN Synthプレビュー第2 PCM 1）。演奏用の第2 PCMは論理発音数を消費せず、同時発音は6に制限する
 - 出力経路: KANTAN Play base側 ES8388 / I2S
 - I2Sポート:
   - KANTAN Play base出力/入力: `I2S_NUM_0`
@@ -523,7 +523,11 @@ BASSとMELODYの設定項目は同じ構造とする。
   - `Sample > Pad`: Sampler Pad一覧を開く
   - `Sample > File`: SDカードのWAV/MP3を専用スロットへ読み込む
   - `KANTAN Synth`: 内蔵音色とSDカードの`.ktsynth`を開く
+    - 選択画面のFn1は、押下でNote On、解放でNote Offとし、Releaseが終わるまでPCMを保持する。2レイヤー、PCM共有、各レイヤーのSample Rate / Root Note / Tune / Gain / Loop / DAHDSRを実再生と同じ条件で反映する
+    - SD上のKTSは読込み済みファイル領域をプレビュー音声が直接参照し、PCM全体の二重確保を避ける。カーソル移動、メニュー離脱、再押下では安全に停止・解放する
+    - WAV/MP3、Beat、Patternの選択プレビューは従来どおり押すたびに再生／停止する
 - `Base Note`: `Sample > Pad / File`のときだけ表示する。`KANTAN Synth`はファイル内の基準音を使う
+- `KANTAN Synth`の発音倍率はQ16でNote On時に算出し、Root Noteとの差を±24半音へ丸めない。高い基準音のPCMを含め、MIDI 0〜127で隣接Noteが同じ倍率にならないこと。音声タスクでは従来どおり算出済み16.16再生ステップだけを使用する
 - `Key/Scale`: `Key / Scale / Tuning`
 - `Octave`
 - `Volume`
@@ -940,7 +944,7 @@ Pad 9〜12はMix A〜Dです。
 ## 多重発音の負荷・発音遅延の計測
 
 - 通常の前方向PCMは1ms分をボイスごとにまとめて描画する。固定作業領域は768バイトで、ボイスごとのPCM複製、追加タスク、先読みキューを作らない。逆再生、Seek、Touchフィルター、Chop境界Fadeは従来の汎用レンダラーへ戻す
-- 通常経路の位置更新・Gain・Envelope・補間は範囲を保証した32bit演算を使う。48kHz出力、既存の内部24kHz設定、Attack/Release、Loop Crossfade、拍合わせは維持する。シンセの設定がすべて揃ってからボイスを有効化する
+- 通常経路の位置更新・Gain・Envelope・補間は範囲を保証した32bit演算を使う。EnvelopeレベルはQ15.16で保持し、音声処理中は加減算と比較だけで進める。Attack最大5秒、Decay最大60秒、Release最大10秒を48kHzの指定フレーム数どおりに完了し、途中Note Offではその瞬間のレベルからReleaseを開始する。既存の内部24kHz設定、Delay/Hold/Sustain、Loop Crossfade、拍合わせは維持する。Delay中はPCM cursorを進めない。シンセの設定がすべて揃ってからボイスを有効化する
 - Recで新しいNote Offを保存するときは対応するNote Onだけを検索し、最小Gate補正後に再生スナップショットへ追記する。毎回の全Note Off×全Note On走査と全再生インデックス再構築を省く。テンポ変更等で全体を変えたときの一括補正は維持する
 - `sampler_s3_latency_probe`、`sampler_s3_latency_reference`、`sampler_s3_debug`で低負荷の発音計測を有効にする。通常の`sampler_s3`ではボイスの計測用フィールドも無効化する。比較には本番同等の`-O2`を使うprobe/referenceを使用し、referenceではPCMミキサーだけ従来方式に戻す
 - 物理Pad入力履歴の押下・離上待ち時間、ライブ／Rec別のNote On・Note Offから最初のミキサー処理まで、Recイベント保存、Recイベント一括再生、ボイス探索、1ms I2Sブロック処理時間を計測する。イベント遅延は1ms幅、CPU処理時間は100µs幅のヒストグラムとする
@@ -950,7 +954,7 @@ Pad 9〜12はMix A〜Dです。
 - 判定基準は音声処理への追加待ちが現行I2S 1ブロック（96個の32bit word、48 stereo frame、48kHzのため1ms）以内、I2Sブロック処理p95が1ms未満とする。物理入力から実出力の目標p95 20msは拍合わせ待ちを分離して実機計測する。ミキサー到達カウンターはDAC出力・DMAバッファ待ち・音色の立ち上がりを測定しない
 - 同じ内蔵KANTAN Synth音色を複数パートへ割り当てた場合、デコード済みPCM Assetを参照カウントで共有する。各パートのStart/End、Loop、Envelope、Gainなどのメタデータは独立して保持する
 - PCMポインタ、再生範囲、Sustain Loop範囲、Crossfadeが一致するパートは、内部RAMのAttack/Sustain作業キャッシュも共有する。どれかが異なれば自動的にパート別キャッシュへ分離する
-- 作業キャッシュは実際の区間長で確保し、6スロット合計48KiBを上限とする。確保前に内部RAM空き48KiBと連続領域16KiBの余裕を判定し、不足時は元のPSRAMへフォールバックする。Chordのキャッシュ準備を優先する。発音中のキャッシュは書換・拡張・解放しない。BLE接続／Mic開始時の未使用キャッシュ解放は維持する
+- 作業キャッシュは実際の区間長で確保し、9 descriptor（3 Part主Layer + 3 Part第2 Layer + 3 Sampler Pad）合計48KiBを上限とする。確保前に内部RAM空き48KiBと連続領域16KiBの余裕を判定し、不足時は元のPSRAMへフォールバックする。Chordのキャッシュ準備を優先する。発音中のキャッシュは書換・拡張・解放しない。BLE接続／Mic開始時の未使用キャッシュ解放は維持する
 - Rec再生は1msの専用タスクと固定スナップショットを使い、同時刻イベントをNote Off、Pitch Bend、Note Onの順に処理する。ライブ即時発音は入力履歴を処理するメインタスクから直接音源へ渡す。拍合わせによるPlay最大24ms／Recグリッド半分の発音待ちは従来どおりとする
 - 実機での比較は[PCM多重発音レスポンス 実機A/B比較手順](pcm-response-validation-ja.md)、実装内容・ホスト比較結果・実機で未確認の範囲は[PCM response validation](pcm-response-validation.md)を参照する
 

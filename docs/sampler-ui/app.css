@@ -39,6 +39,7 @@ input,select { min-width:0; border:1px solid var(--line); border-radius:4px; pad
 .upload-dropzone.has-files { border-style:solid; border-color:#3d879f; }
 .upload-dropzone.disabled { opacity:.6; pointer-events:none; }
 .upload-area > button { min-width:112px; }
+.synth-upload { grid-template-columns:1fr; }
 .upload-progress { margin:8px 0 12px; padding:9px 10px; border:1px solid #3d7285; border-radius:5px; background:#14232b; }
 .upload-progress[hidden] { display:none; }
 .upload-progress-head { display:flex; align-items:center; gap:7px; min-height:20px; color:var(--text); }
@@ -48,6 +49,53 @@ input,select { min-width:0; border:1px solid var(--line); border-radius:4px; pad
 .upload-progress-track { height:5px; margin-top:7px; overflow:hidden; border-radius:3px; background:#293641; }
 .upload-progress-fill { display:block; width:0; height:100%; border-radius:3px; background:var(--accent); transition:width .12s linear; }
 .upload-progress.saving .upload-progress-fill { transform-origin:left; animation:upload-saving 1s ease-in-out infinite; }
+.sf2-open { width:100%; min-height:48px; margin:0 0 12px; font-size:15px; }
+.sf2-launcher,.sf2-save-row { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:0 0 12px; }
+.sf2-launcher h2 { margin:0; }
+.synth-methods { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-top:16px; }
+.synth-methods button { min-height:86px; display:grid; align-content:center; gap:6px; text-align:left; }
+.synth-methods small { color:#d6edf5; font-weight:400; }
+.sf2-converter { border-color:#3d879f; box-shadow:0 0 0 1px rgba(77,201,240,.08); }
+.sf2-converter h3 { margin:18px 0 8px; font-size:14px; }
+.sf2-field { display:grid; gap:5px; margin:10px 0; color:var(--muted); font-size:12px; }
+.sf2-field > span { color:var(--text); font-weight:700; }
+.sf2-field input,.sf2-field select { width:100%; min-height:40px; }
+.sf2-candidates { display:grid; gap:8px; margin:8px 0 12px; padding:10px; border:1px solid #40515d; border-radius:6px; }
+.sf2-candidates legend { padding:0 5px; color:var(--muted); font-size:12px; }
+.sf2-candidate { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:5px 9px; padding:10px; border:1px solid #40515d; border-radius:6px; cursor:pointer; }
+.sf2-candidate.selected { border-color:var(--accent); background:#172a33; }
+.sf2-candidate input { grid-row:1 / span 2; }
+.sf2-candidate-name { font-weight:700; overflow-wrap:anywhere; }
+.sf2-candidate small { grid-column:2; color:var(--muted); }
+.sf2-candidate button { grid-column:3; grid-row:1 / span 2; min-height:38px; }
+.sf2-volume { margin:12px 0; padding:12px; border:1px solid #40515d; border-radius:6px; }
+.sf2-volume-heading,.sf2-volume-row { display:flex; align-items:center; gap:10px; }
+.sf2-volume-heading { justify-content:space-between; margin-bottom:7px; }
+.sf2-volume-heading button { min-height:32px; padding:5px 9px; }
+.sf2-volume-row input { flex:1; min-width:0; }
+.sf2-volume small { display:block; margin-top:7px; color:var(--muted); }
+.sf2-advanced { margin:14px 0; border-top:1px solid #40515d; border-bottom:1px solid #40515d; padding:10px 0; }
+.sf2-advanced summary { cursor:pointer; font-weight:700; min-height:32px; }
+.sf2-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 12px; }
+.sf2-size { display:grid; align-content:center; gap:5px; color:var(--muted); }
+.sf2-size strong { color:var(--text); font-size:16px; }
+.pitch-confirm { margin:14px 0; padding:12px; border:1px solid #40515d; border-radius:6px; }
+.pitch-confirm h3 { margin-top:0; }
+.pitch-controls { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:10px 0; }
+.pitch-controls label { display:grid; gap:5px; color:var(--muted); font-size:12px; }
+.pitch-controls select { min-height:42px; color:var(--text); font-size:16px; }
+.sf2-working,.success,.warning,.error { padding:10px; border-radius:5px; }
+.device-preview { display:grid; gap:5px; margin:8px 0 12px; padding:10px; border:1px solid #3d7285; border-radius:6px; background:#14232b; }
+.device-preview button { min-height:40px; }
+.device-preview .actions { margin-top:0; }
+.device-preview small { color:var(--muted); }
+.synth-layer { display:grid; gap:10px; margin:14px 0; padding:14px; border:1px solid #365462; border-radius:7px; background:#101c22; }
+.synth-layer h3 { margin:0; }
+.sf2-working { background:#14232b; }
+.success { background:#123426; color:#9ce6bd; }
+.warning { background:#3b2e13; color:#ffd98a; }
+.error { background:#3b191b; color:#ffb0b6; }
+.danger-text { color:var(--danger) !important; }
 @keyframes upload-spin { to { transform:rotate(360deg); } }
 @keyframes upload-saving { 0%,100% { transform:scaleX(.25); opacity:.45; } 50% { transform:scaleX(1); opacity:1; } }
 .range-value { min-width:52px; text-align:right; color:var(--accent); font-variant-numeric:tabular-nums; }
@@ -65,8 +113,8 @@ input,select { min-width:0; border:1px solid var(--line); border-radius:4px; pad
   #status { grid-column:1 / -1; grid-row:2; margin:0; overflow-wrap:anywhere; }
   #refresh { grid-column:2; grid-row:1; min-height:36px; }
 
-  .tabs { gap:3px; margin:0 -10px 12px; padding:0 10px; }
-  .tab { flex:1 1 0; min-height:40px; padding:8px 4px; }
+  .tabs { gap:3px; margin:0 -10px 12px; padding:0 10px; overflow-x:auto; }
+  .tab { flex:0 0 auto; min-width:76px; min-height:40px; padding:8px 7px; }
   .grid { grid-template-columns:1fr; gap:10px; }
   .panel { padding:10px; border-radius:6px; }
   .panel h2 { font-size:16px; }
@@ -103,6 +151,15 @@ input,select { min-width:0; border:1px solid var(--line); border-radius:4px; pad
   .upload-area { grid-template-columns:1fr; }
   .upload-area > button { min-height:40px; }
   .upload-dropzone { min-height:76px; }
+  .sf2-grid { grid-template-columns:1fr; }
+  .synth-methods { grid-template-columns:1fr; }
+  .sf2-save-row { align-items:stretch; flex-direction:column; }
+  .sf2-save-row button { min-height:46px; }
+  .synth-layer { padding:10px; }
+  .synth-layer .sf2-launcher { align-items:stretch; flex-direction:column; }
+  .synth-layer .sf2-launcher button { align-self:flex-start; }
+  .sf2-candidate { grid-template-columns:auto minmax(0,1fr); }
+  .sf2-candidate button { grid-column:2; grid-row:3; justify-self:start; }
 }
 
 @media (max-width:360px) {

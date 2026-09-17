@@ -59,6 +59,10 @@ struct sample_slot_t {
   sample_sustain_mode_t synth_sustain_mode = sample_sustain_mode_t::automatic;
   uint16_t synth_attack_ms = 0;
   uint16_t synth_release_ms = 120;
+  uint16_t synth_delay_100us = 0;
+  uint16_t synth_hold_ms = 0;
+  uint16_t synth_decay_ms = 0;
+  uint16_t synth_sustain_level_q15 = 32768;
   int16_t synth_tune_cents = 0;
   uint16_t synth_tune_scale_q12 = 4096;  // centsから事前計算する演奏用倍率
   bool reverse = false;
@@ -110,16 +114,52 @@ struct sample_slot_t {
   }
 };
 
+// Only KANTAN Synth can own a second PCM layer. Keep its descriptor compact:
+// normal Pad names, paths and 96-bin waveform previews would otherwise waste
+// about 1.5 KiB of scarce internal RAM for three invisible layer descriptors.
+struct synth_layer_slot_t {
+  int16_t* pcm = nullptr;
+  sample_asset_t* asset = nullptr;
+  uint32_t frames = 0;
+  uint32_t sample_rate = 48000;
+  uint32_t start_frame = 0;
+  uint32_t end_frame = 0;
+  uint16_t volume_q8 = 0;
+  uint16_t pitch_q8 = 256;
+  uint8_t base_note = 60;
+  uint32_t synth_loop_start = 0;
+  uint32_t synth_loop_end = 0;
+  uint16_t synth_loop_crossfade = 0;
+  sample_sustain_mode_t synth_sustain_mode = sample_sustain_mode_t::off;
+  uint16_t synth_attack_ms = 0;
+  uint16_t synth_release_ms = 120;
+  uint16_t synth_delay_100us = 0;
+  uint16_t synth_hold_ms = 0;
+  uint16_t synth_decay_ms = 0;
+  uint16_t synth_sustain_level_q15 = 32768;
+  int16_t synth_tune_cents = 0;
+  uint16_t synth_tune_scale_q12 = 4096;
+
+  bool isValid(void) const { return pcm != nullptr && frames != 0; }
+  uint32_t playStart(void) const { return start_frame < frames ? start_frame : 0; }
+  uint32_t playEnd(void) const {
+    return (end_frame > playStart() && end_frame <= frames) ? end_frame : frames;
+  }
+  uint32_t playFrames(void) const { return playEnd() - playStart(); }
+};
+
 class sampler_pool_t {
 public:
   using progress_callback_t = void (*)();
   static constexpr const size_t pool_budget_bytes = 5 * 1024 * 1024;
   static constexpr const uint32_t max_sample_sec = 20;  // Long Chop素材を含む上限
   static constexpr const uint8_t synth_source_count = 3; // Melody / Chord / Bass
-  static constexpr const uint8_t asset_capacity = 27;   // 12 Pad + 3 Synth + Chop素材/変換の余白
+  static constexpr const uint8_t asset_capacity = 30;   // 12 Pad + 3 x 2 Synth + Chop素材/変換の余白
 
   static sample_slot_t slot[def::pad::pad_count];
   static sample_slot_t synth_source[synth_source_count];
+  static synth_layer_slot_t synth_layer2[synth_source_count];
+  static uint8_t synth_layer_count[synth_source_count];
 
   static size_t usedBytes(void);
   static size_t freeBytes(void);
