@@ -163,6 +163,7 @@ static uint32_t getColorByCommand(const def::command::command_param_t &command_p
     break;
 
   case def::command::edit_enc2_target:
+  case def::command::melody_edit_modifier:
     color = system_registry->color_setting.getButtonCursorColor();
     // color = 0x996688u;
     break;
@@ -314,6 +315,12 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
   const auto command = command_param.getCommand();
   const auto param = command_param.getParam();
 
+  // SIDE_1を修飾キーとして使ったかを、押下中に発生した別コマンドで記録する。
+  if (command != def::command::mapping_switch && command != def::command::side1_modifier
+   && system_registry->working_command.check({ def::command::mapping_switch, 1 })) {
+    _mapping_switch_used = true;
+  }
+
   switch (command)
   {
   case def::command::sub_button:
@@ -346,6 +353,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
   case def::command::chord_bass_semitone:
   case def::command::mapping_switch:
   case def::command::chord_modifier:
+  case def::command::melody_edit_modifier:
     // 動作中コマンドの更新
     if (is_pressed) {
       system_registry->working_command.set(command_param);
@@ -476,6 +484,7 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
 
   case def::command::mapping_switch:
     if (is_pressed) {
+      if (param == 1) { _mapping_switch_used = false; }
       system_registry->runtime_info.setButtonMappingSwitch(param);
       // system_registry->working_command.set(def::command::swap_sub_button);
 
@@ -485,6 +494,16 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
       }
 
     } else {
+      bool open_melody = false;
+      if (param == 1 && !_mapping_switch_used) {
+        const auto mode = system_registry->runtime_info.getGuiMode();
+        const uint32_t other_buttons = system_registry->internal_input.getButtonBitmask()
+                                     & ~def::button_bitmask::SIDE_1;
+        open_melody = other_buttons == 0
+          && mode != def::gui_mode_t::gm_menu
+          && mode != def::gui_mode_t::gm_part_edit
+          && mode != def::gui_mode_t::gm_melody_edit;
+      }
 #if 1  // レバーを離したタイミングで元のマッピングに戻す
       system_registry->runtime_info.setButtonMappingSwitch(0);
 #else
@@ -495,6 +514,9 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
         system_registry->runtime_info.setButtonMappingSwitch(0);
       }
 #endif
+      if (open_melody) {
+        enterMelodyEdit();
+      }
     }
 // M5_LOGV("A:%04x  B:%04x  C:%04x  D:%04x", _command_history[0].raw, _command_history[1].raw, _command_history[2].raw, _command_history[3].raw);
 // M5_LOGE("mapping_switch %d", system_registry->runtime_info.getButtonMappingSwitch());
@@ -883,6 +905,54 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
     }
     break;
 
+  case def::command::side1_modifier:
+    // 物理SIDE_1専用。Commanderの押下時コマンドキャッシュにより、マッピングが
+    // 切り替わった後もリリースは必ずこの経路へ戻る。
+    commandProccessor({ def::command::mapping_switch, 1 }, is_pressed);
+    break;
+
+  case def::command::melody_edit_enter:
+    if (is_pressed) { enterMelodyEdit(); }
+    break;
+
+  case def::command::melody_edit_function:
+    if (is_pressed) {
+      procMelodyEditFunction(command_param);
+      system_registry->checkSongModified();
+    }
+    break;
+
+  case def::command::melody_edit_parameter_ud:
+    if (is_pressed) {
+      auto& melody = system_registry->song_data.melody;
+      if (system_registry->working_command.check({
+            def::command::melody_edit_modifier, def::command::melody_modifier_tone })) {
+        int tone = melody.info.getTone() + param;
+        if (tone < 0) { tone = 0; }
+        if (tone > 127) { tone = 127; }
+        melody.info.setTone((uint8_t)tone);
+        system_registry->player_command.addQueue({
+          def::command::melody_preview, def::command::melody_preview_pitch });
+      } else if (system_registry->working_command.check({
+                   def::command::melody_edit_modifier, def::command::melody_modifier_volume })) {
+        int volume = melody.info.getVolume() + 5 * param;
+        if (volume < 0) { volume = 0; }
+        if (volume > 100) { volume = 100; }
+        melody.info.setVolume((uint8_t)volume);
+        system_registry->player_command.addQueue({
+          def::command::melody_preview, def::command::melody_preview_volume });
+      } else {
+        procMelodyEditFunction({ def::command::melody_edit_function,
+          param < 0 ? def::command::melody_left : def::command::melody_right });
+      }
+      system_registry->checkSongModified();
+    }
+    break;
+
+  case def::command::melody_preview:
+    system_registry->player_command.addQueue(command_param, is_pressed);
+    break;
+
   case def::command::edit_enc2_target:
     {
       int8_t target = system_registry->chord_play.getEditEnc2Target();
@@ -1123,6 +1193,132 @@ void task_operator_t::afterMenuClose(void)
   system_registry->operator_command.addQueue( { def::command::system_control, def::command::sc_save } );
 }
 
+void task_operator_t::enterMelodyEdit(void)
+{
+  if (system_registry->runtime_info.getGuiFlag_MelodyEdit()) { return; }
+  system_registry->backup_song_data.assign(system_registry->song_data);
+  _melody_undo_count = 0;
+  system_registry->runtime_info.setAutoplayState(def::play::auto_play_state_t::auto_play_none);
+  system_registry->runtime_info.setMelodyCursorStep(0);
+  system_registry->runtime_info.setMelodyCursorPitch(60);
+  system_registry->runtime_info.setMelodyScaleFold(true);
+  system_registry->runtime_info.setGuiFlag_MelodyEdit(true);
+  system_registry->player_command.addQueue({ def::command::melody_preview, def::command::melody_preview_stop });
+  changeCommandMapping();
+}
+
+void task_operator_t::procMelodyEditFunction(const def::command::command_param_t& command_param)
+{
+  using mf = def::command::melody_edit_function_t;
+  auto& melody = system_registry->song_data.melody;
+  uint16_t step = system_registry->runtime_info.getMelodyCursorStep();
+  uint8_t pitch = system_registry->runtime_info.getMelodyCursorPitch();
+  const auto function = (mf)command_param.getParam();
+  const int page = def::app::melody_steps_per_page;
+
+  auto remember_and_set = [&](system_registry_t::melody_event_t event) {
+    auto old = melody.timeline.getEvent(step);
+    if (old == event) { return; }
+    if (_melody_undo_count == max_melody_undo) {
+      memmove(&_melody_undo[0], &_melody_undo[1], (max_melody_undo - 1) * sizeof(_melody_undo[0]));
+      --_melody_undo_count;
+    }
+    _melody_undo[_melody_undo_count++] = { step, old };
+    melody.setEvent(step, event);
+  };
+
+  switch (function) {
+  case mf::melody_left:
+    if (step > 0) { --step; }
+    break;
+  case mf::melody_right:
+    if (step + 1 < def::app::max_progression_length) { ++step; }
+    break;
+  case mf::melody_page_left:
+    {
+      uint16_t page_start = (step / page) * page;
+      step = step == page_start
+           ? (page_start >= page ? page_start - page : 0)
+           : page_start;
+    }
+    break;
+  case mf::melody_page_right:
+    {
+      uint16_t last_page = ((def::app::max_progression_length - 1) / page) * page;
+      step = std::min<uint16_t>(last_page, ((step / page) + 1) * page);
+    }
+    break;
+  case mf::melody_home:
+    step = 0;
+    break;
+  case mf::melody_up:
+  case mf::melody_down: {
+    int direction = function == mf::melody_up ? 1 : -1;
+    int next = pitch;
+    if (system_registry->runtime_info.getMelodyScaleFold()) {
+      static constexpr uint8_t major_scale[] = { 0, 2, 4, 5, 7, 9, 11 };
+      int key = system_registry->runtime_info.getMasterKey();
+      do {
+        next += direction;
+        if (next < 0 || next > 127) { break; }
+        int pc = (next - key) % 12;
+        if (pc < 0) { pc += 12; }
+        if (std::find(std::begin(major_scale), std::end(major_scale), pc) != std::end(major_scale)) { break; }
+      } while (true);
+    } else {
+      next += direction;
+    }
+    if (next >= 0 && next <= 127 && next != pitch) {
+      pitch = (uint8_t)next;
+      system_registry->runtime_info.setMelodyCursorPitch(pitch);
+      system_registry->player_command.addQueue({ def::command::melody_preview, def::command::melody_preview_pitch });
+    }
+    break;
+  }
+  case mf::melody_note:
+    remember_and_set(system_registry_t::melody_event_t::note(pitch));
+    system_registry->player_command.addQueue({ def::command::melody_preview, def::command::melody_preview_pitch });
+    break;
+  case mf::melody_delete:
+    remember_and_set(system_registry_t::melody_event_t::empty());
+    break;
+  case mf::melody_mute:
+    remember_and_set(system_registry_t::melody_event_t::mute());
+    system_registry->player_command.addQueue({ def::command::melody_preview, def::command::melody_preview_stop });
+    break;
+  case mf::melody_fold:
+    system_registry->runtime_info.setMelodyScaleFold(!system_registry->runtime_info.getMelodyScaleFold());
+    break;
+  case mf::melody_undo:
+    if (_melody_undo_count) {
+      auto undo = _melody_undo[--_melody_undo_count];
+      melody.timeline.setEvent(undo.step, undo.event);
+      uint16_t length = melody.timeline.getDataCount() ? (melody.timeline.end() - 1)->first + 1 : 0;
+      melody.info.setLength(length);
+      step = undo.step;
+    }
+    break;
+  case mf::melody_play:
+    system_registry->player_command.addQueue({ def::command::melody_preview, def::command::melody_preview_step });
+    // 再生タスクが現在位置を取得してからカーソルを進める。
+    // ここで先に進めると、キュー処理時に次のステップをプレビューしてしまう。
+    break;
+  case mf::melody_discard:
+  case mf::melody_save:
+    system_registry->player_command.addQueue({ def::command::melody_preview, def::command::melody_preview_stop });
+    if (function == mf::melody_discard) {
+      system_registry->song_data.assign(system_registry->backup_song_data);
+    }
+    system_registry->runtime_info.setGuiFlag_MelodyEdit(false);
+    system_registry->operator_command.addQueue({ def::command::system_control, def::command::sc_save });
+    changeCommandMapping();
+    break;
+  default:
+    break;
+  }
+  system_registry->runtime_info.setMelodyCursorStep(step);
+}
+
 void task_operator_t::procEditFunction(const def::command::command_param_t& command_param)
 {
   auto part_index = system_registry->chord_play.getEditTargetPart();
@@ -1141,8 +1337,28 @@ void task_operator_t::procEditFunction(const def::command::command_param_t& comm
   case def::command::edit_function_t::right:      new_x += 1; break;
   case def::command::edit_function_t::edit_down:  new_y += 1; break;
   case def::command::edit_function_t::edit_up:    new_y -= 1; break;
-  case def::command::edit_function_t::page_left:  new_x -= def::app::getStepsPerPage(system_registry->current_slot->slot_info.getStepPerBeat()); break;
-  case def::command::edit_function_t::page_right: new_x += def::app::getStepsPerPage(system_registry->current_slot->slot_info.getStepPerBeat()); break;
+  case def::command::edit_function_t::page_left:
+    {
+      int page = def::app::getStepsPerPage(system_registry->current_slot->slot_info.getStepPerBeat());
+      int page_start = (cursor_x / page) * page;
+      if (cursor_x != page_start) {
+        new_x = page_start;
+      } else if (page_start >= page) {
+        new_x = page_start - page;
+      } else {
+        int end_point = 1 + part->part_info.getLoopStep();
+        new_x = ((end_point - 1) / page) * page;
+      }
+    }
+    break;
+  case def::command::edit_function_t::page_right:
+    {
+      int page = def::app::getStepsPerPage(system_registry->current_slot->slot_info.getStepPerBeat());
+      int end_point = 1 + part->part_info.getLoopStep();
+      new_x = ((cursor_x / page) + 1) * page;
+      if (new_x >= end_point) { new_x = 0; }
+    }
+    break;
   case def::command::edit_function_t::backhome:
     new_x = 0;
     new_y = 6;
@@ -1494,6 +1710,11 @@ void task_operator_t::changeCommandMapping(void)
     sub_map = def::command::command_mapping_sub_button_edit_table;
     break;
 
+  case def::gui_mode_t::gm_melody_edit:
+    main_map = def::command::command_mapping_melody_edit_table;
+    sub_map = def::command::command_mapping_sub_button_melody_table;
+    break;
+
   case def::gui_mode_t::gm_song_recording:
     {
       static constexpr const def::command::command_param_array_t* tbl[] = {
@@ -1546,7 +1767,7 @@ void task_operator_t::changeCommandMapping(void)
   }
   // スロットボタン (index max_main_button〜+max_slot_button-1) を反映
   // gm_part_edit 時は編集テーブルの sub_button 1〜4 をそのまま使うためスキップ
-  if (mode != def::gui_mode_t::gm_part_edit) {
+  if (mode != def::gui_mode_t::gm_part_edit && mode != def::gui_mode_t::gm_melody_edit) {
     for (int i = 0; i < def::hw::max_slot_button; ++i) {
       auto pair = system_registry->command_mapping_slot.getCommandParamArray(i);
       system_registry->command_mapping_current.setCommandParamArray(def::hw::max_main_button + i, pair);

@@ -361,6 +361,7 @@ Button Index mapping
     gm_song_play,      // ソング演奏 (ガイドプレイ・オートソング)
     gm_song_recording, // ソングレコーディング
     gm_part_edit,      // パート編集
+    gm_melody_edit,    // Song専用メロディトラック編集
     gm_menu,           // メニュー表示モード
     gm_max,
   };
@@ -538,6 +539,12 @@ Button Index mapping
       play_control,
       play_mode_set,
       progression_pos_ud,
+      melody_edit_enter,
+      melody_edit_function,
+      melody_edit_modifier,
+      melody_edit_parameter_ud,
+      melody_preview,
+      side1_modifier,
       command_max,
     };
 
@@ -562,11 +569,45 @@ Button Index mapping
       (const char*[]){ "-", "←", "→", "↓", "↑", "<<", ">>", "Home", "On", "Off", "Mute", "ON/of", "CLEAR", "Copy", "Paste" },            // edit_function
       (const char*[]){ "-", "Exit", "Save" },            // edit_exit
       (const char*[]){ "-", "Vol %", "Oct", "Voicing", "Velo %", "Tone", "Anchor", "LoopLen", "Stroke" },   // edit_enc2_target
-      (const char*[]){ "-", "Auto", "Play", "Stop", "Pause" },  // autoplay_switch
+      (const char*[]){ "-", "Auto", "Play", "Stop", "Pause", "Beat" },  // autoplay_switch
       (const char*[]){ "Stop", "Play" },  // preview_switch
       (const char*[]){ "Stop", "Rec", "Rec Tog" },  // recording_control
       (const char*[]){ "-", "Penta", "Major", "Chroma", "Blues", "Japan", }, // note_scale_set
+      (const char*[]){ nullptr, },  // note_scale_ud
+      (const char*[]){ nullptr, },  // sound_effect
+      (const char*[]){ nullptr, },  // menu_cursor_sound
+      (const char*[]){ nullptr, },  // menu_navigate_sound
+      (const char*[]){ nullptr, },  // sub_button
+      (const char*[]){ nullptr, },  // mapping_switch
+      (const char*[]){ nullptr, },  // master_vol_ud
+      (const char*[]){ nullptr, },  // master_vol_set
+      (const char*[]){ nullptr, },  // master_key_ud
+      (const char*[]){ nullptr, },  // master_key_set
+      (const char*[]){ nullptr, },  // target_key_set
+      (const char*[]){ nullptr, },  // slot_select_ud
+      (const char*[]){ nullptr, },  // chord_beat
+      (const char*[]){ nullptr, },  // chord_step_reset_request
+      (const char*[]){ nullptr, },  // system_control
+      (const char*[]){ nullptr, },  // file_index_ud
+      (const char*[]){ nullptr, },  // file_index_set
+      (const char*[]){ nullptr, },  // file_load_notify
+      (const char*[]){ nullptr, },  // file_save_notify
+      (const char*[]){ nullptr, },  // edit_enc2_ud
+      (const char*[]){ nullptr, },  // set_velocity
+      (const char*[]){ nullptr, },  // menu_open
+      (const char*[]){ nullptr, },  // internal_button
+      (const char*[]){ nullptr, },  // play_control
+      (const char*[]){ nullptr, },  // play_mode_set
+      (const char*[]){ nullptr, },  // progression_pos_ud
+      (const char*[]){ nullptr, },  // melody_edit_enter
+      (const char*[]){ "-", "←", "→", "↓", "↑", "<<", ">>", "Home", "On", "Off", "Mute", "Fold", "Undo", "Play", "Exit", "Save" }, // melody_edit_function
+      (const char*[]){ "-", "Tone", "Volume" }, // melody_edit_modifier
+      (const char*[]){ nullptr, }, // melody_edit_parameter_ud
+      (const char*[]){ "Stop", "Pitch", "Volume", "Step" }, // melody_preview
+      (const char*[]){ nullptr, }, // side1_modifier
     };
+    static_assert(sizeof(command_name_table) / sizeof(command_name_table[0]) == command_max,
+                  "command_name_table must stay aligned with command_t");
     enum menu_function_t : uint8_t {
       mf_0, mf_1, mf_2, mf_3, mf_4, mf_5, mf_6, mf_7, mf_8, mf_9, mf_back, mf_enter, mf_down, mf_up, mf_exit,
     };
@@ -601,6 +642,49 @@ Button Index mapping
     enum edit_exit_t : uint8_t {
       discard = 1, save,
     };
+    enum melody_edit_function_t : uint8_t {
+      melody_left = 1, melody_right, melody_down, melody_up,
+      melody_page_left, melody_page_right, melody_home,
+      melody_note, melody_delete, melody_mute, melody_fold,
+      melody_undo, melody_play, melody_discard, melody_save,
+    };
+    enum melody_edit_modifier_t : uint8_t {
+      melody_modifier_tone = 1, melody_modifier_volume,
+    };
+    enum melody_preview_t : uint8_t {
+      melody_preview_stop = 0, melody_preview_pitch, melody_preview_volume, melody_preview_step,
+    };
+    static const char* getCommandName(uint8_t command, uint8_t param) {
+      size_t count = 0;
+      switch (command) {
+      case none: count = 1; break;
+      case menu_function: count = mf_exit + 1; break;
+      case slot_select: count = 9; break;
+      case perform_style_set: count = (uint8_t)def::perform_style_t::ps_max; break;
+      case part_off: case part_on: case part_edit_menu: count = 7; break;
+      case part_edit_enter: count = 1; break;
+      case note_button: case drum_button: count = 16; break;
+      case chord_degree: case chord_bass_degree: count = 8; break;
+      case chord_modifier: count = KANTANMusic_MAX_MODIFIER; break;
+      case chord_minor_swap: count = 2; break;
+      case chord_semitone: case chord_bass_semitone: count = 3; break;
+      case edit_function: count = paste + 1; break;
+      case edit_exit: count = save + 1; break;
+      case edit_enc2_target: count = displacement + 1; break;
+      case autoplay_switch: count = autoplay_beat + 1; break;
+      case preview_switch: count = preview_play + 1; break;
+      case recording_control: count = rec_toggle + 1; break;
+      case note_scale_set: count = 6; break;
+      case melody_edit_enter: count = 1; break;
+      case melody_edit_function: count = melody_save + 1; break;
+      case melody_edit_modifier: count = melody_modifier_volume + 1; break;
+      case melody_edit_parameter_ud: count = 1; break;
+      case melody_preview: count = melody_preview_step + 1; break;
+      case side1_modifier: count = 1; break;
+      default: return nullptr;
+      }
+      return command < command_max && param < count ? command_name_table[command][param] : nullptr;
+    }
     enum class wifi_mode_t : uint8_t {
       wifi_disable = 0,
       wifi_enable_sta,
@@ -809,13 +893,25 @@ Button Index mapping
       { edit_enc2_target, edit_enc2_target_t::banlift     },
       { edit_enc2_target, edit_enc2_target_t::displacement},
     };
+    // メロディ編集時。Tone/Volumeは押している間だけ下ダイヤルを修飾する。
+    // レバー状態にかかわらず同じ割り当てにする。
+    static constexpr const command_param_array_t command_mapping_sub_button_melody_table[] = {
+      { melody_edit_modifier, melody_modifier_tone },
+      { melody_edit_modifier, melody_modifier_volume },
+      { none },
+      { none },
+      { melody_edit_modifier, melody_modifier_tone },
+      { melody_edit_modifier, melody_modifier_volume },
+      { none },
+      { none },
+    };
     // メニュー表示時のボタン-コマンドマッピング
     static constexpr const command_param_array_t command_mapping_menu_table[] = {
       { menu_function, mf_1 }, { menu_function, mf_2 }, { menu_function, mf_3 }, { menu_function, mf_0 }, { menu_function, mf_exit, },
       { menu_function, mf_4 }, { menu_function, mf_5 }, { menu_function, mf_6 }, { menu_function, mf_back }, { menu_function, mf_enter },
       { menu_function, mf_7 }, { menu_function, mf_8 }, { menu_function, mf_9 }, { preview_switch, preview_stop }, { preview_switch, preview_play },
       { sub_button  , 1 }, { sub_button, 2 }, { sub_button, 3 }, { sub_button, 4 },
-      { mapping_switch, 1 }, { menu_function, mf_enter }, // SIDE_1, SIDE_2
+      { menu_function, mf_back }, { menu_function, mf_enter }, // SIDE_1, SIDE_2
       { slot_select_ud, slot_select_ud_t::slot_next }, { slot_select_ud, slot_select_ud_t::slot_prev }, { none }, // KNOB_L, KNOB_R, KNOB_K
       { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { menu_function, mf_down }, { menu_function, mf_up }, { menu_function, mf_enter },  // ENC2_DOWN, ENC2_UP, ENC2_PUSH
@@ -852,7 +948,7 @@ Button Index mapping
       { chord_degree, 4 }, { chord_degree  , 5 }, {   chord_degree, 6 }, { chord_modifier  , KANTANMusic_Modifier_7  } , { chord_modifier, KANTANMusic_Modifier_M7   },
       { chord_degree, 7 }, { chord_semitone, 1 }, { chord_semitone, 2 }, { chord_modifier  , KANTANMusic_Modifier_dim} , { chord_modifier, KANTANMusic_Modifier_sus4 },
       { sub_button  , 1 }, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
-      { mapping_switch, 1 }, { menu_open, menu_play_mode }, // SIDE_1, SIDE_2 右側面ボタンでモード切替メニュー表示
+      { side1_modifier, 1 }, { menu_open, menu_play_mode }, // SIDE_1単独リリースはMelody、併用時はmapping_switch
       { slot_select_ud, slot_select_ud_t::slot_next }, { slot_select_ud, slot_select_ud_t::slot_prev }, { none }, // KNOB_L, KNOB_R, KNOB_K
       { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { menu_open, menu_system },  // ENC2_DOWN, ENC2_UP, ENC2_PUSH
@@ -864,7 +960,7 @@ Button Index mapping
       { chord_degree, 4 }, { chord_degree  , 5 }, {   chord_degree, 6 }, { chord_modifier  , KANTANMusic_Modifier_7  } , { chord_modifier, KANTANMusic_Modifier_M7   },
       { chord_degree, 7 }, { chord_semitone, 1 }, { chord_semitone, 2 }, { chord_modifier  , KANTANMusic_Modifier_dim} , { chord_modifier, KANTANMusic_Modifier_sus4 },
       { sub_button  , 1 }, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
-      { mapping_switch, 1 }, { menu_open, menu_play_mode }, // SIDE_1, SIDE_2 右側面ボタンでモード切替メニュー表示
+      { side1_modifier, 1 }, { menu_open, menu_play_mode }, // SIDE_1単独リリースはMelody、併用時はmapping_switch
       { slot_select_ud, slot_select_ud_t::slot_next }, { slot_select_ud, slot_select_ud_t::slot_prev }, { none }, // KNOB_L, KNOB_R, KNOB_K
       { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { progression_pos_ud, -1 }, { progression_pos_ud, 1 }, { menu_open, menu_song_edit },  // ENC2_DOWN, ENC2_UP, ENC2_PUSH
@@ -876,11 +972,23 @@ Button Index mapping
       { chord_degree, 4 }, { chord_degree  , 5 }, {   chord_degree, 6 }, { chord_modifier  , KANTANMusic_Modifier_7  } , { chord_modifier, KANTANMusic_Modifier_M7   },
       { chord_degree, 7 }, { chord_semitone, 1 }, { chord_semitone, 2 }, { chord_modifier  , KANTANMusic_Modifier_dim} , { chord_modifier, KANTANMusic_Modifier_sus4 },
       { sub_button  , 1 }, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
-      { mapping_switch, 1 }, { menu_open, menu_play_mode }, // SIDE_1, SIDE_2 右側面ボタンでモード切替メニュー表示
+      { side1_modifier, 1 }, { menu_open, menu_play_mode }, // SIDE_1単独リリースはMelody、併用時はmapping_switch
       { slot_select_ud, slot_select_ud_t::slot_next }, { slot_select_ud, slot_select_ud_t::slot_prev }, { none }, // KNOB_L, KNOB_R, KNOB_K
       { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { progression_pos_ud, -1 }, { progression_pos_ud, 1 }, { menu_open, menu_autosong },  // ENC2_DOWN, ENC2_UP, ENC2_PUSH
       { master_key_ud, -1}, { master_key_ud,  1 }, // ENC3_DOWN, ENC3_UP
+    };
+    // Song専用メロディトラック編集。6伴奏パートの編集マッピングとは分離する。
+    static constexpr const command_param_array_t command_mapping_melody_edit_table[] = {
+      { melody_edit_function, melody_page_left }, { melody_edit_function, melody_down }, { melody_edit_function, melody_page_right }, { melody_edit_function, melody_discard }, { melody_edit_function, melody_save },
+      { melody_edit_function, melody_left }, { melody_edit_function, melody_mute }, { melody_edit_function, melody_right }, { melody_edit_function, melody_delete }, { melody_edit_function, melody_note },
+      { melody_edit_function, melody_home }, { melody_edit_function, melody_up }, { melody_edit_function, melody_fold }, { melody_edit_function, melody_undo }, { melody_edit_function, melody_play },
+      { sub_button, 1 }, { sub_button, 2 }, { sub_button, 3 }, { sub_button, 4 },
+      { melody_edit_function, melody_discard }, { melody_edit_function, melody_save }, // SIDE_1, SIDE_2
+      { none }, { none }, { none }, // KNOB_L, KNOB_R, KNOB_K
+      { master_vol_ud, -1}, { master_vol_ud, 1 }, { play_control, pc_sustain }, // ENC1
+      { melody_edit_parameter_ud, -1 }, { melody_edit_parameter_ud, 1 }, { melody_edit_function, melody_play }, // ENC2
+      { melody_edit_function, melody_down }, { melody_edit_function, melody_up }, // ENC3
     };
     // ノート演奏モードのボタン-コマンドマッピング
     static constexpr const command_param_array_t command_mapping_note_play_table[] = {
@@ -888,7 +996,7 @@ Button Index mapping
       { note_button,  6 }, { note_button,  7 }, { note_button,  8 }, { note_button,  9 }, { note_button, 10 },
       { note_button, 11 }, { note_button, 12 }, { note_button, 13 }, { note_button, 14 }, { note_button, 15 },
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
-      { mapping_switch, 1 }, { menu_open, menu_play_mode }, // SIDE_1, SIDE_2
+      { side1_modifier, 1 }, { menu_open, menu_play_mode }, // SIDE_1単独リリースはMelody、併用時はmapping_switch
       { slot_select_ud, slot_select_ud_t::slot_next }, { slot_select_ud, slot_select_ud_t::slot_prev }, { none }, // KNOB_L, KNOB_R, KNOB_K
       { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { menu_open, menu_system },  // ENC2_DOWN, ENC2_UP, ENC2_PUSH
@@ -900,7 +1008,7 @@ Button Index mapping
       { drum_button,  6 }, { drum_button,  7 }, { drum_button,  8 }, { drum_button,  9 }, { drum_button, 10 },
       { drum_button, 11 }, { drum_button, 12 }, { drum_button, 13 }, { drum_button, 14 }, { drum_button, 15 },
       { sub_button  , 1}, { sub_button, 2}, { sub_button, 3 }, { sub_button, 4 },
-      { mapping_switch, 1 }, { menu_open, menu_play_mode }, // SIDE_1, SIDE_2
+      { side1_modifier, 1 }, { menu_open, menu_play_mode }, // SIDE_1単独リリースはMelody、併用時はmapping_switch
       { slot_select_ud, slot_select_ud_t::slot_next }, { slot_select_ud, slot_select_ud_t::slot_prev }, { none }, // KNOB_L, KNOB_R, KNOB_K
       { master_vol_ud, -1}, { master_vol_ud , 1 }, { autoplay_switch, autoplay_pause, play_control, pc_sustain, play_control, pc_reset_arpeggio }, // ENC1_DOWN, ENC1_UP, ENC1_PUSH
       { none }, { none }, { menu_open, menu_system },  // ENC2_DOWN, ENC2_UP, ENC2_PUSH
@@ -1242,6 +1350,11 @@ Button Index mapping
     static constexpr const int16_t step_per_beat_min = 1;  // 1ビートあたりのステップ数の最小値
     static constexpr const int16_t step_per_beat_default = 2; // 1ビートあたりのステップ数の初期値
     static constexpr const int16_t step_per_beat_max = 4; // 1ビートあたりのステップ数の最大値
+
+    // SongメロディはSlotの分解能に依存しない8分音符グリッド。
+    // Play 1回で1拍（2ステップ）進む。
+    static constexpr const uint8_t melody_steps_per_beat = 2;
+    static constexpr const uint8_t melody_steps_per_page = 16;
 
     // step_per_beat に基づく1ページあたりのステップ数を返す
     // spb=1:8, spb=2:8, spb=3:6, spb=4:8

@@ -182,14 +182,7 @@ struct ui_main_buttons_t : public ui_base_t
         }
         _text_color[i] = text_color;
 
-        const char* name = nullptr;
-        if (command < sizeof(def::command::command_name_table) / sizeof(def::command::command_name_table[0]))
-        {
-          auto table = def::command::command_name_table[command];
-          if (table != nullptr) {
-            name = table[command_param.param];
-          }
-        }
+        const char* name = def::command::getCommandName(command, command_param.param);
 
         for (auto data: def::command::button_text_table) {
           if (data.command == cp_pair) {
@@ -461,13 +454,16 @@ struct ui_sub_buttons_t : public ui_base_t
     registry_t::history_code_t _sub_button_history_code;
     // モード管理
     bool _is_part_edit = false;
+    bool _is_melody_edit = false;
   public:
   void update_impl(draw_param_t *param, int offset_x, int offset_y) override {
     ui_base_t::update_impl(param, offset_x, offset_y);
 
     bool is_part_edit = (system_registry->runtime_info.getGuiMode() == def::gui_mode_t::gm_part_edit);
-    if (_is_part_edit != is_part_edit) {
+    bool is_melody_edit = (system_registry->runtime_info.getGuiMode() == def::gui_mode_t::gm_melody_edit);
+    if (_is_part_edit != is_part_edit || _is_melody_edit != is_melody_edit) {
       _is_part_edit = is_part_edit;
+      _is_melody_edit = is_melody_edit;
       param->addInvalidatedRect({offset_x, offset_y, _client_rect.w, _client_rect.h});
     }
 
@@ -511,12 +507,50 @@ struct ui_sub_buttons_t : public ui_base_t
           }
           const auto command = command_param.getCommand();
           const auto p = command_param.getParam();
-          const char* name = nullptr;
-          if (command < sizeof(def::command::command_name_table) / sizeof(def::command::command_name_table[0])) {
-            auto table = def::command::command_name_table[command];
-            if (table != nullptr) { name = table[p]; }
-          }
+          const char* name = def::command::getCommandName(command, p);
           if (name != nullptr) { snprintf(_edit_text[i], sizeof(_edit_text[i]), "%s", name); }
+        }
+      }
+    } else if (is_melody_edit) {
+      // ---- メロディ編集時：Tone/Volumeのモーメンタリ修飾ボタン ----
+      uint32_t button_bitmask = (system_registry->internal_input.getButtonBitmask()
+                               >> def::hw::max_main_button)
+                              & ((1u << def::hw::max_sub_button) - 1);
+      uint32_t xor_mask = _slot_btn_bitmask ^ button_bitmask;
+      _slot_btn_bitmask = button_bitmask;
+      bool flg_update = xor_mask != 0;
+      auto history_code = system_registry->sub_button.getHistoryCode();
+      if (_sub_button_history_code != history_code) {
+        _sub_button_history_code = history_code;
+        flg_update = true;
+      }
+      int map_offset = system_registry->runtime_info.getSubButtonSwap()
+                     ? def::hw::max_sub_button : 0;
+      for (int i = 0; i < def::hw::max_sub_button; ++i) {
+        uint32_t color = system_registry->sub_button.getSubButtonColor(i + map_offset);
+        if (_btns_color[i] != color) {
+          _btns_color[i] = color;
+          flg_update = true;
+        }
+      }
+      if (flg_update) {
+        param->addInvalidatedRect({offset_x, offset_y, _client_rect.w, _client_rect.h});
+        for (int i = 0; i < def::hw::max_sub_button; ++i) {
+          _text[i][0] = 0;
+          _text_upper[i] = "";
+          _text_lower[i] = "";
+          auto pair = system_registry->sub_button.getCommandParamArray(i + map_offset);
+          auto command_param = pair.array[0];
+          const char* name = def::command::getCommandName(
+            command_param.getCommand(), command_param.getParam());
+          if (name != nullptr) { snprintf(_text[i], sizeof(_text[i]), "%s", name); }
+          bool working = system_registry->working_command.check(command_param);
+          _text_color[i] = working || (button_bitmask & (1u << i))
+                         ? system_registry->color_setting.getButtonPressedTextColor()
+                         : system_registry->color_setting.getButtonDefaultTextColor();
+          _gfx->setTextSize(1, 2);
+          _text_width[i] = _gfx->textWidth(_text[i]);
+          _text_wide[i] = false;
         }
       }
     } else {
@@ -581,11 +615,7 @@ struct ui_sub_buttons_t : public ui_base_t
             _text_color[i] = system_registry->color_setting.getButtonWorkingTextColor();
           }
           auto command = command_param.command;
-          const char* name = nullptr;
-          if (command < sizeof(def::command::command_name_table) / sizeof(def::command::command_name_table[0])) {
-            auto table = def::command::command_name_table[command];
-            if (table != nullptr) { name = table[command_param.param]; }
-          }
+          const char* name = def::command::getCommandName(command, command_param.param);
           for (auto data: def::command::button_text_table) {
             if (data.command == cp_pair) {
               name = data.text;
@@ -701,7 +731,8 @@ struct ui_sub_buttons_t : public ui_base_t
       // ボタンエリア全体を黒で塗りつぶし（上下vpadの隙間部分）
       canvas->fillRect(offset_x, offset_y, _client_rect.w, _client_rect.h, TFT_BLACK);
       canvas->setTextDatum(m5gfx::datum_t::middle_left);
-      for (int i = 0; i < (int)max_slot_button; ++i) {
+      int button_count = _is_melody_edit ? def::hw::max_sub_button : (int)max_slot_button;
+      for (int i = 0; i < button_count; ++i) {
         auto rect = getButtonRect(i, offset_x, offset_y);
         if (!clip_rect->isIntersect(rect)) { continue; }
         bool is_pressed = (_slot_btn_bitmask >> i) & 1;

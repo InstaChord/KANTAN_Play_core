@@ -177,6 +177,9 @@ bool task_kantanplay_t::commandProccessor(void)
   case def::command::progression_pos_ud:
     procProgressionPosUd(command_param, is_pressed);
     break;
+  case def::command::melody_preview:
+    procMelodyPreview(command_param, is_pressed);
+    break;
 
   case def::command::preview_switch:
     if (is_pressed) {
@@ -431,6 +434,63 @@ uint32_t task_kantanplay_t::chordProc(void)
 {
   uint32_t next_event_timing = INT32_MAX;
   const int progress_usec = (int32_t)(_current_usec - _prev_usec);
+
+  if (_melody_preview_release_usec >= 0) {
+    _melody_preview_release_usec -= progress_usec;
+    if (_melody_preview_release_usec < 0) {
+      melodyNoteOff(true);
+    } else if (next_event_timing > (uint32_t)_melody_preview_release_usec) {
+      next_event_timing = _melody_preview_release_usec;
+    }
+  }
+
+  if (_melody_preview_next_remain_usec >= 0) {
+    _melody_preview_next_remain_usec -= progress_usec;
+    if (_melody_preview_next_remain_usec < 0) {
+      const uint16_t step = _melody_preview_next_step;
+      _melody_preview_next_remain_usec = -1;
+      // 2ステップ目は実際のイベントだけを適用する。空なら1ステップ目の音を保持する。
+      playMelodyPreviewStep(step, false);
+      // 次のPlayまで実演奏と同様に保持する。操作が止まった場合だけNote Offする。
+      if (_melody_preview_note < 128) {
+        _melody_preview_release_usec = std::max<int32_t>(
+          1500 * 1000, getOnbeatCycle() * 2);
+      }
+    } else if (next_event_timing > (uint32_t)_melody_preview_next_remain_usec) {
+      next_event_timing = _melody_preview_next_remain_usec;
+    }
+  }
+
+  if (_melody_preview_chord_next_remain_usec >= 0) {
+    int32_t remain_usec = _melody_preview_chord_next_remain_usec - progress_usec;
+    while (remain_usec < 0 && _melody_preview_chord_steps_remaining) {
+      uint16_t melody_step = _melody_preview_chord_source_step;
+      // 奇数メロディステップ（裏拍）から開始した場合だけ、拍の中央で
+      // 次のコード進行ステップへまたぐ。
+      if ((_melody_preview_chord_source_step & 1)
+       && _melody_preview_chord_elapsed_usec * 2 >= _melody_preview_beat_usec
+       && melody_step + 1 < def::app::max_progression_length) {
+        ++melody_step;
+      }
+      playMelodyChordPreview(melody_step, _melody_preview_chord_next_step);
+      --_melody_preview_chord_steps_remaining;
+      if (_melody_preview_chord_steps_remaining) {
+        int32_t delay_usec = getMelodyPreviewPatternDelayUsec(
+          _melody_preview_chord_next_step, _melody_preview_chord_step_per_beat);
+        ++_melody_preview_chord_next_step;
+        _melody_preview_chord_elapsed_usec += delay_usec;
+        remain_usec += delay_usec;
+      }
+    }
+    if (_melody_preview_chord_steps_remaining) {
+      _melody_preview_chord_next_remain_usec = remain_usec;
+      if (next_event_timing > (uint32_t)remain_usec) {
+        next_event_timing = remain_usec;
+      }
+    } else {
+      _melody_preview_chord_next_remain_usec = -1;
+    }
+  }
 
   for (int part = 0; part <= def::app::max_chord_part; ++part) { // +1 はSE専用スロット
     bool hit_flg = false;
@@ -1027,6 +1087,27 @@ void task_kantanplay_t::chordStepAdvance(bool disable_note_off)
 
 void task_kantanplay_t::chordStepPlay(void)
 {
+  if (!_suppress_melody_step) {
+    auto melody_length = system_registry->song_data.melody.info.getLength();
+    uint32_t progression_steps = (uint32_t)system_registry->current_progression->info.getLength()
+                               * system_registry->current_slot->slot_info.getStepPerBeat();
+    if (progression_steps > def::app::max_progression_length) {
+      progression_steps = def::app::max_progression_length;
+    }
+    if (melody_length < progression_steps) { melody_length = progression_steps; }
+    if (melody_length) {
+      if (_melody_step >= melody_length) {
+        if (system_registry->runtime_info.getSongAutoRepeat()) {
+          _melody_step = 0;
+        } else {
+          melodyNoteOff(false);
+        }
+      }
+      if (_melody_step < melody_length) {
+        playMelodyStep(_melody_step++);
+      }
+    }
+  }
   auto degree = _current_option.main_degree;  //system_registry->chord_play.getChordDegree();
   if (degree.getDegree() == 0) {
     // コードが選ばれていない場合は終了
@@ -1230,6 +1311,201 @@ void task_kantanplay_t::procProgressionPosUd(const def::command::command_param_t
     auto mode = system_registry->currentPlayMode();
     if (mode == def::playmode::pm_auto_song) {
       system_registry->runtime_info.setAutoplayState(def::play::auto_play_state_t::auto_play_waiting);
+    }
+  }
+}
+
+void task_kantanplay_t::melodyNoteOff(bool preview)
+{
+  auto& note = preview ? _melody_preview_note : _melody_note;
+  if (note < 128) {
+    system_registry->midi_out_control.setNoteVelocity(def::midi::channel_7, note, 0);
+  }
+  note = 0xFF;
+  if (preview) { _melody_preview_release_usec = -1; }
+}
+
+void task_kantanplay_t::playMelodyEvent(system_registry_t::melody_event_t event, bool preview)
+{
+  if (event.isEmpty()) { return; } // 空ステップは直前音を継続
+  melodyNoteOff(preview);
+  if (event.isMute()) { return; }
+
+  uint8_t melody_program = system_registry->song_data.melody.info.getTone();
+  uint16_t volume = system_registry->song_data.melody.info.getVolume()
+                  * system_registry->runtime_info.getMIDIChannelVolumeMax() / 100;
+  if (volume > 127) { volume = 127; }
+  system_registry->midi_out_control.setProgramChange(def::midi::channel_7, melody_program);
+  system_registry->midi_out_control.setChannelVolume(def::midi::channel_7, volume);
+  system_registry->midi_out_control.setChannelPan(def::midi::channel_7, 64);
+  auto& active_note = preview ? _melody_preview_note : _melody_note;
+  active_note = event.getNote();
+  system_registry->midi_out_control.setNoteVelocity(def::midi::channel_7, active_note, 0x80 | 96);
+}
+
+void task_kantanplay_t::playMelodyStep(uint16_t step)
+{
+  playMelodyEvent(system_registry->song_data.melody.getEvent(step), false);
+}
+
+void task_kantanplay_t::playMelodyChordPreview(uint16_t melody_step, uint16_t arranger_step)
+{
+  auto progression_length = system_registry->current_progression->info.getLength();
+  if (!progression_length) { return; }
+  // メロディ画面の1ステップは8分音符、コード進行の1ステップは4分音符。
+  uint16_t progression_step = melody_step / def::app::melody_steps_per_beat;
+  if (progression_step >= progression_length) { progression_step = progression_length - 1; }
+  auto desc = system_registry->current_progression->getStepDescriptor(progression_step);
+  if (desc.empty()) { return; }
+
+  auto saved_option = _current_option;
+  auto saved_slot = system_registry->current_slot;
+  int8_t saved_steps[def::app::max_chord_part];
+  bool saved_enabled[def::app::max_chord_part];
+  for (int i = 0; i < def::app::max_chord_part; ++i) {
+    saved_steps[i] = system_registry->chord_play.getPartStep(i);
+    saved_enabled[i] = system_registry->chord_play.getPartEnable(i);
+  }
+  if (desc.getSlotIndex() < system_registry->song_data.song_info.getNumSlot()) {
+    system_registry->current_slot = &system_registry->song_data.slot[desc.getSlotIndex()];
+  }
+  // 各パート固有のループ長で折り返し、指定された伴奏ステップだけを鳴らす。
+  for (int i = 0; i < def::app::max_chord_part; ++i) {
+    auto& part = system_registry->current_slot->chord_part[i];
+    uint16_t loop_length = (uint16_t)part.part_info.getLoopStep() + 1;
+    if (loop_length < 1 || loop_length > def::app::max_arpeggio_step) {
+      loop_length = def::app::max_arpeggio_step;
+    }
+    system_registry->chord_play.setPartStep(i, arranger_step % loop_length);
+    system_registry->chord_play.setPartEnable(i, desc.getPartEnable(i));
+  }
+  _current_option = desc;
+  _suppress_melody_step = true;
+  chordStepPlay();
+  _suppress_melody_step = false;
+  _current_option = saved_option;
+  system_registry->current_slot = saved_slot;
+  for (int i = 0; i < def::app::max_chord_part; ++i) {
+    system_registry->chord_play.setPartStep(i, saved_steps[i]);
+    system_registry->chord_play.setPartEnable(i, saved_enabled[i]);
+  }
+}
+
+void task_kantanplay_t::playMelodyPreviewStep(uint16_t step, bool resolve_sustain)
+{
+  auto event = system_registry->song_data.melody.getEvent(step);
+  if (event.isMute()) {
+    melodyNoteOff(true);
+  } else if (event.isNote()) {
+    playMelodyEvent(event, true);
+  } else if (resolve_sustain) {
+    // 任意位置からプレビューを始める場合は、その位置で持続中の音を解決する。
+    int active_note = system_registry->song_data.melody.timeline.getActiveNote(step);
+    if (active_note >= 0) {
+      // 連続再生中なら同じ持続音を再アタックしない。停止後や位置を飛ばした
+      // 場合は、タイムライン上で有効な音だけを改めて発音する。
+      if (_melody_preview_note != active_note) {
+        playMelodyEvent(system_registry_t::melody_event_t::note((uint8_t)active_note), true);
+      }
+    } else {
+      melodyNoteOff(true);
+    }
+  }
+}
+
+uint8_t task_kantanplay_t::getMelodyPreviewStepPerBeat(uint16_t step)
+{
+  uint8_t step_per_beat = system_registry->current_slot->slot_info.getStepPerBeat();
+  auto progression_length = system_registry->current_progression->info.getLength();
+  if (progression_length) {
+    uint16_t progression_step = step / def::app::melody_steps_per_beat;
+    if (progression_step >= progression_length) { progression_step = progression_length - 1; }
+    auto desc = system_registry->current_progression->getStepDescriptor(progression_step);
+    if (!desc.empty() && desc.getSlotIndex() < system_registry->song_data.song_info.getNumSlot()) {
+      step_per_beat = system_registry->song_data.slot[desc.getSlotIndex()].slot_info.getStepPerBeat();
+    }
+  }
+  if (step_per_beat < 1) { step_per_beat = 1; }
+  return step_per_beat;
+}
+
+int32_t task_kantanplay_t::getMelodyPreviewPatternDelayUsec(
+  uint16_t arranger_step, uint8_t step_per_beat)
+{
+  if (step_per_beat < 1) { step_per_beat = 1; }
+  int32_t step_usec = getOnbeatCycle() / step_per_beat;
+  // updateOffbeatTiming()と同じ長短の組で、偶数分割のSwingを再現する。
+  if ((step_per_beat & 1) == 0) {
+    int32_t swing_usec = step_usec * calcSwing_x100() / 10000;
+    step_usec += (arranger_step & 1) ? -swing_usec : swing_usec;
+  }
+  return std::max<int32_t>(1024, step_usec);
+}
+
+void task_kantanplay_t::procMelodyPreview(const def::command::command_param_t& command_param, const bool is_pressed)
+{
+  if (!is_pressed) { return; }
+  auto type = (def::command::melody_preview_t)command_param.getParam();
+  _melody_preview_next_remain_usec = -1;
+  _melody_preview_chord_next_remain_usec = -1;
+  _melody_preview_chord_steps_remaining = 0;
+  if (type == def::command::melody_preview_stop) {
+    melodyNoteOff(true);
+    return;
+  }
+  if (type == def::command::melody_preview_pitch) {
+    melodyNoteOff(true);
+    playMelodyEvent(system_registry_t::melody_event_t::note(
+      system_registry->runtime_info.getMelodyCursorPitch()), true);
+    _melody_preview_release_usec = 180 * 1000;
+    return;
+  }
+  if (type == def::command::melody_preview_volume) {
+    uint16_t volume = system_registry->song_data.melody.info.getVolume()
+                    * system_registry->runtime_info.getMIDIChannelVolumeMax() / 100;
+    system_registry->midi_out_control.setChannelVolume(
+      def::midi::channel_7, std::min<uint16_t>(127, volume));
+    return;
+  }
+  if (type == def::command::melody_preview_step) {
+    uint16_t step = system_registry->runtime_info.getMelodyCursorStep();
+    playMelodyPreviewStep(step, true);
+
+    // Play 1回は常に1拍。伴奏は、その位置のSlotのStep per beatに従って
+    // 1拍分の全サブステップを実演奏と同じSwing間隔で鳴らす。
+    uint8_t step_per_beat = getMelodyPreviewStepPerBeat(step);
+    uint16_t arranger_step = ((uint32_t)step * step_per_beat)
+                           / def::app::melody_steps_per_beat;
+    playMelodyChordPreview(step, arranger_step);
+    if (step_per_beat > 1) {
+      int32_t delay_usec = getMelodyPreviewPatternDelayUsec(arranger_step, step_per_beat);
+      _melody_preview_chord_next_remain_usec = delay_usec;
+      _melody_preview_chord_elapsed_usec = delay_usec;
+      _melody_preview_beat_usec = getOnbeatCycle();
+      _melody_preview_chord_source_step = step;
+      _melody_preview_chord_next_step = arranger_step + 1;
+      _melody_preview_chord_steps_remaining = step_per_beat - 1;
+      _melody_preview_chord_step_per_beat = step_per_beat;
+    }
+
+    // Playを続けている間は音を持続させる。2拍以上（最低1.5秒）操作が
+    // なければセッションを終了し、次回はカーソル位置から状態を再構築する。
+    if (_melody_preview_note < 128) {
+      _melody_preview_release_usec = std::max<int32_t>(
+        1500 * 1000, getOnbeatCycle() * 2);
+    }
+
+    const uint16_t next_step = step + 1;
+    if (next_step < def::app::max_progression_length) {
+      _melody_preview_next_step = next_step;
+      _melody_preview_next_remain_usec = std::max<int32_t>(1024, getOnbeatCycle() / 2);
+    }
+
+    // Playは実演奏の表・裏を1組として2ステップ進む。矢印操作は1ステップのまま。
+    uint16_t cursor_step = std::min<uint32_t>(
+      def::app::max_progression_length - 1, (uint32_t)step + 2);
+    if (cursor_step != step) {
+      system_registry->runtime_info.setMelodyCursorStep(cursor_step);
     }
   }
 }
@@ -1542,6 +1818,12 @@ void task_kantanplay_t::resetStep(void)
   }
 
   _arpeggio_reset_remain_usec = 1024;
+  _melody_step = 0;
+  _melody_preview_next_remain_usec = -1;
+  _melody_preview_chord_next_remain_usec = -1;
+  _melody_preview_chord_steps_remaining = 0;
+  melodyNoteOff(false);
+  melodyNoteOff(true);
 
   // 動作中のコードボタンの表示を解除
   system_registry->working_command.clear( { def::command::chord_degree, _current_option.main_degree } );
@@ -1549,6 +1831,8 @@ void task_kantanplay_t::resetStep(void)
 
 void task_kantanplay_t::allPartsNoteOff(void)
 {
+  melodyNoteOff(false);
+  melodyNoteOff(true);
   // 各パートの音を停止する
   for (int part_index = 0; part_index < def::app::max_chord_part; ++part_index) {
     chordNoteOff(part_index);

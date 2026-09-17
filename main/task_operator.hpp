@@ -27,6 +27,8 @@ private:
   void procChordBassDegree(const def::command::command_param_t& command_param, const bool is_pressed);
   void procChordBassSemitone(const def::command::command_param_t& command_param, const bool is_pressed);
   void procEditFunction(const def::command::command_param_t& command_param);
+  void procMelodyEditFunction(const def::command::command_param_t& command_param);
+  void enterMelodyEdit(void);
   void setSlotIndex(uint8_t slot_index);
 
   void changeCommandMapping(void);
@@ -38,6 +40,14 @@ private:
 
   uint8_t _modifier_press_order[8];
   uint8_t _bass_degree_press_order[8];
+  bool _mapping_switch_used = false;
+  struct melody_undo_t {
+    uint16_t step;
+    system_registry_t::melody_event_t event;
+  };
+  static constexpr size_t max_melody_undo = 32;
+  melody_undo_t _melody_undo[max_melody_undo];
+  size_t _melody_undo_count = 0;
 };
 
 //-------------------------------------------------------------------------

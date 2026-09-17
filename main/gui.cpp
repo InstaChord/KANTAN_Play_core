@@ -42,6 +42,7 @@ static constexpr const int32_t main_area_height = disp_height - header_height - 
 #include "gui/gui_info.inl"
 #include "gui/gui_buttons.inl"
 #include "gui/gui_partinfo.inl"
+#include "gui/gui_melody.inl"
 #include "gui/gui_progression.inl"
 #include "gui/gui_menu.inl"
 #include "gui/gui_misc.inl"

@@ -177,6 +177,7 @@ public:
     switch (system_registry->runtime_info.getGuiMode()) {
     case def::gui_mode_t::gm_menu:
     case def::gui_mode_t::gm_part_edit:
+    case def::gui_mode_t::gm_melody_edit:
     case def::gui_mode_t::gm_song_play:
     case def::gui_mode_t::gm_song_recording:
       visible = false;
@@ -428,6 +429,9 @@ void gui_t::init(void)
     }
   }
   ui_chord_part_container.addChild(&ui_arpeggio_edit);
+  ui_melody_edit.setClientRect({ 0, 0, 0, 0 });
+  ui_melody_edit.setTargetRect({ 0, 0, 0, 0 });
+  ui_chord_part_container.addChild(&ui_melody_edit);
   ui_chord_part_container.shrink_to_fit();
 
   ui_left_icon_container.addChild(&ui_playkey_info);

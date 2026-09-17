@@ -308,6 +308,11 @@ protected:
             PERFORMANCE_ACTIVE,
             FIRMWARE_CHANNEL,
             WIFI_CONNECTIVITY,
+            GUI_FLAG_MELODYEDIT,
+            MELODY_CURSOR_STEP_L,
+            MELODY_CURSOR_STEP_H,
+            MELODY_CURSOR_PITCH,
+            MELODY_SCALE_FOLD,
         };
 
         // 音が鳴ったパートへの発光エフェクト設定
@@ -380,6 +385,7 @@ protected:
 
         def::gui_mode_t getGuiMode(void) const {
             if (getGuiFlag_Menu()) { return def::gui_mode_t::gm_menu; }
+            if (getGuiFlag_MelodyEdit()) { return def::gui_mode_t::gm_melody_edit; }
             if (getGuiFlag_PartEdit()) { return def::gui_mode_t::gm_part_edit; }
             if (getGuiFlag_SongRecording()) { return def::gui_mode_t::gm_song_recording; }
             switch (getPlayMode()) {
@@ -409,6 +415,25 @@ protected:
         // パート編集モードか否か
         void setGuiFlag_PartEdit(bool enabled) { set8(GUI_FLAG_PARTEDIT, enabled); }
         bool getGuiFlag_PartEdit(void) const { return get8(GUI_FLAG_PARTEDIT); }
+
+        void setGuiFlag_MelodyEdit(bool enabled) { set8(GUI_FLAG_MELODYEDIT, enabled); }
+        bool getGuiFlag_MelodyEdit(void) const { return get8(GUI_FLAG_MELODYEDIT); }
+        void setMelodyCursorStep(uint16_t step) {
+            if (step >= def::app::max_progression_length) { step = def::app::max_progression_length - 1; }
+            // MELODY_CURSOR_STEP_Lは既存runtime領域への追記位置で奇数アドレスになる。
+            // registry_t::set16/get16は偶数アラインメント必須なので、2バイトを明示的に扱う。
+            set8(MELODY_CURSOR_STEP_L, step & 0xFF);
+            set8(MELODY_CURSOR_STEP_H, step >> 8);
+        }
+        uint16_t getMelodyCursorStep(void) const {
+            auto step = (uint16_t)get8(MELODY_CURSOR_STEP_L)
+                      | ((uint16_t)get8(MELODY_CURSOR_STEP_H) << 8);
+            return step < def::app::max_progression_length ? step : 0;
+        }
+        void setMelodyCursorPitch(uint8_t pitch) { set8(MELODY_CURSOR_PITCH, pitch > 127 ? 127 : pitch); }
+        uint8_t getMelodyCursorPitch(void) const { return get8(MELODY_CURSOR_PITCH); }
+        void setMelodyScaleFold(bool fold) { set8(MELODY_SCALE_FOLD, fold); }
+        bool getMelodyScaleFold(void) const { return get8(MELODY_SCALE_FOLD); }
 
         // シーケンス編集モードか否か
         void setGuiFlag_SongRecording(bool enabled) { set8(GUI_FLAG_SONGRECORDING, enabled); }
@@ -1449,6 +1474,27 @@ protected:
         uint16_t getLength(void) const { return get16(LENGTH_L); }
     };
 
+    struct reg_melody_info_t : public registry_t {
+        reg_melody_info_t(void) : registry_t(16, 0, DATA_SIZE_8) {}
+        enum index_t : uint16_t {
+            LENGTH_L,
+            LENGTH_H,
+            PROGRAM_NUMBER,
+            VOLUME,
+        };
+        void setLength(uint16_t step) { set16(LENGTH_L, step); }
+        uint16_t getLength(void) const { return get16(LENGTH_L); }
+        void setTone(uint8_t program) { set8(PROGRAM_NUMBER, std::min<uint8_t>(127, program)); }
+        uint8_t getTone(void) const { return get8(PROGRAM_NUMBER); }
+        void setVolume(uint8_t volume) { set8(VOLUME, std::min<uint8_t>(100, volume)); }
+        uint8_t getVolume(void) const { return get8(VOLUME); }
+        void reset(void) {
+            setLength(0);
+            setTone(0);
+            setVolume(100);
+        }
+    };
+
     struct progression_data_t {
         reg_chord_progression_t timeline;
         reg_progression_info_t info;
@@ -1544,6 +1590,107 @@ protected:
         }
     };
 
+    // Song全体に属するモノフォニック・メロディ。イベントがないステップは
+    // 直前の音を継続し、mute は明示的な Note Off を表す。
+    struct melody_event_t {
+        uint8_t value = 0; // 0=empty, 1=mute, 2..129=MIDI note 0..127
+
+        static constexpr melody_event_t empty(void) { return { 0 }; }
+        static constexpr melody_event_t mute(void) { return { 1 }; }
+        static constexpr melody_event_t note(uint8_t midi_note) { return { (uint8_t)(midi_note + 2) }; }
+        constexpr bool isEmpty(void) const { return value == 0; }
+        constexpr bool isMute(void) const { return value == 1; }
+        constexpr bool isNote(void) const { return value >= 2; }
+        constexpr uint8_t getNote(void) const { return value >= 2 ? value - 2 : 0; }
+        constexpr bool operator==(const melody_event_t& rhs) const { return value == rhs.value; }
+        constexpr bool operator!=(const melody_event_t& rhs) const { return value != rhs.value; }
+    };
+
+    struct reg_melody_timeline_t : public registry_t {
+        using entry_t = std::pair<uint16_t, melody_event_t>;
+        reg_melody_timeline_t(void) : registry_t(4096, 0, DATA_SIZE_32) {}
+        entry_t* begin(void) const { return (entry_t*)_reg_data; }
+        entry_t* end(void) const { return begin() + _data_count; }
+        size_t max_count(void) const { return _registry_size / sizeof(entry_t); }
+
+        entry_t* findExact(uint16_t step) const {
+            auto bg = begin();
+            auto ed = end();
+            auto it = std::lower_bound(bg, ed, step,
+                [](const entry_t& a, uint16_t b) { return a.first < b; });
+            return (it != ed && it->first == step) ? it : nullptr;
+        }
+        melody_event_t getEvent(uint16_t step) const {
+            auto it = findExact(step);
+            return it == nullptr ? melody_event_t::empty() : it->second;
+        }
+        // 指定ステップ時点で鳴っている音。mute またはイベント未登録なら -1。
+        int getActiveNote(uint16_t step) const {
+            auto bg = begin();
+            auto ed = end();
+            auto it = std::upper_bound(bg, ed, step,
+                [](uint16_t a, const entry_t& b) { return a < b.first; });
+            if (it == bg) { return -1; }
+            auto event = (--it)->second;
+            return event.isNote() ? event.getNote() : -1;
+        }
+        bool setEvent(uint16_t step, melody_event_t event) {
+            if (step >= def::app::max_progression_length) { return false; }
+            auto bg = begin();
+            auto ed = end();
+            auto pos = std::lower_bound(bg, ed, step,
+                [](const entry_t& a, uint16_t b) { return a.first < b; });
+            if (pos != ed && pos->first == step) {
+                if (event.isEmpty()) {
+                    std::move(pos + 1, ed, pos);
+                    --_data_count;
+                } else {
+                    pos->second = event;
+                }
+                return true;
+            }
+            if (event.isEmpty()) { return true; }
+            if (_data_count >= max_count()) { return false; }
+            std::move_backward(pos, ed, ed + 1);
+            pos->first = step;
+            pos->second = event;
+            ++_data_count;
+            return true;
+        }
+        void deleteAfter(uint16_t step) {
+            auto pos = std::lower_bound(begin(), end(), step,
+                [](const entry_t& a, uint16_t b) { return a.first < b; });
+            _data_count = pos - begin();
+        }
+        void clear(void) { _data_count = 0; }
+        size_t getDataCount(void) const { return _data_count; }
+        uint32_t crc32(uint32_t crc_init) const override {
+            return calc_crc32(_reg_data, _data_count * sizeof(entry_t), crc_init);
+        }
+        void assign(const reg_melody_timeline_t& src) {
+            _data_count = src._data_count;
+            memcpy(_reg_data, src._reg_data, src._data_count * sizeof(entry_t));
+        }
+    protected:
+        size_t _data_count = 0;
+    };
+
+    struct melody_data_t {
+        reg_melody_timeline_t timeline;
+        reg_melody_info_t info;
+        void init(bool psram = false) { timeline.init(psram); info.init(psram); }
+        void reset(void) { timeline.clear(); info.reset(); }
+        void assign(const melody_data_t& src) { timeline.assign(src.timeline); info.assign(src.info); }
+        uint32_t crc32(uint32_t crc = 0) const { crc = info.crc32(crc); return timeline.crc32(crc); }
+        melody_event_t getEvent(uint16_t step) const {
+            return step < info.getLength() ? timeline.getEvent(step) : melody_event_t::empty();
+        }
+        void setEvent(uint16_t step, melody_event_t event) {
+            if (!timeline.setEvent(step, event)) { return; }
+            if (!event.isEmpty() && step >= info.getLength()) { info.setLength(step + 1); }
+        }
+    };
+
     struct reg_command_request_t : public registry_base_t {
 #if __has_include (<freertos/FreeRTOS.h>)
         using registry_base_t::setNotifyTaskHandle;
@@ -1613,6 +1760,7 @@ protected:
     struct song_data_t {
         reg_song_info_t song_info;
         progression_data_t progression;
+        melody_data_t melody;
 
         kanplay_slot_t slot[def::app::max_slot];
 
@@ -1622,6 +1770,7 @@ protected:
         void init(bool psram = false) {
             song_info.init(psram);
             progression.init(true);
+            melody.init(true);
             for (int i = 0; i < def::app::max_slot; ++i) {
                 slot[i].init(psram);
             }
@@ -1630,6 +1779,7 @@ protected:
             auto num_slot = song_info.getNumSlot();
             crc = song_info.crc32(crc);
             crc = progression.crc32(crc);
+            crc = melody.crc32(crc);
             for (int i = 0; i < num_slot; ++i) {
                 crc = slot[i].crc32(crc);
             }
@@ -1645,6 +1795,7 @@ protected:
         bool assign(const song_data_t &src) {
             song_info.assign(src.song_info);
             progression.assign(src.progression);
+            melody.assign(src.melody);
             auto num_slot = song_info.getNumSlot();
             for (int i = 0; i < num_slot; ++i) {
                 slot[i].assign(src.slot[i]);
@@ -1654,6 +1805,7 @@ protected:
         void reset(void) {
             song_info.reset();
             progression.reset();
+            melody.reset();
             auto num_slot = song_info.getNumSlot();
             for (int i = 0; i < num_slot; ++i) {
                 slot[i].reset();
@@ -1664,6 +1816,7 @@ protected:
         bool operator== (const song_data_t &src) const {
             if (song_info != src.song_info) { return false; }
             if (progression.info != src.progression.info) { return false; }
+            if (melody.crc32() != src.melody.crc32()) { return false; }
             auto num_slot = song_info.getNumSlot();
             for (int i = 0; i < num_slot; ++i) {
                 if (slot[i] != src.slot[i]) { return false; }

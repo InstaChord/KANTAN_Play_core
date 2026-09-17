@@ -1547,6 +1547,60 @@ static bool loadProgressionInternal(system_registry_t::progression_data_t* progr
   return true;
 }
 
+static bool saveMelodyInternal(system_registry_t::melody_data_t* melody, JsonVariant& json)
+{
+  json["version"] = 2;
+  json["length"] = melody->info.getLength();
+  json["tone"] = melody->info.getTone();
+  json["volume"] = melody->info.getVolume();
+  auto timeline = json["timeline"].to<JsonObject>();
+  char step_key[8];
+  for (auto it = melody->timeline.begin(); it != melody->timeline.end(); ++it) {
+    snprintf(step_key, sizeof(step_key), "%u", (unsigned)it->first);
+    if (it->second.isMute()) {
+      timeline[step_key] = "mute";
+    } else if (it->second.isNote()) {
+      timeline[step_key] = it->second.getNote();
+    }
+  }
+  return true;
+}
+
+static bool loadMelodyInternal(system_registry_t::melody_data_t* melody, const JsonVariant& json)
+{
+  melody->reset();
+  if (json.isNull() || json.size() == 0) { return false; }
+  auto timeline = json["timeline"].as<JsonObject>();
+  for (auto kvp : timeline) {
+    int step = atoi(kvp.key().c_str());
+    if (step < 0 || step >= def::app::max_progression_length) { continue; }
+    system_registry_t::melody_event_t event;
+    if (kvp.value().is<const char*>() && strcmp(kvp.value().as<const char*>(), "mute") == 0) {
+      event = system_registry_t::melody_event_t::mute();
+    } else if (kvp.value().is<int>()) {
+      int note = kvp.value().as<int>();
+      if (note < 0 || note > 127) { continue; }
+      event = system_registry_t::melody_event_t::note((uint8_t)note);
+    } else {
+      continue;
+    }
+    melody->timeline.setEvent((uint16_t)step, event);
+  }
+  uint16_t length = json["length"].as<uint16_t>();
+  if (length > def::app::max_progression_length) { length = def::app::max_progression_length; }
+  melody->info.setLength(length);
+  melody->timeline.deleteAfter(length);
+  if (json["tone"].is<int>()) {
+    int tone = json["tone"].as<int>();
+    if (tone >= 0 && tone < 128) { melody->info.setTone((uint8_t)tone); }
+  }
+  if (json["volume"].is<int>()) {
+    int volume = json["volume"].as<int>();
+    if (volume >= 0 && volume <= 100) { melody->info.setVolume((uint8_t)volume); }
+  }
+  return true;
+}
+
 // アルペジオパターンデータの保存/読出し共通関数
 // JsonObject に arpeggio/style キーを書き込む
 static void saveArpeggioToJson(const system_registry_t::reg_arpeggio_table_t& arpeggio, JsonObject& obj)
@@ -1643,13 +1697,14 @@ static void loadArpeggioFromJson(system_registry_t::reg_arpeggio_table_t& arpegg
 
 static bool saveSongInternal(system_registry_t::song_data_t* song, JsonVariant &json)
 {
+  // version 4: Song直下に任意の melody トラックを追加。欠落時は空トラック。
   // version 3:
   //  - 空オブジェクト {} は「未使用スロット/デフォルトパート」専用の意味。
   //  - スロット/パート全体が前方のものと一致する場合は "copy":[slot] / "copy":[slot,part] で参照する。
   //  - フィールド単位でデフォルト一致時は省略する (load 側は is<>() ガードで読む)。
   //  - per-part drum_note はトップレベル drum_note (= slot[0] のドラム) と一致する場合は省略する。
   //  - 「効果的なデフォルト」= part_info/arpeggio が slot_default と一致し、かつ drum が slot[0] のブロードキャスト値と一致する状態。
-  json["version"] = 3;
+  json["version"] = 4;
   json["num_slot"] = song->song_info.getNumSlot();
   json["tempo"] = song->song_info.getTempo();
   json["swing"] = song->song_info.getSwing();
@@ -1659,6 +1714,12 @@ static bool saveSongInternal(system_registry_t::song_data_t* song, JsonVariant &
   { // コード進行データ
     auto json_progression = json["progression"].to<JsonVariant>();
     saveProgressionInternal(&song->progression, json_progression);
+  }
+  if (song->melody.info.getLength() > 0
+   || song->melody.info.getTone() != 0
+   || song->melody.info.getVolume() != 100) {
+    auto json_melody = json["melody"].to<JsonVariant>();
+    saveMelodyInternal(&song->melody, json_melody);
   }
 
   // トップレベル drum_note: slot[0] の各パートのドラムノート情報。
@@ -1797,7 +1858,7 @@ static bool saveSongInternal(system_registry_t::song_data_t* song, JsonVariant &
 static bool loadSongInternal(system_registry_t::song_data_t* song, const JsonVariant &json, bool skip_progression = false)
 {
   int version = json["version"].as<int>();
-  if (version > 3)
+  if (version > 4)
   {
     M5_LOGV("version mismatch: %d", version);
   }
@@ -1830,6 +1891,9 @@ static bool loadSongInternal(system_registry_t::song_data_t* song, const JsonVar
     if (json_progression.isNull()) { json_progression = json["sequence"].as<JsonVariant>(); }
     loadProgressionInternal(&(song->progression), json_progression);
     system_registry->runtime_info.setProgressionPosition(0);
+  }
+  if (!skip_progression) {
+    loadMelodyInternal(&song->melody, json["melody"].as<JsonVariant>());
   }
 
   // 下位互換: トップレベルの drum_note を全スロットに適用する
@@ -1995,6 +2059,7 @@ bool system_registry_t::song_data_t::loadSongJSON(const uint8_t* data, size_t da
     // reset() 後の自身の progression に現行のコード進行を複製しておき、
     // assign() で live 側に戻ったときに維持されるようにする
     progression.assign(system_registry->song_data.progression);
+    melody.assign(system_registry->song_data.melody);
   }
 
   ArduinoJson::JsonDocument json;

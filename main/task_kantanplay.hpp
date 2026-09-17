@@ -142,6 +142,14 @@ Degree操作コマンド {
   void procDrumButton(const def::command::command_param_t& command_param, const bool is_pressed);
   void procChordStepResetRequest(const def::command::command_param_t& command_param, const bool is_pressed);
   void procPlayEffect(const def::command::command_param_t& command_param, const bool is_pressed);
+  void procMelodyPreview(const def::command::command_param_t& command_param, const bool is_pressed);
+  void melodyNoteOff(bool preview);
+  void playMelodyEvent(system_registry_t::melody_event_t event, bool preview);
+  void playMelodyStep(uint16_t step);
+  void playMelodyChordPreview(uint16_t melody_step, uint16_t arranger_step);
+  void playMelodyPreviewStep(uint16_t step, bool resolve_sustain);
+  uint8_t getMelodyPreviewStepPerBeat(uint16_t step);
+  int32_t getMelodyPreviewPatternDelayUsec(uint16_t arranger_step, uint8_t step_per_beat);
 
   void setPitchManage(uint8_t part, uint8_t pitch, uint8_t midi_ch, uint8_t note_number, int8_t velocity, int32_t press_usec, int32_t release_usec);
 
@@ -160,6 +168,20 @@ Degree操作コマンド {
   midi_pitch_manage_t _midi_pitch_manage[def::app::max_chord_part + 1][def::app::max_pitch_with_drum][max_manage_history];
   uint8_t _tone_preview_midi_ch = 0xFF;
   uint8_t _tone_preview_note = 0xFF;
+  uint8_t _melody_note = 0xFF;
+  uint8_t _melody_preview_note = 0xFF;
+  int32_t _melody_preview_release_usec = -1;
+  int32_t _melody_preview_next_remain_usec = -1;
+  uint16_t _melody_preview_next_step = 0;
+  int32_t _melody_preview_chord_next_remain_usec = -1;
+  int32_t _melody_preview_chord_elapsed_usec = 0;
+  int32_t _melody_preview_beat_usec = 0;
+  uint16_t _melody_preview_chord_source_step = 0;
+  uint16_t _melody_preview_chord_next_step = 0;
+  uint8_t _melody_preview_chord_steps_remaining = 0;
+  uint8_t _melody_preview_chord_step_per_beat = 0;
+  uint16_t _melody_step = 0;
+  bool _suppress_melody_step = false;
   int32_t checkOtherPitchNote(int part, int pitch, int midi_ch, int note_number);
 
   struct midi_note_manage_t
