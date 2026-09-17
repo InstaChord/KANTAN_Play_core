@@ -30064,8 +30064,8 @@ static bool load_builtin_sample_to_pad(uint8_t pad, const char* builtin_id,
 static void load_factory_start_project(void)
 {
   // Build the first-boot Project entirely from immutable built-in sources.
-  // This mirrors Start_Project.json without depending on its SD asset paths
-  // or storing a second copy of any PCM in flash.
+  // This mirrors the saved Start_Project.json without depending on its
+  // companion SD asset directory or storing a second copy of any PCM in flash.
   clear_kit(false);
   reset_sampler_preferences();
 
@@ -30074,19 +30074,22 @@ static void load_factory_start_project(void)
     const char* name;
     uint16_t volume_q8;
     uint8_t base_note;
+    sample_sustain_mode_t sustain_mode;
   };
   static constexpr factory_sample_t factory_samples[] = {
-    { 4,  "TOM",        256, 56 },
-    { 5,  "WOOD",       256, 67 },
-    { 6,  "AIR HORN",   178, 60 },
-    { 7,  "LASER",      256, 83 },
-    { 8,  "KICK",       256, 36 },
-    { 9,  "CHIP TOM",   256, 46 },
-    { 10, "CLOSED HAT", 256, 60 },
-    { 11, "JUMP",        61, 60 },
+    { 0,  "AIR HORN", 178, 60, sample_sustain_mode_t::off       },
+    { 1,  "JUMP",     126, 60, sample_sustain_mode_t::automatic },
+    { 4,  "TOM",      256, 56, sample_sustain_mode_t::automatic },
+    { 5,  "WOOD",     256, 67, sample_sustain_mode_t::automatic },
+    { 6,  "CHIN",     256, 57, sample_sustain_mode_t::automatic },
+    { 7,  "PIKO",     256, 78, sample_sustain_mode_t::automatic },
+    { 8,  "VOICE 1",  256, 60, sample_sustain_mode_t::automatic },
+    { 9,  "VOICE 2",  282, 47, sample_sustain_mode_t::automatic },
+    { 10, "VOICE 3",  256, 44, sample_sustain_mode_t::automatic },
+    { 11, "GO",       256, 60, sample_sustain_mode_t::automatic },
   };
   for (const auto& item : factory_samples) {
-    draw_startup_loading_frame("LOADING DISCO BEAT");
+    draw_startup_loading_frame("LOADING START PROJECT");
     char builtin_id[40];
     snprintf(builtin_id, sizeof(builtin_id), "builtin:%s", item.name);
     if (!load_builtin_sample_to_pad(item.pad, builtin_id)) { continue; }
@@ -30097,9 +30100,17 @@ static void load_factory_start_project(void)
     slot.pitch_q8 = 256;
     slot.base_note = item.base_note;
     slot.base_note_auto = true;
-    sampler_pool_t::analyzeSynthSustain(item.pad);
-    slot.synth_sustain_mode = sample_sustain_mode_t::automatic;
+    slot.synth_loop_start = 0;
+    slot.synth_loop_end = 0;
+    slot.synth_loop_crossfade = 0;
+    slot.synth_sustain_mode = item.sustain_mode;
+    slot.synth_attack_ms = 0;
     slot.synth_release_ms = 120;
+    slot.synth_delay_100us = 0;
+    slot.synth_hold_ms = 0;
+    slot.synth_decay_ms = 0;
+    slot.synth_sustain_level_q15 = 32768;
+    set_sample_synth_tune(slot, 0);
     slot.reverse = false;
     slot.hold_enabled = false;
     slot.choke_enabled = false;
@@ -30117,14 +30128,14 @@ static void load_factory_start_project(void)
   sampler_volume = 100;
   loop_quantize_enabled = true;
   loop_quantize_option_index = 3;
+  loop_note_off_quantize_option_index = 4;
   loop_swing_amount = 0;
-  sync_loop_note_off_grid();
 
   fx_param[fx_tempo_index] = 0;
-  fx_param[fx_filter_index] = -45;
+  fx_param[fx_filter_index] = -35;
   fx_param[fx_gater_index] = 50;
-  fx_param[fx_crusher_index] = 50;
-  fx_param[fx_repeat_index] = 2;
+  fx_param[fx_crusher_index] = 20;
+  fx_param[fx_repeat_index] = 3;
   fx_param[fx_delay_index] = 1;
   fx_target_mask = sampler_audio_t::fx_target_live;
   fx_target_pending_mask = 0;
@@ -30135,21 +30146,70 @@ static void load_factory_start_project(void)
   sampler_audio_t::setMasterDelay(false);
   sampler_audio_t::setMasterDelayFrames(fx_delay_frames());
 
-  melody_settings = {
-    synth_tone_source_t::general_midi, factory_melody_program, 9,
-    0, 0, 0, factory_melody_volume,
-    pitch_bend_range_t::semitone
-  };
+  melody_settings = { synth_tone_source_t::general_midi, 81, 8,
+    0, 0, 0, 80, pitch_bend_range_t::semitone };
   chord_settings = {
-    synth_tone_source_t::general_midi, factory_chord_program, 9,
-    0, 0, 0, factory_chord_volume,
+    synth_tone_source_t::general_midi, 90, 8,
+    0, 0, 1, 80,
     pitch_bend_range_t::semitone
   };
-  bass_settings = {
-    synth_tone_source_t::general_midi, factory_bass_program, 9,
-    0, 0, 0, factory_bass_volume,
-    pitch_bend_range_t::semitone
+  bass_settings = { synth_tone_source_t::general_midi, 38, 8,
+    0, 0, 0, 80, pitch_bend_range_t::semitone };
+
+  auto load_factory_ktsynth = [](performance_page_t page, const char* name) {
+    const uint8_t index = synth_source_slot_index(page);
+    const auto* source = find_builtin_ktsynth_source(name);
+    if (index >= sampler_pool_t::synth_source_count || source == nullptr
+     || !load_builtin_ktsynth(index, *source)) {
+      return false;
+    }
+    auto& slot = sampler_pool_t::synth_source[index];
+    snprintf(slot.file_path, sizeof(slot.file_path), "builtin:%s", source->name);
+    page_settings(page).source = synth_tone_source_t::kantan_synth;
+    return true;
   };
+  if (load_factory_ktsynth(performance_page_t::melody, "Steel Guitar")) {
+    auto& slot = sampler_pool_t::synth_source[
+      synth_source_slot_index(performance_page_t::melody)];
+    slot.start_frame = 0;
+    slot.end_frame = std::min<uint32_t>(31369, slot.frames);
+    slot.volume_q8 = 184;
+    slot.pitch_q8 = 256;
+    slot.base_note = 59;
+    slot.base_note_auto = false;
+    slot.synth_loop_start = 20106;
+    slot.synth_loop_end = std::min<uint32_t>(31369, slot.frames);
+    slot.synth_loop_crossfade = 0;
+    slot.synth_sustain_mode = sample_sustain_mode_t::manual;
+    slot.synth_attack_ms = 0;
+    slot.synth_release_ms = 600;
+    slot.synth_delay_100us = 10;
+    slot.synth_hold_ms = 100;
+    slot.synth_decay_ms = 2000;
+    slot.synth_sustain_level_q15 = 0;
+    set_sample_synth_tune(slot, 3);
+  }
+  if (load_factory_ktsynth(performance_page_t::bass, "Pick Bass")) {
+    auto& slot = sampler_pool_t::synth_source[
+      synth_source_slot_index(performance_page_t::bass)];
+    slot.start_frame = 0;
+    slot.end_frame = std::min<uint32_t>(13420, slot.frames);
+    slot.volume_q8 = 181;
+    slot.pitch_q8 = 256;
+    slot.base_note = 52;
+    slot.base_note_auto = false;
+    slot.synth_loop_start = 13222;
+    slot.synth_loop_end = std::min<uint32_t>(13420, slot.frames);
+    slot.synth_loop_crossfade = 0;
+    slot.synth_sustain_mode = sample_sustain_mode_t::manual;
+    slot.synth_attack_ms = 1;
+    slot.synth_release_ms = 486;
+    slot.synth_delay_100us = 0;
+    slot.synth_hold_ms = 0;
+    slot.synth_decay_ms = 0;
+    slot.synth_sustain_level_q15 = 32768;
+    set_sample_synth_tune(slot, 38);
+  }
   melody_follow_harmony_key = true;
   harmony_scale = 0;
   set_harmony_key(0, false);

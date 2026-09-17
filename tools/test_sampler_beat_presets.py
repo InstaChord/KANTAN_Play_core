@@ -106,7 +106,7 @@ assert "beat_preset_disco," in SOURCE
 for token, _bpm in presets:
     assert f"pattern:{token}" in WEB, f"Web preview is missing {token}"
 assert "name:'DISCO PATTERN'" in WEB
-assert "app.js?v=105-edit-synth-ui" in INDEX
-assert "app.js?v=105-edit-synth-ui" in WIFI
+assert "app.js?v=106-sample-upload" in INDEX
+assert "app.js?v=106-sample-upload" in WIFI
 
 print("PASS: 8 simple Beat presets, fixed Crash/Ride roles, legacy migration, and DISCO defaults")
