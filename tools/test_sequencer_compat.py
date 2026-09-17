@@ -123,6 +123,26 @@ def test_wifi_setup_uses_ap_ip_and_keeps_mdns_for_file_editor() -> None:
     assert sampler.count("wifi_setup_url") >= 2
 
 
+def test_simple_genre_uses_current_song_format() -> None:
+    menu = (ROOT / "main/menu_data/menu_data_arrays.inl").read_text()
+    genre_menu = menu[menu.index('{ "Genre"'):menu.index('{ "Song"')]
+    assert genre_menu.index('"Simple"') < genre_menu.index('"Pop"')
+    assert "data_song_preset_genre_simple" in genre_menu
+
+    preset_dir = ROOT / "incbin/preset/song_genre/simple"
+    expected = ["Simple_Guitar.json", "Simple_Guitarx2.json", "Simple_Piano.json"]
+    listing = (preset_dir / "_list.inl").read_text()
+    assert [name for name in expected if name in listing] == expected
+    for name in expected:
+        song = json.loads((preset_dir / name).read_text())
+        assert song["format"] == "KANTANPlayCore"
+        assert song["type"] == "Song"
+        assert song["version"] == 3
+        assert song["num_slot"] == 8
+        assert len(song["slot"]) == 8
+        assert all("play_mode" not in slot for slot in song["slot"])
+
+
 if __name__ == "__main__":
     test_names_and_ota_identity()
     test_sd_recovery_is_sequencer_only()
@@ -130,4 +150,5 @@ if __name__ == "__main__":
     test_external_device_matches_sampler_route_model()
     test_radio_lifecycle_and_sampler_isolation()
     test_wifi_setup_uses_ap_ip_and_keeps_mdns_for_file_editor()
+    test_simple_genre_uses_current_song_format()
     print("PASS: Sequencer identity, SD recovery, safe build, Sampler-compatible External Device routing")

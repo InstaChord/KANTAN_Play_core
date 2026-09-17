@@ -1460,6 +1460,7 @@ Button Index mapping
       data_arpeggio_piano,
       data_arpeggio_other,
       // ジャンルプリセット カテゴリ別
+      data_song_preset_genre_simple,
       data_song_preset_genre_pop,
       data_song_preset_genre_rock,
       data_song_preset_genre_dance,
@@ -1490,6 +1491,7 @@ Button Index mapping
       "",               // data_arpeggio_guitar (バイナリ埋め込み)
       "",               // data_arpeggio_piano (バイナリ埋め込み)
       "",               // data_arpeggio_other (バイナリ埋め込み)
+      "",               // data_song_preset_genre_simple (バイナリ埋め込み)
       "",               // data_song_preset_genre_pop (バイナリ埋め込み)
       "",               // data_song_preset_genre_rock (バイナリ埋め込み)
       "",               // data_song_preset_genre_dance (バイナリ埋め込み)

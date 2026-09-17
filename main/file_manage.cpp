@@ -108,6 +108,11 @@ asm (\
   ".section \".text\"\n")
 #endif
 
+// ソングプリセット: Simple
+#define ENTRY(idx, filename) IMPORT_FILE(.rodata, "song_genre/simple/", filename, sg_simple_##idx);
+#include "../incbin/preset/song_genre/simple/_list.inl"
+#undef ENTRY
+
 // ソングプリセット: Pop
 #define ENTRY(idx, filename) IMPORT_FILE(.rodata, "song_genre/pop/", filename, sg_pop_##idx);
 #include "../incbin/preset/song_genre/pop/_list.inl"
@@ -250,6 +255,13 @@ static int vfs_getFileList(std::vector<file_info_string_t>& list, const char* fu
 #endif // KANPLAY_USE_VFS_SD || KANPLAY_USE_VFS_LITTLEFS
 
 
+// ソングプリセット: Simple
+#define ENTRY(idx, filename) { filename_sg_simple_##idx, sg_simple_##idx, (size_t)sizeof_sg_simple_##idx },
+static const incbin_file_t incbin_song_genre_simple[] = {
+#include "../incbin/preset/song_genre/simple/_list.inl"
+};
+#undef ENTRY
+
 // ソングプリセット: Pop
 #define ENTRY(idx, filename) { filename_sg_pop_##idx, sg_pop_##idx, (size_t)sizeof_sg_pop_##idx },
 static const incbin_file_t incbin_song_genre_pop[] = {
@@ -309,6 +321,7 @@ static storage_incbin_t storage_incbin_arp_empty   { nullptr, 0 };
 // データが存在するカテゴリ: 配列サイズをそのまま使用
 // データが空のカテゴリ: nullptr, 0 で初期化 (空配列はC++で未定義動作になるため)
 #define MAKE_INCBIN_STORAGE(arr) { arr, sizeof(arr) / sizeof(arr[0]) }
+static storage_incbin_t storage_incbin_sg_simple   MAKE_INCBIN_STORAGE(incbin_song_genre_simple);
 static storage_incbin_t storage_incbin_sg_pop      MAKE_INCBIN_STORAGE(incbin_song_genre_pop);
 static storage_incbin_t storage_incbin_sg_rock     MAKE_INCBIN_STORAGE(incbin_song_genre_rock);
 // data_song_preset_genre は起動時デフォルトとして参照される旧互換枠。実体はPopへ向ける。
@@ -341,6 +354,7 @@ static dir_manage_t dir_manage[dt::data_type_max] =
   { &storage_incbin_arp_empty  , def::app::data_path[dt::data_arpeggio_piano     ] }, // data_arpeggio_piano  (データ未追加)
   { &storage_incbin_arp_empty  , def::app::data_path[dt::data_arpeggio_other     ] }, // data_arpeggio_other  (データ未追加)
   // ジャンルプリセット カテゴリ別
+  { &storage_incbin_sg_simple   , "" }, // data_song_preset_genre_simple
   { &storage_incbin_sg_pop      , "" }, // data_song_preset_genre_pop
   { &storage_incbin_sg_rock     , "" }, // data_song_preset_genre_rock
   { &storage_incbin_sg_dance    , "" }, // data_song_preset_genre_dance
@@ -1555,6 +1569,7 @@ void file_manage_t::setLatestFileInfo(def::app::data_type_t data_type, const cha
   auto is_song_data_type = [](def::app::data_type_t t) {
     switch (t) {
     case def::app::data_type_t::data_song_preset_genre:
+    case def::app::data_type_t::data_song_preset_genre_simple:
     case def::app::data_type_t::data_song_preset_genre_pop:
     case def::app::data_type_t::data_song_preset_genre_rock:
     case def::app::data_type_t::data_song_preset_genre_dance:

@@ -2030,6 +2030,7 @@ bool system_registry_t::song_data_t::loadSongJSON(const uint8_t* data, size_t da
   auto is_genre_preset = [](def::app::data_type_t t) {
     switch (t) {
     case def::app::data_type_t::data_song_preset_genre:
+    case def::app::data_type_t::data_song_preset_genre_simple:
     case def::app::data_type_t::data_song_preset_genre_pop:
     case def::app::data_type_t::data_song_preset_genre_rock:
     case def::app::data_type_t::data_song_preset_genre_dance:

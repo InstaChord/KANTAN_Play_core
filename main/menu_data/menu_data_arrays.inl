@@ -8,6 +8,7 @@ static constexpr const size_t START_COUNTER_SYSTEM = __COUNTER__ + 1;
 static constexpr menu_item_ptr menu_system[] = {
   MENU_BUILDER(mi_tree_t              ,0     , { "Menu"             , "メニュー"    }),
   MENU_BUILDER(mi_tree_t              , 1    , { "Genre"            , "ジャンル"    }),
+  MENU_BUILDER(mi_load_file_t         ,  2   , {  "Simple"          , "シンプル"      }, def::app::data_type_t::data_song_preset_genre_simple,   0 ),
   MENU_BUILDER(mi_load_file_t         ,  2   , {  "Pop"             , "ポップス"      }, def::app::data_type_t::data_song_preset_genre_pop,      0 ),
   MENU_BUILDER(mi_load_file_t         ,  2   , {  "Rock"            , "ロック"        }, def::app::data_type_t::data_song_preset_genre_rock,     0 ),
   MENU_BUILDER(mi_load_file_t         ,  2   , {  "Dance"           , "ダンス"        }, def::app::data_type_t::data_song_preset_genre_dance,    0 ),
