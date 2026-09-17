@@ -17,12 +17,12 @@ versioned binaries are kept separately in [archive/firmware](../../archive/firmw
 ## Public Beta Release Flow
 
 1. Build the OTA binary for CoreS3.
-2. Create a Git tag in `InstaChord/KANTAN_Play_core`, for example `v0.9.0-beta.1`.
+2. Create a Git tag in `InstaChord/KANTAN_Play_core`, for example `v0.9.1`.
 3. Open GitHub Releases and create a new release from that tag.
 4. Enable **Set as a pre-release**.
 5. Upload `KANTAN_Play_CoreS3_OTA.bin` as a release asset.
 6. Update the `beta` entry in `catalog.json`:
-   - `version`: for example `0.9.0-beta.1`
+   - `version`: for example `0.9.1`
    - `url.cores3`: the matching release asset URL
 7. Publish GitHub Pages.
 

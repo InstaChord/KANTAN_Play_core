@@ -28,9 +28,9 @@
       "channel": "beta",
       "name": "KANTAN Sequencer Beta",
       "description": "Public beta release",
-      "version": "0.9.0-beta.1",
+      "version": "0.9.1",
       "url": {
-        "cores3": "https://github.com/InstaChord/KANTAN_Play_core/releases/download/v0.9.0-beta.1/KANTAN_Play_CoreS3_OTA.bin"
+        "cores3": "https://github.com/InstaChord/KANTAN_Play_core/releases/download/v0.9.1/KANTAN_Play_CoreS3_OTA.bin"
       }
     },
     {

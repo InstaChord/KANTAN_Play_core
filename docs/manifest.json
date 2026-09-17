@@ -1,6 +1,6 @@
 {
   "name": "KANTAN Sequencer for KANTAN Play core",
-  "version": "0.7.5",
+  "version": "0.9.1",
   "new_install_prompt_erase": true,
   "builds": [
     {

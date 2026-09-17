@@ -7,6 +7,11 @@ on:
         description: 'リリースノート（空欄の場合は自動生成）'
         required: false
         default: ''
+      prerelease:
+        description: '公開ベータとしてプレリリースにする'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -91,17 +96,22 @@ jobs:
           tag="${{ steps.version.outputs.tag }}"
           version="${{ steps.version.outputs.version }}"
           notes="${{ github.event.inputs.release_notes }}"
+          prerelease_flag=""
+          if [ "${{ github.event.inputs.prerelease }}" = "true" ]; then
+            prerelease_flag="--prerelease"
+          fi
 
           git tag "${tag}"
           git push origin "${tag}"
 
           if [ -z "${notes}" ]; then
-            notes="KANTAN Play v${version}"
+            notes="KANTAN Sequencer v${version}"
           fi
 
           gh release create "${tag}" \
-            --title "KANTAN Play ${tag}" \
+            --title "KANTAN Sequencer ${tag}" \
             --notes "${notes}" \
+            ${prerelease_flag} \
             "docs/firmware/KANTAN_Play_CoreS3_full.bin#KANTAN_Play_CoreS3_full.bin (フル書き込み用)" \
             "ota_bin/KANTAN_Play_CoreS3_OTA.bin#KANTAN_Play_CoreS3_OTA.bin (OTAアップデート用)"
 
