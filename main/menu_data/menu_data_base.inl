@@ -41,6 +41,7 @@ static int getSubMenuIndexList(std::vector<uint16_t> *index_list, const menu_ite
     if (menu[j]->getLevel() < target_level) { break; }
     // 目的の階層より深い階層のメニューは無視
     if (menu[j]->getLevel() > target_level) { continue; }
+    if (!menu[j]->isVisible()) { continue; }
     ++result;
     if (index_list != nullptr)
     {

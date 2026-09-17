@@ -7,6 +7,8 @@
 
 #include "common_define.hpp"
 #include "system_registry.hpp"
+#include <atomic>
+#include "sequencer_external.hpp"
 // #include "driver_midi.hpp"
 
 #include "midi/midi_transport_uart.hpp"
@@ -28,6 +30,12 @@
 #endif
 
 namespace kanplay_ns {
+static std::atomic<bool> ble_wifi_suspended{false};
+static std::atomic<bool> ble_wifi_stopped{false};
+
+void task_midi_t::suspendBLEForWiFi(void) { ble_wifi_suspended.store(true); }
+bool task_midi_t::isBLESuspendedForWiFi(void) { return ble_wifi_suspended.load(); }
+bool task_midi_t::isBLEStoppedForWiFi(void) { return ble_wifi_stopped.load(); }
 //-------------------------------------------------------------------------
 #if __has_include(<freertos/FreeRTOS.h>)
 struct internal_realtime_midi_t {
@@ -137,7 +145,12 @@ public:
         system_registry->task_status.setWorking(me->_task_status_index);
       } 
 #endif
-      midi->service();
+#if !defined(KANPLAY_SAMPLER)
+      // BLE scan/connect/deinit all belong to the 12 KB MIDI owner. Running
+      // discovery here used the 3 KB packet task and raced controller teardown.
+      if (me->_task_status_index != system_registry_t::reg_task_status_t::TASK_MIDI_BLE)
+#endif
+      { midi->service(); }
       bool connected = midi->isConnected();
       bool tx_enable = connected && midi->getUseTx();
       bool rx_enable = connected && midi->getUseRx();
@@ -716,6 +729,13 @@ void task_midi_t::start(void)
     // initialized later by setUseTxRx().  Do this synchronously so the app can
     // suppress a failing saved-device reconnect before the MIDI task runs.
     ble_midi_transport.begin();
+#if !defined(KANPLAY_SAMPLER)
+    if (consumeBLEMidiConnectCrashStage() != 0) {
+      // Keep the saved peer, but require an explicit scan after a failed boot.
+      system_registry->midi_port_setting.setBLEMIDI(def::command::midi_off);
+      sequencer_external::noteConnectCrash();
+    }
+#endif
     // オン・オフはsystem_registryで設定する
   }
 #endif
@@ -766,9 +786,19 @@ void task_midi_t::task_func(task_midi_t* me)
   auto prev_iclink_style = def::command::instachord_link_style_t::icls_button;
 
   for (;;) {
+#if defined(KANPLAY_SAMPLER)
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+#else
+    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(50));
+#endif
 
     auto iclink_port = system_registry->midi_port_setting.getInstaChordLinkPort();
+#if !defined(KANPLAY_SAMPLER)
+    const bool suspend_ble = ble_wifi_suspended.load();
+    if (suspend_ble && iclink_port == def::command::iclp_ble) {
+      iclink_port = def::command::iclp_off;
+    }
+#endif
     auto iclink_dev = system_registry->midi_port_setting.getInstaChordLinkDev();
     auto iclink_style = system_registry->midi_port_setting.getInstaChordLinkStyle();
     if (prev_iclink_port != iclink_port || prev_iclink_dev != iclink_dev || prev_iclink_style != iclink_style) {
@@ -829,6 +859,9 @@ void task_midi_t::task_func(task_midi_t* me)
       ble_out = true;
       ble_in = true;
     }
+#if !defined(KANPLAY_SAMPLER)
+    if (suspend_ble) { ble_in = ble_out = false; }
+#endif
     if (prev_ble_out != ble_out || prev_ble_in != ble_in) {
       if (ble_in || ble_out) {
         ble_midi_subtask.start();
@@ -837,6 +870,15 @@ void task_midi_t::task_func(task_midi_t* me)
       prev_ble_in  = ble_in;
       ble_midi_transport.setUseTxRx(ble_out, ble_in);
     }
+#if !defined(KANPLAY_SAMPLER)
+    if (suspend_ble) {
+      ble_midi_transport.cancelCentralScan();
+      // Published only after setUseTxRx(false,false) has returned.
+      ble_wifi_stopped.store(true);
+    } else {
+      ble_midi_transport.service();
+    }
+#endif
 #endif
 #ifdef MIDI_TRANSPORT_USB_HPP
     auto usb_mode = system_registry->midi_port_setting.getUSBMode();

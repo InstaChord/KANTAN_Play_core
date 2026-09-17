@@ -2,6 +2,7 @@
 // Copyright (c) 2025 InstaChord Corp.
 
 #include <M5Unified.h>
+#include "task_midi.hpp"
 
 #include "task_i2c.hpp"
 
@@ -169,6 +170,9 @@ TODO:CoreS3でのSDカード挿抜状態判定を追加する
             M5.Rtc.setDateTime( gmtime( &t ) );
           }
           if (off == def::command::system_control_t::sc_reset) {
+            system_registry->midi_port_setting.setUSBPowerEnabled(false);
+            M5.Power.setUsbOutput(false);
+            M5.delay(750);
             esp_restart();
           }
           M5.Power.powerOff();
@@ -199,8 +203,7 @@ TODO:CoreS3でのSDカード挿抜状態判定を追加する
           // 物理VBUSを立ち上げる。単なるUSB給電として使う場合は待たない。
           if (system_registry->midi_port_setting.getUSBMIDI()
                 != def::command::ex_midi_mode_t::midi_off
-              && system_registry->runtime_info.getMidiPortStateUSB()
-                == def::command::midiport_info_t::mp_off) {
+              && !task_midi_t{}.isUSBStackReady()) {
             usb_power_enabled = false;
           }
           // CoreS3のUSB-C端子はPCから給電されている間、VBUSを出力側へ

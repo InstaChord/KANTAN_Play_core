@@ -5,6 +5,9 @@
 
 #include "menu_data.hpp"
 #include "file_manage.hpp"
+#include "sequencer_external.hpp"
+#include "task_midi.hpp"
+#include "restart_confirmation_state.hpp"
 
 namespace kanplay_ns {
 //-------------------------------------------------------------------------

@@ -390,7 +390,18 @@ bool storage_sd_t::beginStorage(void)
   // An explicit Eject, a missing card, or an I/O failure must never be
   // defeated by an unrelated file picker or autosave. Only Load SD Card may
   // probe the medium again.
-  if (_media_state != sd_media_state_t::uninitialized) { return false; }
+  if (_media_state != sd_media_state_t::uninitialized) {
+#if !defined(KANPLAY_SAMPLER)
+    // KANTAN Sequencer has no explicit Load SD Card screen. Preserve its
+    // legacy recovery behavior after a missing-card mount attempt or I/O
+    // error, while never defeating an explicit safe-eject state.
+    if (_media_state == sd_media_state_t::missing
+     || _media_state == sd_media_state_t::error) {
+      return loadStorage();
+    }
+#endif
+    return false;
+  }
   return mountStorage();
 }
 
@@ -1399,7 +1410,11 @@ bool dir_manage_t::updateFileList(void)
   if (_storage == nullptr) { return false; }
   std::vector<file_info_string_t> list;
   int result = _storage->getFileList(list, _path, def::app::fileext_song);
-  if (result < 0 && _storage != &storage_sd) {
+  if (result < 0
+#if defined(KANPLAY_SAMPLER)
+   && _storage != &storage_sd
+#endif
+  ) {
     _storage->endStorage();
     _storage->beginStorage();
     result = _storage->getFileList(list, _path, def::app::fileext_song);
@@ -1653,7 +1668,11 @@ bool file_manage_t::saveFile(def::app::data_type_t dir_type, size_t memory_index
 
   auto path = dir->makeFullPath(mem->filename.c_str());
   auto result = st->saveFromMemoryToFile(path.c_str(), mem->data, mem->size);
-  if (result != mem->size && st != &storage_sd) {
+  if (result != mem->size
+#if defined(KANPLAY_SAMPLER)
+   && st != &storage_sd
+#endif
+  ) {
     st->endStorage();
     st->beginStorage();
     result = st->saveFromMemoryToFile(path.c_str(), mem->data, mem->size);

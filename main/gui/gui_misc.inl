@@ -460,6 +460,7 @@ void gui_t::init(void)
   ui_background.addChild(&ui_playkey_select);
   ui_background.addChild(&ui_popup_notify);
   ui_background.addChild(&ui_popup_qr);
+  ui_background.addChild(&ui_restart_notice);
   ui_background.shrink_to_fit();
 
 //-------------------------------------------------------------------------

@@ -176,7 +176,7 @@ protected:
 
     // MIDIポートに関する設定情報
     struct reg_midi_port_setting_t : public registry_t {
-        reg_midi_port_setting_t(void) : registry_t(8, 0, DATA_SIZE_8) {}
+        reg_midi_port_setting_t(void) : registry_t(9, 0, DATA_SIZE_8) {}
         enum index_t : uint16_t {
             PORT_C_MIDI,
             BLE_MIDI,
@@ -186,6 +186,7 @@ protected:
             INSTACHORD_LINK_STYLE,
             USB_POWER_ENABLED, // USB給電 オン・オフ
             USB_MODE,          // USBモード(Host/Device)
+            EXTERNAL_INPUT_SOURCE, // 排他的な主入力 (Sampler互換構成)
         };
         void setPortCMIDI(def::command::ex_midi_mode_t mode) { set8(PORT_C_MIDI, static_cast<uint8_t>(mode)); }
         def::command::ex_midi_mode_t getPortCMIDI(void) const { return static_cast<def::command::ex_midi_mode_t>(get8(PORT_C_MIDI)); }
@@ -210,6 +211,45 @@ protected:
 
         void setUSBMode(def::command::usb_mode_t mode) { set8(USB_MODE, static_cast<uint8_t>(mode)); }
         def::command::usb_mode_t getUSBMode(void) const { return static_cast<def::command::usb_mode_t>(get8(USB_MODE)); }
+
+        void setExternalInputSource(def::command::external_input_source_t source) {
+            if (source >= def::command::external_input_source_max) {
+                source = def::command::external_input_off;
+            }
+
+            set8(EXTERNAL_INPUT_SOURCE, static_cast<uint8_t>(source));
+        }
+        // Boot only, before the MIDI/I2C workers start. Selection at runtime
+        // only stages the saved source; it must not start a second stack.
+        void applyExternalInputSourceAtBoot(void) {
+            const auto source = getExternalInputSource();
+            _reg_data_8[BLE_MIDI] = def::command::midi_off;
+            _reg_data_8[USB_MIDI] = def::command::midi_off;
+            _reg_data_8[USB_POWER_ENABLED] = false;
+            _reg_data_8[USB_MODE] = def::command::usb_device;
+            switch (source) {
+            case def::command::external_input_usb_midi_host:
+                _reg_data_8[USB_MODE] = def::command::usb_host;
+                _reg_data_8[USB_MIDI] = def::command::midi_input;
+                // task_i2c delays physical VBUS until the host stack is ready.
+                _reg_data_8[USB_POWER_ENABLED] = true;
+                break;
+            case def::command::external_input_usb_midi_device:
+                _reg_data_8[USB_MIDI] = def::command::midi_input;
+                break;
+            case def::command::external_input_ble_midi:
+                _reg_data_8[BLE_MIDI] = def::command::midi_input;
+                break;
+            case def::command::external_input_off:
+            default:
+                break;
+            }
+        }
+        def::command::external_input_source_t getExternalInputSource(void) const {
+            auto source = static_cast<def::command::external_input_source_t>(get8(EXTERNAL_INPUT_SOURCE));
+            return source < def::command::external_input_source_max
+                 ? source : def::command::external_input_off;
+        }
     } midi_port_setting;
 
     // 実行時に変化する保存されない情報 (設定画面が存在しない可変情報)

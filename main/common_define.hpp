@@ -293,6 +293,7 @@ namespace def {
     QRCODE_NONE,
     QRCODE_URL_MANUAL,
     QRCODE_AP_SSID,
+    QRCODE_URL_WIFI_SETUP,
     QRCODE_URL_DEVICE,
     QRCODE_URL_DEVICE_NO_WIFI,
     QRCODE_URL_SYSTEM_INFO,
@@ -676,6 +677,17 @@ Button Index mapping
     enum usb_mode_t : uint8_t {
       usb_host = 0,
       usb_device,
+    };
+
+    // Main live-input choices shared by KANTAN Play core firmwares. The
+    // Sequencer exposes the MIDI-capable subset of the Sampler's list; Port C
+    // and InstaChord Link remain independent output-capable routes.
+    enum external_input_source_t : uint8_t {
+      external_input_off = 0,
+      external_input_usb_midi_host,
+      external_input_usb_midi_device,
+      external_input_ble_midi,
+      external_input_source_max,
     };
 
     enum instachord_link_port_t : uint8_t {
@@ -1242,7 +1254,20 @@ Button Index mapping
     static constexpr const char* wifi_ap_ssid = "kanplay-ap";  // WiFiアクセスポイントモードのSSID
     static constexpr const char* wifi_ap_pass = "01234567";    // WiFiアクセスポイントモードのPASS
     static constexpr const char* wifi_ap_type = "WPA";         // 暗号方式 (nopass, WPA)
+    static constexpr const char* wifi_setup_url = "http://192.168.4.1"; // 設定用APは mDNS 非対応
     static constexpr const char* wifi_mdns = "kanplay";        // WiFi接続時のmDNS名 kanplay.local
+
+#if defined(KANPLAY_SAMPLER)
+    static constexpr const char* firmware_display_name = "KANTAN Sampler";
+    static constexpr const char* firmware_beta_display_name = "KANTAN Sampler Beta";
+#else
+    static constexpr const char* firmware_display_name = "KANTAN Sequencer";
+    static constexpr const char* firmware_beta_display_name = "KANTAN Sequencer Beta";
+#endif
+    static constexpr const char* hardware_display_name = "KANTAN Play core";
+    // Compatibility identifier used by the existing OTA catalog. This is not
+    // a user-facing product name and must remain stable across the rename.
+    static constexpr const char* ota_app_id = "kantanplay";
 
     static constexpr const uint32_t app_version_major = APP_VERSION_MAJOR;
     static constexpr const uint32_t app_version_minor = APP_VERSION_MINOR;

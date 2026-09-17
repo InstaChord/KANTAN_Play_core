@@ -340,8 +340,13 @@ void system_registry_t::reset(void)
   // InstaChord連携デバイス設定
   midi_port_setting.setInstaChordLinkDev(def::command::instachord_link_dev_t::icld_kanplay);
 
-  // USBホスト時パワーサプライ
-  midi_port_setting.setUSBPowerEnabled(true);
+  // Samplerと同じく、外部入力を使わない時はPC接続を優先し、USB-Cから
+  // VBUSを出力しない。入力ソース選択時に必要な経路だけを有効化する。
+#if !defined(KANPLAY_SAMPLER)
+  midi_port_setting.setExternalInputSource(def::command::external_input_off);
+  midi_port_setting.setUSBMode(def::command::usb_device);
+  midi_port_setting.setUSBPowerEnabled(false);
+#endif
 
   // マスターボリューム設定
   user_setting.setMasterVolume(75);
@@ -872,6 +877,9 @@ bool system_registry_t::saveSettingInternal(JsonVariant& json_root)
     json["instachord_link_style"] = (uint8_t)midi_port_setting.getInstaChordLinkStyle();
     json["usb_mode"] = (uint8_t)midi_port_setting.getUSBMode();
     json["usb_power"] = (uint8_t)midi_port_setting.getUSBPowerEnabled();
+#if !defined(KANPLAY_SAMPLER)
+    json["external_input_source"] = (uint8_t)midi_port_setting.getExternalInputSource();
+#endif
   }
 
 /* 以下廃止、新仕様では control_mapping に統一
@@ -940,6 +948,11 @@ bool system_registry_t::loadSettingInternal(JsonVariant& json_root)
     midi_port_setting.setInstaChordLinkStyle((def::command::instachord_link_style_t)json["instachord_link_style"].as<uint8_t>());
     midi_port_setting.setUSBMode((def::command::usb_mode_t)json["usb_mode"].as<uint8_t>());
     midi_port_setting.setUSBPowerEnabled(json["usb_power"].as<bool>());
+#if !defined(KANPLAY_SAMPLER)
+    auto external_source = (def::command::external_input_source_t)
+        (json["external_input_source"] | (uint8_t)def::command::external_input_off);
+    midi_port_setting.setExternalInputSource(external_source);
+#endif
   }
 
   {

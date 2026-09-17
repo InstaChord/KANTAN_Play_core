@@ -19,6 +19,9 @@ const sandbox = {
     createElement(tag) {
       return makeElement(tag);
     },
+    createElementNS(_namespace, tag) {
+      return makeElement(tag);
+    },
     createTextNode(text) {
       return { text };
     },

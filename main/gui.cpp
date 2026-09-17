@@ -11,6 +11,7 @@
 #include "system_registry.hpp"
 #include "file_manage.hpp"
 #include "menu_data.hpp"
+#include "sequencer_external.hpp"
 
 #if CORE_DEBUG_LEVEL > 3
 // #define DEBUG_GUI

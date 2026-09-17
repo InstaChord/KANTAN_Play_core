@@ -15,7 +15,7 @@
       "id": "kantanplay-stable",
       "app": "kantanplay",
       "channel": "stable",
-      "name": "KANTAN Play",
+      "name": "KANTAN Sequencer",
       "description": "Stable release",
       "version": "0.8.4",
       "url": {
@@ -26,7 +26,7 @@
       "id": "kantanplay-beta",
       "app": "kantanplay",
       "channel": "beta",
-      "name": "KANTAN Play Beta",
+      "name": "KANTAN Sequencer Beta",
       "description": "Public beta release",
       "version": "0.9.0-beta.1",
       "url": {

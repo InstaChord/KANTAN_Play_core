@@ -292,6 +292,7 @@ protected:
   std::vector<menu_item_ptr> _item_array;
   uint8_t _childrens_count = 0;
   uint8_t _level;
+  uint32_t _dynamic_refresh_msec = 0;
 
 public:
   menu_drawer_tree_t(uint16_t menu_index, menu_item_ptr menu_item)
@@ -308,6 +309,15 @@ public:
 
   void update(ui_base_t* ui, draw_param_t *param, int offset_x, int offset_y) override
   {
+    if (uint32_t(M5.millis() - _dynamic_refresh_msec) >= 250) {
+      _dynamic_refresh_msec = M5.millis();
+      for (auto item : _item_array) {
+        if (item->isDynamic()) {
+          param->addInvalidatedRect({offset_x, offset_y, ui->getClientRect().w, ui->getClientRect().h});
+          break;
+        }
+      }
+    }
     auto code = system_registry->menu_status.getHistoryCode();
     if (_history_code != code) {
       _history_code = code;
@@ -334,6 +344,7 @@ struct menu_drawer_normal_t : public menu_drawer_list_t
 {
 protected:
   size_t _count;
+  uint32_t _dynamic_refresh_msec = 0;
 public:
   menu_drawer_normal_t(uint16_t menu_index, menu_item_ptr menu_item)
   : menu_drawer_list_t(menu_index, menu_item)
@@ -343,6 +354,11 @@ public:
 
   void update(ui_base_t* ui, draw_param_t *param, int offset_x, int offset_y) override
   {
+    if (_menu_item->isDynamic() && uint32_t(M5.millis() - _dynamic_refresh_msec) >= 100) {
+      _dynamic_refresh_msec = M5.millis();
+      _count = _menu_item->getSelectorCount();
+      param->addInvalidatedRect({offset_x, offset_y, ui->getClientRect().w, ui->getClientRect().h});
+    }
     int min_value = _menu_item->getMinValue();
     _focus_pos = _menu_item->getSelectingValue() - min_value;
     int stored_pos = _menu_item->getValue() - min_value;
@@ -545,4 +561,4 @@ protected:
 static ui_menu_body_t ui_menu_bodys[2] = {
   ui_menu_body_t(0),
   ui_menu_body_t(1),
-};
+};

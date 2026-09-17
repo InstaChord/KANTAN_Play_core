@@ -12,6 +12,7 @@
 #include "task_i2c.hpp"
 #include "task_i2s.hpp"
 #include "task_midi.hpp"
+#include "sequencer_external.hpp"
 #include "task_wifi.hpp"
 #include "task_port_a.hpp"
 #include "task_port_b.hpp"
@@ -66,7 +67,8 @@ namespace kanplay_ns {
   #endif
 
     M5.Display.setTextSize(2);
-    M5.Display.printf("KANTAN Play\nver%d.%d.%d\n\nboot"
+    M5.Display.printf("%s\nver%d.%d.%d\n\nboot"
+      , def::app::firmware_display_name
       , (int)def::app::app_version_major, (int)def::app::app_version_minor, (int)def::app::app_version_patch);
 
     {
@@ -112,6 +114,8 @@ namespace kanplay_ns {
     auto task_kantanplay = new task_kantanplay_t();
 
     log_memory(2); M5.delay(8); M5.Display.print("."); system_registry->init();
+    sequencer_external::prepareAtBoot();
+    sequencer_external::loadPreferredDevice();
     log_memory(3); M5.delay(8); M5.Display.print("."); task_i2s->start();
     log_memory(4); M5.delay(8); M5.Display.print(".");
     if (!task_i2c->start()) {

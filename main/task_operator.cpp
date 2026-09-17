@@ -2,6 +2,7 @@
 // Copyright (c) 2025 InstaChord Corp.
 
 #include <M5Unified.h>
+#include "sequencer_external.hpp"
 
 #include "common_define.hpp"
 
@@ -195,14 +196,26 @@ void task_operator_t::task_func(task_operator_t* me)
 #if defined (M5UNIFIED_PC_BUILD)
     M5.delay(1);
 #else
+#if defined(KANPLAY_SAMPLER)
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+#else
+    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(50));
+#endif
 #endif
     system_registry->task_status.setWorking(system_registry_t::reg_task_status_t::bitindex_t::TASK_OPERATOR);
+#if !defined(KANPLAY_SAMPLER)
+    sequencer_external::service();
+#endif
 
     bool is_pressed;
     def::command::command_param_t command_param;
     while (system_registry->operator_command.getQueue(&me->_history_code, &command_param, &is_pressed))
     {
+#if !defined(KANPLAY_SAMPLER)
+      // Keep the confirmation result stable while the full-screen restart
+      // notice is visible. Power-off/restart is issued by service() above.
+      if (sequencer_external::restartNoticeActive()) { continue; }
+#endif
       me->commandProccessor(command_param, is_pressed);
 #if !defined (M5UNIFIED_PC_BUILD)
       // commander側で待機中の処理があり得るためここでYIELD処理を行う
@@ -830,7 +843,14 @@ void task_operator_t::commandProccessor(const def::command::command_param_t& com
 
       case def::command::system_control_t::sc_reset:
         system_registry->save();
+#if defined(KANPLAY_SAMPLER)
         system_registry->runtime_info.setPowerOff(def::command::system_control_t::sc_reset);
+#else
+        sequencer_external::requestRestart(
+          system_registry->runtime_info.getWiFiOtaProgress() == def::command::wifi_ota_state_t::ota_update_done
+            ? sequencer_external::restart_reason_t::firmware_update
+            : sequencer_external::restart_reason_t::system);
+#endif
         break;
 
       case def::command::system_control_t::sc_save:

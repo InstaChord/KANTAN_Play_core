@@ -346,8 +346,8 @@ public:
 struct mi_otaupdate_t : public mi_selector_t {
 protected:
   static constexpr const localize_text_array_t name_array = { 3, (const localize_text_t[]){
-    { "KANTAN Play",      "KANTAN Play"      },
-    { "KANTAN Play Beta", "KANTAN Play Beta" },
+    { def::app::firmware_display_name,      def::app::firmware_display_name      },
+    { def::app::firmware_beta_display_name, def::app::firmware_beta_display_name },
     { "Developer",        "Developer"        },
   }};
 
@@ -357,6 +357,12 @@ protected:
   }
 
 public:
+  bool isDynamic(void) const override { return true; }
+  const char* getSelectorText(size_t index) const override {
+    const char* status = sequencer_external::wifiStatusText();
+    return status[0] && int(index) == _selecting_value - getMinValue()
+        ? status : mi_selector_t::getSelectorText(index);
+  }
   constexpr mi_otaupdate_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
   : mi_selector_t { cate, menu_id, level, title, &name_array } {}
 
@@ -469,7 +475,13 @@ public:
   constexpr mi_wifiap_t( def::menu_category_t cate, uint16_t menu_id, uint8_t level, const localize_text_t& title )
   : mi_selector_t { cate, menu_id, level, title, &name_array } {}
 
-  const char* getValueText(void) const override { return "..."; }
+  bool isDynamic(void) const override { return true; }
+  const char* getValueText(void) const override { return sequencer_external::wifiStatusText(); }
+  const char* getSelectorText(size_t index) const override {
+    const char* status = sequencer_external::wifiStatusText();
+    return status[0] && int(index) == _selecting_value - getMinValue()
+        ? status : mi_selector_t::getSelectorText(index);
+  }
 
   int getSelectingValue(void) const override
   {
@@ -478,9 +490,11 @@ public:
     auto result = mi_selector_t::getSelectingValue();
 
     if (result == 1) {
-      if (system_registry->wifi_control.getOperation() == def::command::wifi_operation_t::wfop_setup_ap) {
+      if (system_registry->wifi_control.getOperation() == def::command::wifi_operation_t::wfop_setup_ap
+          && system_registry->runtime_info.getWiFiAPInfo() != def::command::wifi_ap_info_t::wai_off
+          && sequencer_external::getWiFiStatus() == sequencer_external::wifi_status_t::ready) {
         qrtype = system_registry->runtime_info.getWiFiStationCount()
-                    ? def::qrcode_type_t::QRCODE_URL_DEVICE
+                    ? def::qrcode_type_t::QRCODE_URL_WIFI_SETUP
                     : def::qrcode_type_t::QRCODE_AP_SSID;
       }
     }
@@ -606,7 +620,11 @@ struct mi_web_filer_t : public mi_normal_t {
 
   const char* getValueText(void) const override { return "..."; }
   static constexpr const localize_text_t _selector_text = { "Open Song Manager", "ソング管理を開く" };
-  const char* getSelectorText(size_t index) const override { return _selector_text.get(); }
+  bool isDynamic(void) const override { return true; }
+  const char* getSelectorText(size_t index) const override {
+    const char* status = sequencer_external::wifiStatusText();
+    return status[0] ? status : _selector_text.get();
+  }
 
   size_t getSelectorCount(void) const override { return 1; }
 

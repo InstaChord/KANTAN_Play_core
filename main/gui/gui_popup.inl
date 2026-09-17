@@ -112,6 +112,61 @@ public:
 };
 ui_popup_notify_t ui_popup_notify;
 
+// A restart is a user-visible operation, not an abrupt side effect of a menu
+// choice. This modal covers every page while settings are saved and the USB
+// power/radio owners shut down. Inputs are ignored by task_operator meanwhile.
+struct ui_restart_notice_t : public ui_base_t {
+  bool _was_active = false;
+  uint32_t _last_animation_msec = 0;
+public:
+  ui_restart_notice_t() {
+    setClientRect({0, 0, disp_width, disp_height});
+    setTargetRect(getClientRect());
+  }
+  ui_base_t* searchUI(int32_t x, int32_t y) override {
+    return sequencer_external::restartNoticeActive() ? ui_base_t::searchUI(x, y) : nullptr;
+  }
+protected:
+  void update_impl(draw_param_t* param, int offset_x, int offset_y) override {
+    const bool active = sequencer_external::restartNoticeActive();
+    const uint32_t now = M5.millis();
+    if (active != _was_active || (active && uint32_t(now - _last_animation_msec) >= 120)) {
+      _was_active = active;
+      _last_animation_msec = now;
+      param->addInvalidatedRect({offset_x, offset_y, disp_width, disp_height});
+    }
+  }
+  void draw_impl(draw_param_t*, M5Canvas* canvas, int32_t offset_x,
+                 int32_t offset_y, const rect_t*) override {
+    if (!sequencer_external::restartNoticeActive()) { return; }
+    canvas->fillRect(offset_x, offset_y, disp_width, disp_height, 0x08080Cu);
+    canvas->drawRect(offset_x + 4, offset_y + 4, disp_width - 8, disp_height - 8, 0x40A0FFu);
+    canvas->setFont(&fonts::efontJA_16_b);
+    canvas->setTextDatum(m5gfx::textdatum_t::middle_center);
+    canvas->setTextColor(TFT_WHITE, 0x08080Cu);
+    canvas->setTextSize(1, 1);
+    canvas->drawString(sequencer_external::restartNoticeTitle(), offset_x + disp_width / 2, offset_y + 76);
+    canvas->setTextColor(0xA0D0FFu, 0x08080Cu);
+    canvas->drawString(sequencer_external::restartNoticeTarget(), offset_x + disp_width / 2, offset_y + 122);
+    canvas->setTextColor(TFT_WHITE, 0x08080Cu);
+    canvas->drawString(sequencer_external::restartNoticeDetail(), offset_x + disp_width / 2, offset_y + 170);
+    canvas->setTextColor(0xA0D0FFu, 0x08080Cu);
+    canvas->drawString(localize_text_t{"Restarting safely...", "安全に再起動しています..."}.get(),
+                       offset_x + disp_width / 2, offset_y + 198);
+
+    // Indeterminate animation communicates progress without promising a fake percentage.
+    const int active_dot = (M5.millis() / 240) % 3;
+    for (int i = 0; i < 3; ++i) {
+      const uint32_t color = i == active_dot ? 0x40A0FFu : 0x203050u;
+      canvas->fillRoundRect(offset_x + 92 + i * 20, offset_y + 226, 12, 12, 3, color);
+    }
+    canvas->setTextColor(0xFFD080u, 0x08080Cu);
+    canvas->drawString(localize_text_t{"Please do not turn off the power", "電源を切らないでください"}.get(),
+                       offset_x + disp_width / 2, offset_y + 270);
+  }
+};
+static ui_restart_notice_t ui_restart_notice;
+
 struct ui_popup_qr_t : public ui_base_t
 {
 protected:
@@ -160,6 +215,15 @@ public:
           case def::qrcode_type_t::QRCODE_AP_SSID:
             _caption = "Scan for WiFi Setup";
             snprintf(buf, sizeof(buf), "WIFI:S:%s;T:%s;P:%s;;", def::app::wifi_ap_ssid, def::app::wifi_ap_type, def::app::wifi_ap_pass);
+            break;
+          case def::qrcode_type_t::QRCODE_URL_WIFI_SETUP:
+            // The setup AP does not advertise mDNS. iOS treats .local as an
+            // mDNS-only name, so both the visible fallback and QR must use
+            // the AP gateway address.
+            _caption = def::app::wifi_setup_url;
+            _caption2 = "Scan QR or type IP address";
+            snprintf(buf, sizeof(buf), "%s/", def::app::wifi_setup_url);
+            color = 0xFFFF00u;
             break;
           case def::qrcode_type_t::QRCODE_URL_DEVICE:
             _caption = "http://kanplay.local";

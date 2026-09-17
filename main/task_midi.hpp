@@ -19,6 +19,11 @@ public:
     bool advertises_midi = false;
   };
   void start(void);
+  // Sequencer Wi-Fi handoff: latched until reboot, like Sampler. These do
+  // not change the saved Input Source or re-enable BLE after Wi-Fi closes.
+  static void suspendBLEForWiFi(void);
+  static bool isBLESuspendedForWiFi(void);
+  static bool isBLEStoppedForWiFi(void);
   // Performance-critical messages for the internal SAM2695. This bypasses
   // the parent MIDI task while preserving FIFO order in the UART subtask.
   bool sendInternalRealtime(uint8_t status, uint8_t data1, uint8_t data2 = 0);

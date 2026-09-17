@@ -826,7 +826,9 @@ bool MIDI_Transport_BLE::forgetPreferredCentralDevice(void)
     _central_scan_requested = false;
     _central_selection_active = false;
     _central_scan_state = scan_state_t::idle;
-    _central_disconnect_requested = _central_connected || _peripheral_connected;
+    // A connection may still be in flight. Always queue the disconnect so
+    // service() closes even a link completed after Forget was pressed.
+    _central_disconnect_requested = true;
   }
 #if defined(CONFIG_BLUEDROID_ENABLED)
   if (address[0]) {

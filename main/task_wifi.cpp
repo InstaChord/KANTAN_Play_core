@@ -10,6 +10,9 @@
 #include "task_http_client.hpp"
 
 #include "system_registry.hpp"
+#include "task_midi.hpp"
+#include "radio_handoff.hpp"
+#include "sequencer_external.hpp"
 
 #include "task_wifi/task_wifi_api.hpp"
 #if defined(KANPLAY_SAMPLER)
@@ -668,14 +671,9 @@ static esp_err_t response_main_handler(httpd_req_t *req)
     "<!doctype html><html lang=\"en\"><head>"
     "<meta charset=\"utf-8\">"
     "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-    "<title>"
-#if defined(KANPLAY_SAMPLER)
-    "KANTAN Sampler"
-#else
-    "KANTAN Play"
-#endif
-    "</title>"
-    "<link rel=\"stylesheet\" href=\"");
+    "<title>");
+  httpd_resp_sendstr_chunk(req, def::app::firmware_display_name);
+  httpd_resp_sendstr_chunk(req, "</title><link rel=\"stylesheet\" href=\"");
   httpd_resp_sendstr_chunk(req, base);
   httpd_resp_sendstr_chunk(req,
     "/app.css?v=104-kts2-layer2\"></head><body>"
@@ -946,7 +944,7 @@ static esp_err_t response_post_wifi_handler(httpd_req_t *req) {
       "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
       "</head><body style=\"font-family:sans-serif;text-align:center;padding:12vw 8vw\">"
       "<h2>Wi-Fi settings saved</h2><p>The device is connecting.</p>"
-      "<p>You can return to KANTAN Sampler.</p></body></html>");
+      "<p>You can return to the device.</p></body></html>");
     uint32_t now = M5.millis();
     _connect_start_ms = now ? now : 1;
     _last_disconnect_reason = 0;
@@ -1526,6 +1524,9 @@ void task_wifi_t::task_func(task_wifi_t* me)
     }
   };
   wifi_goal_t goal;
+#if !defined(KANPLAY_SAMPLER)
+  radio_handoff_t radio_handoff;
+#endif
 
   for (;;) {
 #if defined (M5UNIFIED_PC_BUILD)
@@ -1549,6 +1550,38 @@ void task_wifi_t::task_func(task_wifi_t* me)
     wifi_goal_t prev_goal = goal;
     goal.compute_from_registry(mode, op, webserver_mode);
     const bool radio_requested = goal.ap_enabled || goal.sta_enabled || goal.wps;
+#if !defined(KANPLAY_SAMPLER)
+    if (radio_requested) { task_midi_t::suspendBLEForWiFi(); }
+    const auto handoff = radio_handoff.step(M5.millis(), radio_requested,
+                                            task_midi_t::isBLEStoppedForWiFi());
+    using handoff_state = radio_handoff_t::state_t;
+    using wifi_status = sequencer_external::wifi_status_t;
+    if (handoff == handoff_state::stopping || handoff == handoff_state::settling) {
+      sequencer_external::setWiFiStatus(handoff == handoff_state::stopping
+          ? wifi_status::stopping_ble : wifi_status::settling);
+      goal = prev_goal; // No radio/service may start before teardown completes.
+      continue;
+    }
+    if (handoff == handoff_state::failed) {
+      sequencer_external::setWiFiStatus(wifi_status::failed);
+      system_registry->runtime_info.setWiFiOtaProgress(def::command::wifi_ota_state_t::ota_connection_error);
+      system_registry->wifi_control.setWebServerMode(def::command::webserver_mode_t::ws_disable);
+      system_registry->wifi_control.setOperation(def::command::wifi_operation_t::wfop_disable);
+      system_registry->wifi_control.setWifiMode(def::command::wifi_mode_t::wifi_disable);
+      goal = prev_goal;
+      continue;
+    }
+    if (handoff == handoff_state::ready) {
+      if (sequencer_external::getWiFiStatus() != wifi_status::ready) {
+        M5.Log.printf("[wifi] BLE stopped; internal=%u largest=%u\r\n",
+          (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+          (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+      }
+      sequencer_external::setWiFiStatus(wifi_status::ready);
+    } else if (sequencer_external::getWiFiStatus() != wifi_status::failed) {
+      sequencer_external::setWiFiStatus(wifi_status::idle);
+    }
+#endif
     const bool setup_ap_waiting_for_auth =
       op == def::command::wifi_operation_t::wfop_setup_ap
       && goal.ap_enabled && _ap_station_count == 0;

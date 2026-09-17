@@ -63,6 +63,8 @@ struct menu_item_t {
   virtual menu_item_type_t getType(void) const = 0;//{ return menu_item_type_t::mt_unknown; }
   virtual const char* getTitleText(void) const { return _title.get(); }
   virtual const char* getValueText(void) const { return "..."; }
+  virtual bool isVisible(void) const { return true; }
+  virtual bool isDynamic(void) const { return false; }
 
 // ↓ task_operator側から操作される関数群
   // メニューに入る
