@@ -330,8 +330,8 @@ import { decodeAudioFile, midiNoteName } from './converter/audio-input.js?v=104-
   function renderSamples() {
     const root = $('#sample-view'); root.innerHTML = '';
     const library = el('div', {class:'panel'}, el('h2', {}, 'Sample source'), folderPanel('samples'));
-    library.append(activeFolder('samples') === DEVICE_PRESET
-      ? presetFilePanel() : filePanel('samples', '.wav,.mp3,.ktsynth', true));
+    if(activeFolder('samples') === DEVICE_PRESET)library.append(presetFilePanel(),el('h3',{},'Upload to SD'),filePanel('samples','.wav,.mp3',false,{uploadOnly:true,uploadFolder:''}));
+    else library.append(filePanel('samples', '.wav,.mp3,.ktsynth', true));
     root.append(assignmentPanel(), library);
     renderSynth();
   }
@@ -569,7 +569,8 @@ import { decodeAudioFile, midiNoteName } from './converter/audio-input.js?v=104-
     const create = el('button',{onclick:async()=>{const name=prompt('Folder name');if(name) await createFolder(kind,current,name);}},'New folder');
     return el('div',{class:'folder-panel'},el('div',{class:'row folder-picker'},el('label',{},'Location'),choose,current===DEVICE_PRESET?null:create));
   }
-  function filePanel(kind, accept, assignable = false) {
+  function filePanel(kind, accept, assignable = false, options = {}) {
+    const uploadOnly=options.uploadOnly===true,uploadFolder=options.uploadFolder??activeFolder(kind);
     const list = el('ul',{class:'file-list'});
     for (const file of files[kind]) {
       const preview = kind !== 'music' && /\.(wav|mp3)$/i.test(file.name)
@@ -658,7 +659,7 @@ import { decodeAudioFile, midiNoteName } from './converter/audio-input.js?v=104-
           await uploadFile(kind,file,(percent,saving)=>{
             const overall=(completedBytes+Math.max(1,file.size)*Math.max(0,Math.min(100,percent))/100)*100/totalBytes;
             showProgress(overall,saving,prefix+(saving?'Saving ':'Uploading ')+file.name+'…');
-          },false);
+          },false,uploadFolder);
           succeeded++;
         } catch(err) { failures.push(file.name+': '+err.message); }
         completedBytes+=Math.max(1,file.size);
@@ -666,13 +667,14 @@ import { decodeAudioFile, midiNoteName } from './converter/audio-input.js?v=104-
       input.value=''; queuedFiles=[];
       upload.disabled=false; input.disabled=false; dropZone.classList.remove('disabled');
       progress.hidden=true; progress.classList.remove('saving');
+      if(uploadOnly&&succeeded)browseFolders[kind]=uploadFolder;
       try { await refresh(); }
       finally {
         if(failures.length)status('Uploaded '+succeeded+' of '+batch.length+'. '+failures.join(' | '),true);
         else status('Uploaded '+succeeded+(succeeded===1?' file':' files'));
       }
     });
-    return el('div',{},el('div',{class:'upload-area'},input,dropZone,upload),progress,list);
+    return el('div',{},el('div',{class:'upload-area'},input,dropZone,upload),progress,uploadOnly?null:list);
   }
   async function renameFile(kind, name, next) {
     const relative = activeFolder(kind);
@@ -726,18 +728,18 @@ import { decodeAudioFile, midiNoteName } from './converter/audio-input.js?v=104-
       xhr.send(file);
     });
   }
-  async function uploadFile(kind, file, onProgress=()=>{}, refreshAfter=true) {
+  async function uploadFile(kind, file, onProgress=()=>{}, refreshAfter=true, uploadFolder=activeFolder(kind)) {
     if (PREVIEW) {
       onProgress(35,false); await sleep(180); onProgress(78,false); await sleep(180); onProgress(100,true); await sleep(220);
-      const existing = previewFiles[kind].findIndex(entry => entry.name === file.name && (entry.folder || '') === activeFolder(kind));
-      const entry = {name:file.name, size:file.size, folder:activeFolder(kind)};
+      const existing = previewFiles[kind].findIndex(entry => entry.name === file.name && (entry.folder || '') === uploadFolder);
+      const entry = {name:file.name, size:file.size, folder:uploadFolder};
       if (existing >= 0) previewFiles[kind][existing] = entry;
       else previewFiles[kind].push(entry);
       if(refreshAfter)await refresh();
       return;
     }
     status('Uploading '+file.name+'…');
-    const path = activeFolder(kind);
+    const path = uploadFolder;
     await uploadRequest('/api/sampler/files/'+kind+'/'+encodeURIComponent(path ? path + '/' + file.name : file.name),file,onProgress);
     if(refreshAfter)await refresh();
   }

@@ -148,6 +148,8 @@ test('the simple UI keeps layered selection and primary save in the visible flow
   assert.doesNotMatch(source,/external server|within this browser/i);
   assert.match(source,/unsupported features are ignored/i);assert.match(source,/Play on Device/);
   assert.match(source,/function synthFilePicker/);assert.match(source,/addEventListener\('drop'/);assert.match(source,/WAV or MP3 · max 20 sec/);
+  assert.match(source,/Upload to SD/);assert.match(source,/filePanel\('samples','\.wav,\.mp3',false,\{uploadOnly:true,uploadFolder:''\}\)/);
+  assert.match(source,/if\(uploadOnly&&succeeded\)browseFolders\[kind\]=uploadFolder/);
   assert.match(source,/hold:true/);assert.match(source,/stopSynthPreview/);assert.match(source,/'Off'/);
   assert.match(source,/if\(PREVIEW\)await sleep\(100\);else await command\(\{action:'stopSynthPreview'\},false\)/);
   assert.doesNotMatch(source,/disabled:disabled\|\|sf2Editor\.devicePlaying/);
