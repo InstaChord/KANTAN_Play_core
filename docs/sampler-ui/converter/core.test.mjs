@@ -146,9 +146,12 @@ test('the simple UI keeps layered selection and primary save in the visible flow
   assert.match(html,/data-view="synth-view">Synth/);assert.doesNotMatch(source,/if\(region\.unsupported\.length\)throw/);
   assert.match(source,/Synth Sound/);assert.match(source,/Bass, Melody, and Chord/);
   assert.doesNotMatch(source,/external server|within this browser/i);
-  assert.match(source,/unsupported features are ignored/i);assert.match(source,/Play on KANTAN Sampler/);
+  assert.match(source,/unsupported features are ignored/i);assert.match(source,/Play on Device/);
   assert.match(source,/function synthFilePicker/);assert.match(source,/addEventListener\('drop'/);assert.match(source,/WAV or MP3 · max 20 sec/);
   assert.match(source,/hold:true/);assert.match(source,/stopSynthPreview/);assert.match(source,/'Off'/);
+  assert.match(source,/if\(PREVIEW\)await sleep\(100\);else await command\(\{action:'stopSynthPreview'\},false\)/);
+  assert.doesNotMatch(source,/disabled:disabled\|\|sf2Editor\.devicePlaying/);
+  assert.match(source,/function synthSettingsDetails/);assert.match(source,/settings\.settingsOpen=details\.open/);assert.match(source,/open:settings\.settingsOpen/);
   assert.match(firmware,/doc\["hold"\]/);assert.match(firmware,/(?:playSynth|play_layer)\(menu_preview_voice/);assert.match(firmware,/strcmp\(action, "stopSynthPreview"\)/);
   assert.match(source,/\/api\/sampler\/preview-ktsynth/);assert.match(source,/\.web-preview\.ktsynth/);
   assert.match(api,/response_ktsynth_preview/);assert.match(api,/Synth\/\.web-preview\.ktsynth/);
