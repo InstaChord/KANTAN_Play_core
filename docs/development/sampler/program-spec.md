@@ -131,7 +131,7 @@ SOUNDモードはSamplerパートへの強制移動ではなく、現在のパ�
 
 ### Built-in preset audio budget
 
-- App領域は6,553,600 bytes。公開版コードと現行Built-in WAVを含む使用量は6,146,742 bytes
+- App領域は6,553,600 bytes。公開版コードと現行Built-in WAVを含む使用量は6,145,126 bytes
 - 将来の機能追加用に約450〜600KBを残し、Built-in WAV全体は2.1〜2.3MBを推奨、2.4MBを暫定上限とする
 - PCM16 mono換算で2,186,831 bytesは、48kHzなら約22.8秒、32kHzなら約34.2秒、24kHzなら約45.6秒、18kHzなら約60.7秒
 - 実用上は、Attackを含む短いSynth Sourceを18〜32kHz、帯域が必要な音を48kHzとして混在させ、合計約35〜60秒を制作目標とする

@@ -37,10 +37,10 @@ def main() -> None:
         assert f'"Voice/{filename}"' in source, filename
         assert f'{{ "{label}"' in source, label
 
-    assert total_bytes == 190112, total_bytes
+    assert total_bytes == 188514, total_bytes
     assert total_bytes < 200 * 1024
     assert source.count("sample_category_t::voice") >= len(FILES)
-    print("PASS: 9 valid 32 kHz mono Voice presets, 190112-byte embedded budget")
+    print("PASS: 9 valid 32 kHz mono Voice presets, 188514-byte embedded budget")
 
 
 if __name__ == "__main__":
