@@ -146,8 +146,7 @@
       <h2>ファームウェア情報</h2>
       <dl class="info-grid">
         <dt>バージョン</dt><dd id="firmware-version">読み込み中</dd>
-        <dt>対応デバイス</dt><dd>M5Stack CoreS3</dd>
-        <dt>チップ</dt><dd>ESP32-S3</dd>
+        <dt>対応デバイス</dt><dd>KANTAN Play core（M5Stack CoreS3 + KANTAN Play base）</dd>
       </dl>
     </section>
 
@@ -163,7 +162,7 @@
 
     <section>
       <h2>ファームウェアを書き込む</h2>
-      <p>下のボタンを押して、USBケーブルで接続したM5Stack CoreS3にファームウェアを書き込みます。</p>
+      <p>下のボタンを押して、USBケーブルで接続したKANTAN Play coreにファームウェアを書き込みます。</p>
 
       <div class="install-button-wrapper">
         <esp-web-install-button manifest="manifest.json">
@@ -186,9 +185,9 @@
     <section>
       <h2>書き込み手順</h2>
       <ol>
-        <li>M5Stack CoreS3 をUSBケーブルでPCに接続します</li>
+        <li>KANTAN Play coreをUSBケーブルでPCに接続します</li>
         <li>上の「書き込み開始」ボタンをクリックします</li>
-        <li>シリアルポート選択ダイアログが表示されたら、該当するポートを選択します</li>
+        <li>シリアルポート選択ダイアログが表示されたら、該当するポート（USB JTAG/serial debug unit などと表示されます）を選択します</li>
         <li>書き込みが完了するまでお待ちください（約1〜2分）</li>
         <li>書き込み完了後、デバイスが自動的に再起動します</li>
       </ol>
@@ -203,9 +202,8 @@
           Safari、Firefox、モバイルブラウザでは動作しません。
         </li>
         <li>
-          <strong>KANTAN Play base:</strong>
-          このアプリケーションは専用ハードウェア「KANTAN Play base」と組み合わせて使用するものです。
-          KANTAN Play base が接続されていない状態では起動しません。
+          <strong>デバイスが認識されない場合:</strong>
+          シリアルポート選択ダイアログに「USB JTAG...」が表示されない場合は、USBケーブルを外し、KANTAN Play coreのリセットボタンを3秒以上長押しします。側面のランプが緑色に点灯したら、再度ケーブルを接続してください。
         </li>
         <li>
           <strong>初回書き込み:</strong>
